@@ -1,0 +1,173 @@
+#!/usr/bin/env bash
+# build.sh - Build script for Innioasis Y1 Hosted Rockbox Linux
+# Compiles Rockbox, builds a minimal initramfs rootfs, and packages boot_rockbox.img
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Auto-detect Rockbox source directory
+if [ -f "$SCRIPT_DIR/../tools/configure" ]; then
+    ROCKBOX_SRC="$(cd "$SCRIPT_DIR/.." && pwd)"
+    WORKSPACE_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+elif [ -f "$SCRIPT_DIR/tools/configure" ]; then
+    ROCKBOX_SRC="$SCRIPT_DIR"
+    WORKSPACE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+else
+    WORKSPACE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+    ROCKBOX_SRC="$WORKSPACE_ROOT/!rockbox_fromsource/rockbox-master/rockbox-master"
+fi
+
+ROOTFS_DIR="$SCRIPT_DIR/rootfs"
+BUILD_DIR="$ROCKBOX_SRC/build_y1"
+SPLASH_DIR="$SCRIPT_DIR/splash"
+
+CROSS_COMPILE=${CROSS_COMPILE:-arm-linux-gnueabihf-}
+CC="${CROSS_COMPILE}gcc"
+STRIP="${CROSS_COMPILE}strip"
+
+MAX_BOOT_SIZE=6291456  # 0x600000 (6MB) partition size
+
+echo "=== Innioasis Y1 Hosted Rockbox Build ==="
+echo "Toolchain:   $CC"
+echo "Rockbox Src: $ROCKBOX_SRC"
+echo "Rootfs:      $ROOTFS_DIR"
+
+# 1. Setup Rootfs Skeleton
+echo "[1/5] Setting up root filesystem skeleton..."
+python3 "$SCRIPT_DIR/tools/setup_rootfs.py"
+
+# Convert boot splash and status/error images to raw framebuffer format
+for img in boot sdcard connect errconnect error; do
+    SRC_IMG=""
+    if [ -f "$SPLASH_DIR/$img.png" ]; then
+        SRC_IMG="$SPLASH_DIR/$img.png"
+    elif [ -f "$WORKSPACE_ROOT/$img.png" ]; then
+        SRC_IMG="$WORKSPACE_ROOT/$img.png"
+    elif [ -f "$ROCKBOX_SRC/$img.png" ]; then
+        SRC_IMG="$ROCKBOX_SRC/$img.png"
+    fi
+
+    if [ -n "$SRC_IMG" ]; then
+        echo "[*] Converting $(basename "$SRC_IMG") to raw framebuffer image /etc/$img.raw..."
+        python3 "$SCRIPT_DIR/tools/convert_splash.py" "$SRC_IMG" "$ROOTFS_DIR/etc/$img.raw"
+        cp "$SRC_IMG" "$ROOTFS_DIR/etc/$img.png"
+    fi
+done
+
+# Compile ultra-fast C PID 1 init
+echo "[*] Compiling optimized PID 1 /init..."
+$CC -O2 -Wall "$SCRIPT_DIR/initramfs/init.c" -o "$ROOTFS_DIR/init"
+$STRIP "$ROOTFS_DIR/init"
+chmod +x "$ROOTFS_DIR/init"
+
+# 2. Compile unmute_eac utility
+echo "[2/5] Compiling hardware unmute utility..."
+$CC -O2 "$SCRIPT_DIR/audio/unmute_eac.c" -o "$ROOTFS_DIR/bin/unmute_eac"
+$STRIP "$ROOTFS_DIR/bin/unmute_eac"
+chmod +x "$ROOTFS_DIR/bin/unmute_eac"
+
+# 3. Setup BusyBox rescue shell
+if [ ! -s "$ROOTFS_DIR/bin/busybox" ]; then
+    echo "[*] Checking for static Busybox..."
+    if [ -f "$SCRIPT_DIR/tools/busybox-armv7l" ]; then
+        cp "$SCRIPT_DIR/tools/busybox-armv7l" "$ROOTFS_DIR/bin/busybox"
+    elif [ -f "$WORKSPACE_ROOT/busybox-armv7l" ]; then
+        cp "$WORKSPACE_ROOT/busybox-armv7l" "$ROOTFS_DIR/bin/busybox"
+    elif command -v busybox-armv7l >/dev/null 2>&1; then
+        cp "$(which busybox-armv7l)" "$ROOTFS_DIR/bin/busybox"
+    else
+        echo "[*] Downloading static armv7l busybox..."
+        curl -L -s https://busybox.net/downloads/binaries/1.31.0-defconfig-multiarch-musl/busybox-armv7l -o "$ROOTFS_DIR/bin/busybox" || true
+    fi
+fi
+
+if [ -s "$ROOTFS_DIR/bin/busybox" ]; then
+    chmod +x "$ROOTFS_DIR/bin/busybox"
+    cd "$ROOTFS_DIR/bin"
+    ln -sf busybox sh
+    mkdir -p "$ROOTFS_DIR/sbin"
+    ln -sf /bin/busybox "$ROOTFS_DIR/sbin/poweroff"
+    ln -sf /bin/busybox "$ROOTFS_DIR/sbin/reboot"
+    cd "$SCRIPT_DIR"
+fi
+
+# Ensure glibc libraries are copied and stripped
+mkdir -p "$ROOTFS_DIR/lib"
+rm -f "$ROOTFS_DIR/lib/libm"* "$ROOTFS_DIR/lib/libdl"* "$ROOTFS_DIR/lib/libpthread"* "$ROOTFS_DIR/lib/librt"*
+for lib in ld-linux-armhf.so.3 libc.so.6; do
+    if [ ! -f "$ROOTFS_DIR/lib/$lib" ]; then
+        find /usr/arm-linux-gnueabihf/lib -name "$lib" -exec cp {} "$ROOTFS_DIR/lib/" \; 2>/dev/null || true
+    fi
+    $STRIP --strip-unneeded "$ROOTFS_DIR/lib/$lib" 2>/dev/null || true
+done
+
+# 4. Build Rockbox
+echo "[3/5] Configuring and compiling Rockbox..."
+mkdir -p "$BUILD_DIR"
+cd "$BUILD_DIR"
+
+chmod +x "$ROCKBOX_SRC/tools/configure"
+if [ ! -f "Makefile" ]; then
+    "$ROCKBOX_SRC/tools/configure" --target=310 --type=N
+fi
+
+# Clean any corrupted 0-byte object files from interrupted builds
+find "$BUILD_DIR" -name '*.o' -size 0 -delete 2>/dev/null || true
+
+make -j"$(nproc)"
+make zip
+
+echo "[4/5] Preparing Rockbox binaries and assets..."
+cp "$BUILD_DIR/rockbox" "$ROOTFS_DIR/rockbox"
+$STRIP -s -R .comment -R .note.gnu.build-id "$ROOTFS_DIR/rockbox"
+chmod +x "$ROOTFS_DIR/rockbox"
+
+# Package SD card assets (.rockbox folder with all codecs and plugins)
+if [ -f "$BUILD_DIR/rockbox.zip" ]; then
+    cp "$BUILD_DIR/rockbox.zip" "$SCRIPT_DIR/rockbox_sdcard.zip"
+    # Also add the raw and png image assets into .rockbox on the SD card
+    cd "$ROOTFS_DIR"
+    mkdir -p .rockbox
+    cp etc/*.raw etc/*.png .rockbox/ 2>/dev/null || true
+    zip -u -q "$SCRIPT_DIR/rockbox_sdcard.zip" .rockbox/*.raw .rockbox/*.png 2>/dev/null || true
+    rm -rf .rockbox
+    cd "$SCRIPT_DIR"
+    echo "[+] Created SD card asset archive: $SCRIPT_DIR/rockbox_sdcard.zip"
+fi
+
+# Ensure rootfs ramdisk stays lean (codecs/plugins live on FAT storage)
+rm -rf "$ROOTFS_DIR/.rockbox"
+mkdir -p "$ROOTFS_DIR/.rockbox"
+
+# 5. Pack Initramfs & Boot Image
+echo "[5/5] Packaging boot image..."
+cd "$SCRIPT_DIR"
+
+python3 "$SCRIPT_DIR/tools/build_initramfs.py" "$ROOTFS_DIR" -o "$SCRIPT_DIR/ramdisk_rockbox.img"
+
+# Extract stock kernel if not already extracted
+if [ ! -f "$SCRIPT_DIR/stock_unpacked/kernel_mtk.bin" ]; then
+    python3 "$SCRIPT_DIR/tools/mkbootimg_mtk.py" unpack "$WORKSPACE_ROOT/!stock_rom/boot.img" -o "$SCRIPT_DIR/stock_unpacked"
+fi
+
+python3 "$SCRIPT_DIR/tools/mkbootimg_mtk.py" pack \
+    -k "$SCRIPT_DIR/stock_unpacked/kernel_mtk.bin" \
+    -r "$SCRIPT_DIR/ramdisk_rockbox.img" \
+    -o "$SCRIPT_DIR/boot_rockbox.img"
+
+BOOT_SIZE=$(stat -c%s "$SCRIPT_DIR/boot_rockbox.img")
+echo "=========================================================="
+echo " BUILD COMPLETE!"
+echo " Flashable Boot Image: $SCRIPT_DIR/boot_rockbox.img ($BOOT_SIZE bytes)"
+echo " SD Card Assets:       $SCRIPT_DIR/rockbox_sdcard.zip"
+echo " Partition Limit:      $MAX_BOOT_SIZE bytes (6.00 MB)"
+
+if [ "$BOOT_SIZE" -le "$MAX_BOOT_SIZE" ]; then
+    REMAINING=$((MAX_BOOT_SIZE - BOOT_SIZE))
+    echo "[✓] SIZE CHECK PASSED: Fits in BOOTIMG with $REMAINING bytes headroom!"
+else
+    OVER=$((BOOT_SIZE - MAX_BOOT_SIZE))
+    echo "[!] WARNING: Boot image exceeds partition size by $OVER bytes!"
+fi
+echo "=========================================================="
