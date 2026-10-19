@@ -50,9 +50,13 @@
 #define HAVE_SW_TONE_CONTROLS
 #define HAVE_SW_VOLUME_CONTROL
 #define HAVE_DUMMY_CODEC
+#define HAVE_HEADPHONE_DETECTION
 #define HW_SAMPR_CAPS (SAMPR_CAP_48 | SAMPR_CAP_44 | SAMPR_CAP_32 | \
                        SAMPR_CAP_24 | SAMPR_CAP_22 | SAMPR_CAP_16 | \
                        SAMPR_CAP_12 | SAMPR_CAP_11 | SAMPR_CAP_8)
+
+/* LED / Virtual Disk Access */
+#define CONFIG_LED LED_VIRTUAL
 
 /* Real-Time Clock & Power */
 #define CONFIG_RTC RTC_HOSTED

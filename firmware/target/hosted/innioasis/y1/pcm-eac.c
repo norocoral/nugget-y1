@@ -163,7 +163,7 @@ static void *pcm_worker(void *arg)
             /* Request new PCM buffer from Rockbox without holding mutex */
             if (!pcm_play_dma_complete_callback(PCM_DMAST_OK, &pcm_data, &pcm_size))
             {
-                usleep(10000);
+                usleep(1000);
                 continue;
             }
             pcm_play_dma_status_callback(PCM_DMAST_STARTED);
@@ -475,7 +475,7 @@ static void sink_set_freq(uint16_t freq)
         set_afereg(eac_fd, 0x108, dac_con1, ~0U);
 
         /* 5. I2S Out format & sample rate (0x34) */
-        set_afereg(eac_fd, 0x34, (rate_code << 8) | 0x09, ~0U);
+        set_afereg(eac_fd, 0x34, (rate_code << 8) | rate_code, ~0U);
 
         /* 6. PMIC NewIF Downlink Frequency (0x4024) */
         set_anareg(eac_fd, 0x4024, (pmic_newif_rate << 12) | 0x330, 0xffff);

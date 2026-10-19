@@ -477,10 +477,11 @@ static void optimize_power_and_battery(void)
     log_line("Applying aggressive OS battery and power optimizations...\n");
 
     /* 1. MT6572 SPM (System Power Manager) Deep Idle & Regular Idle
-     * Enables hardware SPM clock gating and CPU power-down when in WFI idle. */
+     * Keep Regular Idle enabled for power savings, but disable Deep Idle
+     * and CPU power-down to prevent audio DMA / AFE bus starvation. */
     write_sysfs("/sys/power/idle_state", "1\n");
-    write_sysfs("/sys/power/dpidle_state", "1\n");
-    write_sysfs("/sys/power/dpidle_state", "cpupdn 1\n");
+    write_sysfs("/sys/power/dpidle_state", "0\n");
+    write_sysfs("/sys/power/dpidle_state", "cpupdn 0\n");
     write_sysfs("/sys/power/rgidle_state", "1\n");
 
     /* 2. CPU Frequency Scaling & Governor (ondemand with aggressive powersave bias) */
@@ -523,7 +524,7 @@ static void optimize_power_and_battery(void)
     write_sysfs("/sys/class/rfkill/rfkill0/state", "0\n");
     write_sysfs("/sys/class/rfkill/rfkill1/state", "0\n");
 
-    log_line("Battery optimizations active: CPU 598MHz/single-core, SPM Deep Idle enabled.\n");
+    log_line("Battery optimizations active: CPU 598MHz/single-core, SPM Regular Idle enabled.\n");
 }
 
 static void display_screen(const char *name)

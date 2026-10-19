@@ -236,6 +236,28 @@ int button_map(int keycode)
 
 bool headphones_inserted(void)
 {
-    /* Always report connected or read from sysfs switch if present */
-    return true;
+    static bool cached_state = true;
+    static long last_check_tick = 0;
+    long now = current_tick;
+
+    /* Check switch state at most 10 times per second to minimize sysfs I/O */
+    if (last_check_tick != 0 && TIME_BEFORE(now, last_check_tick + (HZ / 10)))
+        return cached_state;
+
+    last_check_tick = now;
+
+    int fd = open("/sys/class/switch/h2w/state", O_RDONLY | O_CLOEXEC);
+    if (fd >= 0) {
+        char buf[16];
+        ssize_t len = read(fd, buf, sizeof(buf) - 1);
+        close(fd);
+        if (len > 0) {
+            buf[len] = '\0';
+            int state = 0;
+            if (sscanf(buf, "%d", &state) == 1) {
+                cached_state = (state > 0);
+            }
+        }
+    }
+    return cached_state;
 }

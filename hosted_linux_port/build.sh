@@ -116,7 +116,7 @@ fi
 find "$BUILD_DIR" -name '*.o' -size 0 -delete 2>/dev/null || true
 
 make -j"$(nproc)"
-make zip
+make -j"$(nproc)" zip
 
 echo "[4/5] Preparing Rockbox binaries and assets..."
 cp "$BUILD_DIR/rockbox" "$ROOTFS_DIR/rockbox"

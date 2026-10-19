@@ -76,13 +76,13 @@ int     app_creat(const char *name, mode_t mode);
 #define app_ftruncate   os_ftruncate
 #define app_fsync       os_fsync
 #define app_lseek       os_lseek
-#ifdef HAVE_SDL_THREADS
+#if defined(HAVE_SDL_THREADS) || (CONFIG_LED == LED_VIRTUAL) || (CONFIG_LED == LED_REAL)
 ssize_t app_read(int fildes, void *buf, size_t nbyte);
 ssize_t app_write(int fildes, const void *buf, size_t nbyte);
 #else
 #define app_read        os_read
 #define app_write       os_write
-#endif /* HAVE_SDL_THREADS */
+#endif /* HAVE_SDL_THREADS || CONFIG_LED */
 int     app_remove(const char *path);
 int     app_rename(const char *old, const char *new);
 #define app_modtime     os_modtime

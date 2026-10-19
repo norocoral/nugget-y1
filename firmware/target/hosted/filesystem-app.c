@@ -35,6 +35,7 @@
 #include "string-extra.h"
 #include "rbpaths.h"
 #include "logf.h"
+#include "led.h"
 
 /* PIVOT_ROOT adds a fixed prefix to all paths */
 #if defined(BOOTLOADER) || defined(CHECKWPS) || defined(SIMULATOR) || defined(__PCTOOL__)
@@ -252,7 +253,14 @@ int app_open(const char *path, int oflag, ...)
         FILE_ERROR_RETURN(ENAMETOOLONG, -1);
 
     oflag |= O_CLOEXEC;
-    return os_open(fpath, oflag __OPEN_MODE_ARG);
+#if (CONFIG_LED)
+    led(true);
+#endif
+    int fd = os_open(fpath, oflag __OPEN_MODE_ARG);
+#if (CONFIG_LED)
+    led(false);
+#endif
+    return fd;
 }
 
 int app_creat(const char *path, mode_t mode)
@@ -284,17 +292,31 @@ int app_rename(const char *old, const char *new)
     return os_rename(fold, fnew);
 }
 
-#ifdef HAVE_SDL_THREADS
+#if defined(HAVE_SDL_THREADS) || (CONFIG_LED == LED_VIRTUAL) || (CONFIG_LED == LED_REAL)
 ssize_t app_read(int fd, void *buf, size_t nbyte)
 {
-    return os_read(fd, buf, nbyte);
+#if (CONFIG_LED)
+    led(true);
+#endif
+    ssize_t ret = os_read(fd, buf, nbyte);
+#if (CONFIG_LED)
+    led(false);
+#endif
+    return ret;
 }
 
 ssize_t app_write(int fd, const void *buf, size_t nbyte)
 {
-    return os_write(fd, buf, nbyte);
+#if (CONFIG_LED)
+    led(true);
+#endif
+    ssize_t ret = os_write(fd, buf, nbyte);
+#if (CONFIG_LED)
+    led(false);
+#endif
+    return ret;
 }
-#endif /* HAVE_SDL_THREADS */
+#endif /* HAVE_SDL_THREADS || CONFIG_LED */
 
 int app_relate(const char *path1, const char *path2)
 {

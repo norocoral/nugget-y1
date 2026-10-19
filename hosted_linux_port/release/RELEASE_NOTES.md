@@ -32,8 +32,14 @@
   - **Zero Quiescent Idle Current:** Analog headphone amplifier and MT6323 audio clocks power down when audio playback stops/pauses.
   - **Screen-Off CPU Throttling:** Automatically drops CPU clock to 598 MHz power-saving mode while screen is off, restoring dynamic clocking upon wake.
   - **Single-Core Audio Processing:** Power-gates secondary Cortex-A7 core during playback.
-  - **SPM Deep Idle:** MediaTek SPM deep idle state with CPU power down active during idle.
+  - **SPM Regular Idle:** Regular idle enabled for high power efficiency without audio bus starvation.
   - **Storage Power Management:** Linux VM dirty writeback interval extended to 120s with runtime PM enabled across MMC controllers.
+- 🔌 **Pause on Headphone Unplug:**
+  - Full native Rockbox setting support (`Settings -> Playback Settings -> Pause on Headphone Unplug`).
+  - Automatically pauses audio playback when 3.5mm headphones are removed and resumes when reconnected via the MT6572 `accdet` / `h2w` hardware detection switch.
+- 💽 **Disk Access Indicator:**
+  - Native Rockbox virtual disk activity LED support (`CONFIG_LED LED_VIRTUAL`).
+  - Real-time disk activity indicator in the status bar and theme skins (WPS `%lh` token) during file reading, streaming, and database operations.
 - 🔒 **Automatic HOLD Mode & Advanced Key Lock:**
   - **Auto-Hold:** Whenever the backlight turns off (via timeout or pressing the Power button), the device automatically enters HOLD mode.
   - **Advanced Key Lock:** Settings in `Settings -> General Settings -> System -> Advanced Key Lock` are applied while the screen is off (e.g. keep Volume or Play/Pause buttons active in your pocket). All other buttons are silently blocked without waking the screen.
@@ -45,7 +51,7 @@
   - MicroSD mounted as `/` (`PIVOT_ROOT`) for full `.rock` plugin and game compatibility.
   - Built-in USB Mass Storage gadget allows drag-and-drop music and theme transfer directly from Windows, Mac, or Linux.
 - 🖼️ **Hardware Status Screens:**
-  - `boot.png` hardware bootscreen on startup.
+  - `boot.png` hardware bootscreen on startup cleanly disappears upon Rockbox initialization via immediate display controller update.
   - `sdcard.png` alert if MicroSD card or `.rockbox` directory is missing (with USB Mass Storage active to add files).
   - Native Rockbox USB screen during file transfer.
   - Automatic continuation once issues are resolved.
@@ -56,14 +62,14 @@
 
 | File | Size | Description |
 | :--- | :--- | :--- |
-| `boot_rockbox.img` | 6,094,848 bytes | Flashable boot image (kernel + initramfs) for the `boot` (`BOOTIMG`) partition. Fits within 6MB partition limit with 196,608 bytes headroom. |
+| `boot_rockbox.img` | 6,096,896 bytes | Flashable boot image (kernel + initramfs) for the `boot` (`BOOTIMG`) partition. Fits within 6MB partition limit with 194,560 bytes headroom. |
 | `rockbox_sdcard.zip` | ~14.4 MB | SD card root files (`.rockbox` directory with all audio codecs, plugins, fonts, themes, and screen assets). |
 | `SHA256SUMS.txt` | Text | SHA-256 verification checksums for all release binaries. |
 
 ### SHA-256 Checksums
 ```text
-b03a68ecc0434622d0bb033ebaa5eeb3797b8bbc6a8acc6985fa9be20ca14c47  boot_rockbox.img
-507e2595e93051c55f7c1d99ad9e06c13e008c5758aeed80dad66ce60b9d1c28  rockbox_sdcard.zip
+5d6440c8cededcc9424731bad6aab1d4335ffca27f0b5c21420883fd9943c853  boot_rockbox.img
+e76a64f8e6d8146ef4da8c1c95f58e57a5ec3f361d4e2f8135997029e197cb93  rockbox_sdcard.zip
 ```
 
 ---
