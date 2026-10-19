@@ -932,6 +932,7 @@ struct user_settings
     int y1_cpu_mode;
     int y1_cpu_cores;
     int y1_screen_resolution;
+    bool always_on_screen;
 #endif
 #if !defined(SIMULATOR) && !defined(USB_NONE) && (defined(HAVE_USB_ADB) || defined(HAVE_USB_POWER))
     int usb_mode;

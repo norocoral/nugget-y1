@@ -488,6 +488,60 @@ static void sink_set_freq(uint16_t freq)
     }
 }
 
+static volatile bool amp_powered = true;
+
+static void eac_power_headphone_amp(bool on)
+{
+    if (eac_fd < 0) return;
+    if (amp_powered == on) return;
+
+    if (on) {
+        /* 1. Turn on Audio Clocks */
+        ioctl(eac_fd, AUD_DRV_AFE_CLK, 1);
+        ioctl(eac_fd, AUD_DRV_AIF_CLK, 1);
+        set_anareg(eac_fd, 0x106, 1, 0xffff);
+        set_anareg(eac_fd, 0x10c, 0x100, 0x100);
+
+        /* 2. Power on Downlink DAC & Analog L/R Paths */
+        set_anareg(eac_fd, 0x700, 0x7800, 0x7f80);
+        set_anareg(eac_fd, 0x704, 0x00f0, 0x00ff);
+        set_anareg(eac_fd, 0x702, 0x0000, 0x0700);
+        set_anareg(eac_fd, 0x700, 0x0000, 0x0070);
+        set_anareg(eac_fd, 0x710, 0x0008, 0x0008);
+        set_anareg(eac_fd, 0x700, 0x0180, 0x0180);
+        set_anareg(eac_fd, 0x704, 0x0003, 0x0003);
+
+        /* 3. Power on Headphone Amplifier with pop suppression */
+        set_anareg(eac_fd, 0x70c, 0xf7f2, 0xffff);
+        set_anareg(eac_fd, 0x700, 0x7000, 0xf000);
+        set_anareg(eac_fd, 0x70a, 0x0014, 0xffff);
+        set_anareg(eac_fd, 0x708, 0x007c, 0xffff);
+        usleep(5000);
+        set_anareg(eac_fd, 0x70c, 0xf5ba, 0xffff);
+        set_anareg(eac_fd, 0x70a, 0x0014, 0xffff);
+        ioctl(eac_fd, SET_HEADPHONE_ON, 3);
+
+        /* 4. Enable Digital Downlink & Master Audio */
+        set_anareg(eac_fd, 0x4014, 1, 1);
+        top_ctl_trigger(eac_fd);
+        set_anareg(eac_fd, 0x4000, 1, 1);
+
+        amp_powered = true;
+    } else {
+        /* Power down Headphone Amplifier completely for zero idle current draw */
+        ioctl(eac_fd, SET_HEADPHONE_OFF, 0);
+        set_anareg(eac_fd, 0x70a, 0x0000, 0xffff);
+        set_anareg(eac_fd, 0x700, 0x0000, 0xf000);
+        set_anareg(eac_fd, 0x4014, 0, 1);
+        set_anareg(eac_fd, 0x4000, 0, 1);
+        set_anareg(eac_fd, 0x106, 0, 0xffff);
+        ioctl(eac_fd, AUD_DRV_AFE_CLK, 0);
+        ioctl(eac_fd, AUD_DRV_AIF_CLK, 0);
+
+        amp_powered = false;
+    }
+}
+
 static void sink_dma_start(const void *addr, size_t size)
 {
     pcm_data = addr;
@@ -495,6 +549,9 @@ static void sink_dma_start(const void *addr, size_t size)
 
     if (eac_fd >= 0)
     {
+        /* Power up Headphone amplifier and audio clocks if waking from idle */
+        eac_power_headphone_amp(true);
+
         /* Ensure AFE Master Switch and DL1 DMA are active */
         set_afereg(eac_fd, 0x10, (1 << 0) | (1 << 1), (1 << 0) | (1 << 1));
     }
@@ -515,8 +572,11 @@ static void sink_dma_stop(void)
 
     if (eac_fd >= 0)
     {
-        /* Pause DL1 DMA transfer (clear bit 1 of 0x10) while keeping AFE on */
+        /* Pause DL1 DMA transfer (clear bit 1 of 0x10) */
         set_afereg(eac_fd, 0x10, 0, 1 << 1);
+
+        /* Power down Headphone amplifier and gate clocks during idle to eliminate quiescent draw */
+        eac_power_headphone_amp(false);
     }
 }
 

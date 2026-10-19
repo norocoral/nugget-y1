@@ -83,6 +83,7 @@
 #include "cpufreq-y1.h"
 extern void y1_set_resolution_setting(int mode);
 extern void y1_apply_resolution_setting(int mode);
+extern void y1_set_always_on_screen(bool on);
 #endif
 
 #define UNUSED {.RESERVED=NULL}
@@ -2602,6 +2603,12 @@ const struct settings_list settings[] = {
                    2,
                    "Normal (480x360)",
                    "Classic (320x240 stretched)"),
+    OFFON_SETTING(0,
+                  always_on_screen,
+                  LANG_DISPLAY,
+                  false,
+                  "always on screen",
+                  y1_set_always_on_screen),
 #endif
 #if !defined(SIMULATOR) && !defined(USB_NONE) && (defined(HAVE_USB_ADB) || defined(HAVE_USB_POWER))
     CHOICE_SETTING(0,

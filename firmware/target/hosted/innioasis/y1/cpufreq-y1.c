@@ -19,6 +19,26 @@
 #include "sysfs.h"
 
 static int _current_cpu_mode = -1;
+static int _saved_cpu_mode = -1;
+
+void y1_set_screen_off_power_mode(bool screen_off)
+{
+    if (screen_off) {
+        if (_saved_cpu_mode == -1) {
+            _saved_cpu_mode = _current_cpu_mode >= 0 ? _current_cpu_mode : Y1_CPU_DYNAMIC;
+        }
+        /* Throttle CPU to fixed 598 MHz powersave underclock during screen-off */
+        y1_set_cpu_mode(Y1_CPU_POWERSAVE);
+    } else {
+        /* Restore previous CPU governor mode on screen wake */
+        if (_saved_cpu_mode != -1) {
+            int restore = _saved_cpu_mode;
+            _saved_cpu_mode = -1;
+            _current_cpu_mode = -1;
+            y1_set_cpu_mode(restore);
+        }
+    }
+}
 
 static void write_cpu_node(int cpu, const char *node, const char *val)
 {

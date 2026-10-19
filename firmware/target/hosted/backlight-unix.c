@@ -83,6 +83,8 @@ static int last_bl = -1;
 #define BACKLIGHT_POWER_OFF 4
 
 #if defined(BACKLIGHT_INNIOASIS)
+#include "cpufreq-y1.h"
+#include "lcd-target.h"
 static int bl_fd = -1;
 static void write_bl_hw(int val)
 {
@@ -101,6 +103,12 @@ static void write_bl_hw(int val)
 void backlight_hw_on(void)
 {
     if (last_bl != BACKLIGHT_POWER_ON) {
+#if defined(BACKLIGHT_INNIOASIS)
+        if (y1_is_always_on_screen()) {
+            y1_set_display_power_saving(false);
+        }
+        y1_set_screen_off_power_mode(false);
+#endif
 #ifdef HAVE_LCD_ENABLE
         lcd_enable(true);
 #endif
@@ -120,6 +128,22 @@ void backlight_hw_off(void)
     if (last_bl != BACKLIGHT_POWER_REDUCED) {
         last_bl = BACKLIGHT_POWER_REDUCED;
 #if defined(BACKLIGHT_INNIOASIS)
+        y1_set_screen_off_power_mode(true);
+        if (y1_is_always_on_screen()) {
+            /* Always On Screen mode:
+             * Instead of turning off backlight completely:
+             * 1. Reduce brightness to 50% of the current brightness
+             * 2. Turn off button backlight
+             * 3. Enable power saving mode on the display (1 FPS refresh rate)
+             * Keep LCD panel active (do not suspend) */
+            int dimmed = current_brightness / 2;
+            if (dimmed < 5) dimmed = 5;
+            int hw_val = (dimmed * 255) / 100;
+            write_bl_hw(hw_val);
+            sysfs_set_int("/sys/class/leds/button-backlight/brightness", 0);
+            y1_set_display_power_saving(true);
+            return;
+        }
         write_bl_hw(0);
         sysfs_set_int("/sys/class/leds/button-backlight/brightness", 0);
 #endif
@@ -146,6 +170,10 @@ void backlight_hw_brightness(int brightness)
     if (last_bl == BACKLIGHT_POWER_ON || last_bl == -1) {
         int hw_val = (brightness * 255) / 100;
         write_bl_hw(hw_val);
+    } else if (last_bl == BACKLIGHT_POWER_REDUCED && y1_is_always_on_screen()) {
+        int dimmed = brightness / 2;
+        if (dimmed < 5) dimmed = 5;
+        write_bl_hw((dimmed * 255) / 100);
     }
 #else
     sysfs_set_int(sysfs_bl_brightness, brightness);

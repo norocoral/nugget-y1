@@ -180,6 +180,9 @@ MENUITEM_SETTING(lcd_sleep_after_backlight_off,
 #ifdef HAVE_BACKLIGHT_BRIGHTNESS
 MENUITEM_SETTING(brightness_item, &global_settings.brightness, NULL);
 #endif
+#if defined(INNIOASIS_Y1)
+MENUITEM_SETTING_W_TEXT(always_on_screen_item, &global_settings.always_on_screen, "Always On Screen", NULL);
+#endif
 #ifdef HAVE_COMPOSITE_VIDEO_OUT
 MENUITEM_SETTING(composite_video_output,
                  &global_settings.composite_video_output, NULL);
@@ -216,6 +219,9 @@ MAKE_MENU(lcd_settings,ID2P(LANG_LCD_MENU),
 # endif
 # ifdef HAVE_BACKLIGHT_BRIGHTNESS
             ,&brightness_item
+# endif
+# if defined(INNIOASIS_Y1)
+            ,&always_on_screen_item
 # endif
 #endif /* HAVE_BACKLIGHT */
 #ifdef HAVE_COMPOSITE_VIDEO_OUT

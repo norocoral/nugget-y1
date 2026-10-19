@@ -478,35 +478,43 @@ static void optimize_power_and_battery(void)
 
     /* 1. MT6572 SPM (System Power Manager) Deep Idle & Regular Idle
      * Enables hardware SPM clock gating and CPU power-down when in WFI idle. */
+    write_sysfs("/sys/power/idle_state", "1\n");
     write_sysfs("/sys/power/dpidle_state", "1\n");
     write_sysfs("/sys/power/dpidle_state", "cpupdn 1\n");
     write_sysfs("/sys/power/rgidle_state", "1\n");
 
-    /* 2. CPU Frequency Scaling & Governor (ondemand with aggressive powersave floor) */
+    /* 2. CPU Frequency Scaling & Governor (ondemand with aggressive powersave bias) */
     write_sysfs("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor", "ondemand\n");
     write_sysfs("/sys/devices/system/cpu/cpu0/cpufreq/scaling_min_freq", "598000\n");
     write_sysfs("/sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq", "1001000\n");
 
-    /* Tune ondemand governor parameters for minimum power consumption */
-    write_sysfs("/sys/devices/system/cpu/cpufreq/ondemand/up_threshold", "95\n");
+    /* Tune ondemand governor parameters for maximum power saving */
+    write_sysfs("/sys/devices/system/cpu/cpufreq/ondemand/up_threshold", "98\n");
     write_sysfs("/sys/devices/system/cpu/cpufreq/ondemand/sampling_down_factor", "1\n");
+    write_sysfs("/sys/devices/system/cpu/cpufreq/ondemand/sampling_rate", "100000\n");
     write_sysfs("/sys/devices/system/cpu/cpufreq/ondemand/io_is_busy", "0\n");
-    write_sysfs("/sys/devices/system/cpu/cpufreq/ondemand/powersave_bias", "100\n");
+    write_sysfs("/sys/devices/system/cpu/cpufreq/ondemand/powersave_bias", "200\n");
 
     /* 3. Power-gate secondary CPU core (CPU1) for pure single-core audio playback */
     write_sysfs("/sys/devices/system/cpu/cpu1/online", "0\n");
     write_sysfs("/sys/devices/system/cpu/cpufreq/hotplug/cpu_num_base", "1\n");
+    write_sysfs("/sys/devices/system/cpu/cpufreq/hotplug/cpu_num_limit", "1\n");
 
     /* 4. Linux Kernel VM dirty page flush tuning (avoid waking up storage bus) */
-    write_sysfs("/proc/sys/vm/dirty_writeback_centisecs", "6000\n");
-    write_sysfs("/proc/sys/vm/dirty_expire_centisecs", "6000\n");
+    write_sysfs("/proc/sys/vm/dirty_writeback_centisecs", "12000\n");
+    write_sysfs("/proc/sys/vm/dirty_expire_centisecs", "12000\n");
     write_sysfs("/proc/sys/vm/laptop_mode", "5\n");
 
-    /* 5. Storage queue schedulers (noop = zero CPU overhead, FIFO for flash memory) */
+    /* 5. Storage queue schedulers & runtime power management */
     write_sysfs("/sys/block/mmcblk1/queue/scheduler", "noop\n");
     write_sysfs("/sys/block/mmcblk1/queue/read_ahead_kb", "512\n");
     write_sysfs("/sys/block/mmcblk0/queue/scheduler", "noop\n");
     write_sysfs("/sys/block/mmcblk0/queue/read_ahead_kb", "512\n");
+    write_sysfs("/sys/devices/platform/mtk-msdc.0/power/control", "auto\n");
+    write_sysfs("/sys/devices/platform/mtk-msdc.1/power/control", "auto\n");
+    write_sysfs("/sys/block/mmcblk0/power/control", "auto\n");
+    write_sysfs("/sys/block/mmcblk1/power/control", "auto\n");
+    write_sysfs("/sys/devices/platform/mt_usb/power/control", "auto\n");
 
     /* 6. Suppress kernel console wakeups / printk spam */
     write_sysfs("/proc/sys/kernel/printk", "1 1 1 1\n");

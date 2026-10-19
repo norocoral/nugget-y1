@@ -14,6 +14,8 @@
 #ifndef _CPUFREQ_Y1_H_
 #define _CPUFREQ_Y1_H_
 
+#include <stdbool.h>
+
 enum y1_cpu_modes
 {
     Y1_CPU_DYNAMIC = 0,     /* Ondemand: 598MHz - 1300MHz dynamic scaling */
@@ -32,5 +34,8 @@ void y1_set_cpu_cores_setting(int mode);
 
 /* Get current CPU frequency in MHz */
 int y1_get_current_freq(void);
+
+/* Screen off power throttle: drop to 598MHz while screen is off, restore on wake */
+void y1_set_screen_off_power_mode(bool screen_off);
 
 #endif /* _CPUFREQ_Y1_H_ */

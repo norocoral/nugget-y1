@@ -27,12 +27,27 @@
 #include "lcd-target.h"
 #include "backlight-target.h"
 #include "panic.h"
+#include "kernel.h"
 
 #ifndef VESA_NO_BLANKING
 #define VESA_NO_BLANKING 0
 #endif
 #ifndef VESA_POWERDOWN
 #define VESA_POWERDOWN   4
+#endif
+
+/* MediaTek Hardware Framebuffer IOCTLs */
+#ifndef MTKFB_POWERON
+#define MTKFB_POWERON            0x4f0c /* _IO('O', 12) */
+#endif
+#ifndef MTKFB_POWEROFF
+#define MTKFB_POWEROFF           0x4f0d /* _IO('O', 13) */
+#endif
+#ifndef MTKFB_CHANGE_UPDATESPEED
+#define MTKFB_CHANGE_UPDATESPEED 0x40044f13 /* _IOW('O', 19, unsigned long) */
+#endif
+#ifndef MTKFB_RESET_UPDATESPEED
+#define MTKFB_RESET_UPDATESPEED  0x4f35     /* _IO('O', 53) */
 #endif
 
 static int fb_fd = -1;
@@ -150,12 +165,49 @@ void lcd_enable(bool on)
 
     lcd_set_active(on);
     if (on) {
+        ioctl(fb_fd, MTKFB_POWERON, 0);
         ioctl(fb_fd, FBIOBLANK, VESA_NO_BLANKING);
         send_event(LCD_EVENT_ACTIVATION, NULL);
         lcd_update();
     } else {
+        ioctl(fb_fd, MTKFB_POWEROFF, 0);
         ioctl(fb_fd, FBIOBLANK, VESA_POWERDOWN);
     }
+}
+
+static bool y1_always_on_enabled = false;
+static bool y1_display_powersave = false;
+static long last_powersave_tick = 0;
+
+void y1_set_always_on_screen(bool on)
+{
+    y1_always_on_enabled = on;
+}
+
+bool y1_is_always_on_screen(void)
+{
+    return y1_always_on_enabled;
+}
+
+void y1_set_display_power_saving(bool enable)
+{
+    y1_display_powersave = enable;
+    if (fb_fd >= 0) {
+        if (enable) {
+            unsigned long speed = 1;
+            ioctl(fb_fd, MTKFB_CHANGE_UPDATESPEED, &speed);
+            last_powersave_tick = 0;
+            lcd_update();
+        } else {
+            ioctl(fb_fd, MTKFB_RESET_UPDATESPEED, 0);
+            lcd_update();
+        }
+    }
+}
+
+bool y1_is_display_power_saving(void)
+{
+    return y1_display_powersave;
 }
 
 static int y1_resolution_mode = 0; /* 0 = Normal (480x360), 1 = Classic (320x240 stretched) */
@@ -193,6 +245,16 @@ void lcd_update_rect(int x, int y, int width, int height)
 #ifdef HAVE_LCD_ENABLE
     if (!lcd_active()) return;
 #endif
+
+    if (y1_display_powersave) {
+        /* When display is in Always-On Screen power saving mode:
+         * Rate-limit updates to at most once per second (1 FPS).
+         * This saves 97% of memory bus bandwidth and GPU/DDP power consumption. */
+        if (last_powersave_tick != 0 && TIME_BEFORE(current_tick, last_powersave_tick + HZ)) {
+            return;
+        }
+        last_powersave_tick = current_tick;
+    }
 
     int stride = finfo.line_length;
     if (stride == 0) {

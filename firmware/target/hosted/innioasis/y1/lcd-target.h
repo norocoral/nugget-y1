@@ -25,6 +25,10 @@ extern fb_data *framebuffer;
 extern void lcd_set_active(bool active);
 extern void y1_display_raw_screen(const char *name);
 extern void y1_set_resolution_setting(int mode);
+extern void y1_set_always_on_screen(bool on);
+extern bool y1_is_always_on_screen(void);
+extern void y1_set_display_power_saving(bool enable);
+extern bool y1_is_display_power_saving(void);
 
 #endif /* __LCD_TARGET_H__ */
 
