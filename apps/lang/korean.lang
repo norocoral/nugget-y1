@@ -17175,3 +17175,269 @@
     touchscreen: "터치스크린 플릭 바로가기"
   </voice>
 </phrase>
+<phrase>
+  id: LANG_Y1_SCREEN_RESOLUTION
+  desc: in Settings -> Nugget -> Device
+  user: core
+  <source>
+    *: "Screen Resolution"
+  </source>
+  <dest>
+    *: "화면 해상도"
+  </dest>
+  <voice>
+    *: "화면 해상도"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_ALWAYS_ON_SCREEN
+  desc: in Settings -> Nugget -> Device
+  user: core
+  <source>
+    *: "Always On Display"
+  </source>
+  <dest>
+    *: "Always On Display"
+  </dest>
+  <voice>
+    *: "Always On Display"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_AOD_WPS_ONLY
+  desc: in Settings -> Nugget -> Device
+  user: core
+  <source>
+    *: "AOD: On WPS Only"
+  </source>
+  <dest>
+    *: "AOD: 재생 화면에서만"
+  </dest>
+  <voice>
+    *: "AOD 재생 화면에서만"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_AOD_PLAYBACK_ONLY
+  desc: in Settings -> Nugget -> Device
+  user: core
+  <source>
+    *: "AOD: When Playing Only"
+  </source>
+  <dest>
+    *: "AOD: 재생 중에만"
+  </dest>
+  <voice>
+    *: "AOD 재생 중에만"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_CPU_CORES
+  desc: in Settings -> Nugget -> Device
+  user: core
+  <source>
+    *: "Second CPU Core"
+  </source>
+  <dest>
+    *: "보조 CPU 코어"
+  </dest>
+  <voice>
+    *: "보조 CPU 코어"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_HEADPHONE_REMOTE
+  desc: in Settings -> Nugget -> Device
+  user: core
+  <source>
+    *: "Headphone Controls"
+  </source>
+  <dest>
+    *: "이어폰 리모컨 설정"
+  </dest>
+  <voice>
+    *: "이어폰 리모컨 설정"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_MFB_SINGLE_CLICK
+  desc: in Settings -> Nugget -> Device -> Headphone Controls
+  user: core
+  <source>
+    *: "1 Click MFB"
+  </source>
+  <dest>
+    *: "1회 클릭"
+  </dest>
+  <voice>
+    *: "1회 클릭"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_MFB_DOUBLE_CLICK
+  desc: in Settings -> Nugget -> Device -> Headphone Controls
+  user: core
+  <source>
+    *: "Double Click MFB"
+  </source>
+  <dest>
+    *: "더블 클릭"
+  </dest>
+  <voice>
+    *: "더블 클릭"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_MFB_TRIPLE_CLICK
+  desc: in Settings -> Nugget -> Device -> Headphone Controls
+  user: core
+  <source>
+    *: "Triple Click MFB"
+  </source>
+  <dest>
+    *: "트리플 클릭"
+  </dest>
+  <voice>
+    *: "트리플 클릭"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_MFB_HOLD_2S
+  desc: in Settings -> Nugget -> Device -> Headphone Controls
+  user: core
+  <source>
+    *: "Hold MFB for 2s"
+  </source>
+  <dest>
+    *: "2초간 길게 누름"
+  </dest>
+  <voice>
+    *: "2초간 길게 누름"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_MFB_HOLD_5S
+  desc: in Settings -> Nugget -> Device -> Headphone Controls
+  user: core
+  <source>
+    *: "Hold MFB for 5s"
+  </source>
+  <dest>
+    *: "5초간 길게 누름"
+  </dest>
+  <voice>
+    *: "5초간 길게 누름"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_DOUBLE_CLICK_UNHOLD
+  desc: in Settings -> Nugget -> Device
+  user: core
+  <source>
+    *: "Double Click to unHOLD"
+  </source>
+  <dest>
+    *: "더블 클릭으로 홀드 해제"
+  </dest>
+  <voice>
+    *: "더블 클릭으로 홀드 해제"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_BLUETOOTH
+  desc: in Settings -> Bluetooth
+  user: core
+  <source>
+    *: "Bluetooth"
+  </source>
+  <dest>
+    *: "블루투스"
+  </dest>
+  <voice>
+    *: "블루투스"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_NUGGET
+  desc: in Settings -> General Settings -> Nugget
+  user: core
+  <source>
+    *: "Nugget"
+  </source>
+  <dest>
+    *: "너겟 (Nugget)"
+  </dest>
+  <voice>
+    *: "너겟"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_DEVICE
+  desc: in Settings -> General Settings -> Nugget -> Device
+  user: core
+  <source>
+    *: "Device"
+  </source>
+  <dest>
+    *: "기기"
+  </dest>
+  <voice>
+    *: "기기"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_CPU_MODE
+  desc: in Settings -> Nugget -> Device
+  user: core
+  <source>
+    *: "CPU Frequency Mode"
+  </source>
+  <dest>
+    *: "CPU 클럭 모드"
+  </dest>
+  <voice>
+    *: "CPU 클럭 모드"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_BT_PAIRED_DEVICES
+  desc: in Settings -> Bluetooth
+  user: core
+  <source>
+    *: "Paired Devices..."
+  </source>
+  <dest>
+    *: "등록된 기기 목록..."
+  </dest>
+  <voice>
+    *: "등록된 기기 목록"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_BT_SEARCH_DEVICES
+  desc: in Settings -> Bluetooth
+  user: core
+  <source>
+    *: "Search New Devices..."
+  </source>
+  <dest>
+    *: "새 기기 검색..."
+  </dest>
+  <voice>
+    *: "새 기기 검색"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_BT_DISCONNECT
+  desc: in Settings -> Bluetooth
+  user: core
+  <source>
+    *: "Disconnect Audio"
+  </source>
+  <dest>
+    *: "오디오 연결 해제"
+  </dest>
+  <voice>
+    *: "오디오 연결 해제"
+  </voice>
+</phrase>

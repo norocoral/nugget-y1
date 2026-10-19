@@ -411,7 +411,7 @@ MENUITEM_FUNCTION(sel_softlock_mask, 0, ID2P(LANG_SETTINGS),
                   selectivesoftlock_set_mask, selectivesoftlock_callback,
                   Icon_Menu_setting);
 #if defined(INNIOASIS_Y1)
-MENUITEM_SETTING_W_TEXT(y1_double_click_unhold_item, &global_settings.double_click_unhold, "Double Click to unHOLD", NULL);
+MENUITEM_SETTING(y1_double_click_unhold_item, &global_settings.double_click_unhold, NULL);
 MAKE_MENU(sel_softlock, ID2P(LANG_SOFTLOCK_SELECTIVE),
           NULL, Icon_Menu_setting, &bt_selective_actions, &sel_softlock_mask, &y1_double_click_unhold_item);
 #else
@@ -429,12 +429,12 @@ MENUITEM_SETTING(governor, &global_settings.governor, NULL);
 #include "bt-y1.h"
 #include "list.h"
 
-MENUITEM_SETTING_W_TEXT(y1_screen_res_setting, &global_settings.y1_screen_resolution, "Screen Resolution", NULL);
-MENUITEM_SETTING_W_TEXT(y1_always_on_screen_item, &global_settings.always_on_screen, "Always On Display", NULL);
-MENUITEM_SETTING_W_TEXT(y1_aod_wps_item, &global_settings.aod_wps_only, "AOD: On WPS Only", NULL);
-MENUITEM_SETTING_W_TEXT(y1_aod_playback_item, &global_settings.aod_playback_only, "AOD: When Playing Only", NULL);
-MENUITEM_SETTING_W_TEXT(y1_cpu_mode_setting, &global_settings.y1_cpu_mode, "CPU Frequency Mode", NULL);
-MENUITEM_SETTING_W_TEXT(y1_cpu_cores_setting, &global_settings.y1_cpu_cores, "Second CPU Core", NULL);
+MENUITEM_SETTING(y1_screen_res_setting, &global_settings.y1_screen_resolution, NULL);
+MENUITEM_SETTING(y1_always_on_screen_item, &global_settings.always_on_screen, NULL);
+MENUITEM_SETTING(y1_aod_wps_item, &global_settings.aod_wps_only, NULL);
+MENUITEM_SETTING(y1_aod_playback_item, &global_settings.aod_playback_only, NULL);
+MENUITEM_SETTING(y1_cpu_mode_setting, &global_settings.y1_cpu_mode, NULL);
+MENUITEM_SETTING(y1_cpu_cores_setting, &global_settings.y1_cpu_cores, NULL);
 MENUITEM_SETTING(y1_bt_enable_item, &global_settings.bt_enabled, NULL);
 
 static struct y1_bt_device ui_bt_devs[Y1_BT_MAX_DEVICES];
@@ -494,7 +494,7 @@ static int menu_y1_bt_paired_action(void)
 
     struct gui_synclist bt_list;
     gui_synclist_init(&bt_list, y1_bt_paired_list_get_name, NULL, false, 1, NULL);
-    gui_synclist_set_title(&bt_list, "Paired Devices", Icon_NOICON);
+    gui_synclist_set_title(&bt_list, ID2P(LANG_Y1_BT_PAIRED_DEVICES), Icon_NOICON);
     gui_synclist_set_nb_items(&bt_list, ui_bt_dev_count > 0 ? ui_bt_dev_count : 1);
     gui_synclist_select_item(&bt_list, 0);
     gui_synclist_draw(&bt_list);
@@ -593,7 +593,7 @@ static int menu_y1_bt_new_action(void)
 
     struct gui_synclist bt_list;
     gui_synclist_init(&bt_list, y1_bt_new_list_get_name, NULL, false, 1, NULL);
-    gui_synclist_set_title(&bt_list, "Search New Devices", Icon_NOICON);
+    gui_synclist_set_title(&bt_list, ID2P(LANG_Y1_BT_SEARCH_DEVICES), Icon_NOICON);
     gui_synclist_set_nb_items(&bt_list, ui_bt_dev_count > 0 ? ui_bt_dev_count : 1);
     gui_synclist_select_item(&bt_list, 0);
     gui_synclist_draw(&bt_list);
@@ -678,15 +678,15 @@ static int menu_y1_bt_new_action(void)
 static int menu_y1_bt_disconnect_action(void)
 {
     y1_bt_disconnect();
-    splash(HZ, "Bluetooth Disconnected");
+    splash(HZ, ID2P(LANG_Y1_BT_DISCONNECT));
     return 0;
 }
 
-MENUITEM_FUNCTION(y1_bt_paired_item, 0, "Paired Devices...",
+MENUITEM_FUNCTION(y1_bt_paired_item, 0, ID2P(LANG_Y1_BT_PAIRED_DEVICES),
                   menu_y1_bt_paired_action, NULL, Icon_NOICON);
-MENUITEM_FUNCTION(y1_bt_new_item, 0, "Search New Devices...",
+MENUITEM_FUNCTION(y1_bt_new_item, 0, ID2P(LANG_Y1_BT_SEARCH_DEVICES),
                   menu_y1_bt_new_action, NULL, Icon_NOICON);
-MENUITEM_FUNCTION(y1_bt_disconnect_item, 0, "Disconnect Audio",
+MENUITEM_FUNCTION(y1_bt_disconnect_item, 0, ID2P(LANG_Y1_BT_DISCONNECT),
                   menu_y1_bt_disconnect_action, NULL, Icon_NOICON);
 
 MAKE_MENU(nugget_bluetooth_menu, ID2P(LANG_Y1_BLUETOOTH), 0, Icon_NOICON,
@@ -696,20 +696,20 @@ MAKE_MENU(nugget_bluetooth_menu, ID2P(LANG_Y1_BLUETOOTH), 0, Icon_NOICON,
           &y1_bt_new_item,
           &y1_bt_disconnect_item);
 
-MENUITEM_SETTING_W_TEXT(y1_mfb_single_item, &global_settings.mfb_single_click, "1 Click MFB", NULL);
-MENUITEM_SETTING_W_TEXT(y1_mfb_double_item, &global_settings.mfb_double_click, "Double Click MFB", NULL);
-MENUITEM_SETTING_W_TEXT(y1_mfb_triple_item, &global_settings.mfb_triple_click, "Triple Click MFB", NULL);
-MENUITEM_SETTING_W_TEXT(y1_mfb_hold_2s_item, &global_settings.mfb_hold_2s, "Hold MFB for 2s", NULL);
-MENUITEM_SETTING_W_TEXT(y1_mfb_hold_5s_item, &global_settings.mfb_hold_5s, "Hold MFB for 5s", NULL);
+MENUITEM_SETTING(y1_mfb_single_item, &global_settings.mfb_single_click, NULL);
+MENUITEM_SETTING(y1_mfb_double_item, &global_settings.mfb_double_click, NULL);
+MENUITEM_SETTING(y1_mfb_triple_item, &global_settings.mfb_triple_click, NULL);
+MENUITEM_SETTING(y1_mfb_hold_2s_item, &global_settings.mfb_hold_2s, NULL);
+MENUITEM_SETTING(y1_mfb_hold_5s_item, &global_settings.mfb_hold_5s, NULL);
 
-MAKE_MENU(nugget_headphone_menu, "Headphone Controls", 0, Icon_NOICON,
+MAKE_MENU(nugget_headphone_menu, ID2P(LANG_Y1_HEADPHONE_REMOTE), 0, Icon_NOICON,
           &y1_mfb_single_item,
           &y1_mfb_double_item,
           &y1_mfb_triple_item,
           &y1_mfb_hold_2s_item,
           &y1_mfb_hold_5s_item);
 
-MAKE_MENU(nugget_device_menu, "Device", 0, Icon_NOICON,
+MAKE_MENU(nugget_device_menu, ID2P(LANG_DEVICE), 0, Icon_NOICON,
           &y1_screen_res_setting,
           &y1_always_on_screen_item,
           &y1_aod_wps_item,
@@ -719,7 +719,7 @@ MAKE_MENU(nugget_device_menu, "Device", 0, Icon_NOICON,
           &y1_cpu_cores_setting,
           &nugget_headphone_menu);
 
-MAKE_MENU(nugget_menu, "Nugget", 0, Icon_NOICON,
+MAKE_MENU(nugget_menu, ID2P(LANG_NUGGET), 0, Icon_NOICON,
           &nugget_device_menu);
 
 #ifdef HAVE_SW_POWEROFF

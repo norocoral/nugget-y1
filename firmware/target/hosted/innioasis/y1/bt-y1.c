@@ -133,10 +133,7 @@ static uint8_t remote_seid = 1;
 static uint8_t sbc_cfg_octet0 = 0x21; /* 44.1kHz, Joint Stereo */
 static uint8_t sbc_cfg_octet1 = 0x15; /* 16 blocks, 8 subbands, Loudness */
 static uint8_t sbc_bitpool    = 53;
-
-/* HCI ACL flow control */
-static int acl_max_pkts = 4;
-static int acl_in_flight = 0;
+static bool    sbc_is_xq      = false;
 
 /* Remote Name Resolution queue after Inquiry */
 static bool resolving_names = false;
@@ -369,7 +366,6 @@ static int l2cap_send_pdu(uint16_t dcid, const void *payload, uint16_t len)
 
     ssize_t w = write(stpbt_fd, pkt, 9 + len);
     if (w == (ssize_t)(9 + len)) {
-        acl_in_flight++;
         return 0;
     }
     return -1;
@@ -560,10 +556,8 @@ static void handle_avdtp_sig_pdu(const uint8_t *pdu, uint16_t len)
                         sbc_cfg_octet0 = pdu[i + 4];
                         sbc_cfg_octet1 = pdu[i + 5];
                         uint8_t max_bp = pdu[i + 7];
-                        if (max_bp >= 2 && max_bp < 53)
-                            sbc_bitpool = max_bp;
-                        else
-                            sbc_bitpool = 53;
+                        sbc_bitpool = max_bp;
+                        sbc_is_xq = ((sbc_cfg_octet0 & 0x04) != 0 && sbc_bitpool >= 38);
                     }
                 }
                 reinit_a2dp_sbc();
@@ -643,12 +637,22 @@ static void handle_avdtp_sig_pdu(const uint8_t *pdu, uint16_t len)
                 }
                 /* Choose 44.1kHz (0x20), else 48kHz (0x10) */
                 uint8_t freq = (sup_o0 & 0x20) ? 0x20 : 0x10;
-                /* Choose Joint Stereo (0x01), else Stereo (0x02) */
-                uint8_t chm  = (sup_o0 & 0x01) ? 0x01 : 0x02;
-                sbc_cfg_octet0 = freq | chm;
+                /* Try SBC XQ first: Dual Channel (0x04) at bitpool 38 (452 kbps) */
+                if ((sup_o0 & 0x04) && max_bp >= 38) {
+                    sbc_is_xq = true;
+                    sbc_cfg_octet0 = freq | 0x04; /* Dual Channel */
+                    sbc_bitpool = (freq == 0x20) ? 38 : ((max_bp >= 45) ? 45 : 38);
+                    bt_log("Negotiating SBC XQ (Dual Channel, high-bitpool)\n");
+                } else {
+                    /* Fallback to standard SBC Joint Stereo (0x01) or Stereo (0x02) */
+                    sbc_is_xq = false;
+                    uint8_t chm  = (sup_o0 & 0x01) ? 0x01 : 0x02;
+                    sbc_cfg_octet0 = freq | chm;
+                    sbc_bitpool = (max_bp > 53) ? 53 : ((max_bp < 2) ? 35 : max_bp);
+                    bt_log("Negotiating standard SBC (Joint Stereo)\n");
+                }
                 /* Choose 16 blocks (0x10), 8 subbands (0x04), Loudness (0x01) or SNR (0x02) */
                 sbc_cfg_octet1 = 0x14 | ((sup_o1 & 0x01) ? 0x01 : 0x02);
-                sbc_bitpool = (max_bp > 53) ? 53 : ((max_bp < 2) ? 35 : max_bp);
 
                 reinit_a2dp_sbc();
 
@@ -691,6 +695,33 @@ static void handle_avdtp_sig_pdu(const uint8_t *pdu, uint16_t len)
             }
             default:
                 break;
+        }
+    }
+    else if (msg_type == 0x03) /* Response Reject to our Initiator command */
+    {
+        if (sig_id == AVDTP_SET_CONFIGURATION) {
+            bt_log("AVDTP_SET_CONFIGURATION rejected by remote\n");
+            if (sbc_is_xq) {
+                /* Remote rejected SBC XQ: fallback to standard SBC Joint Stereo */
+                bt_log("Falling back from SBC XQ to standard SBC (Joint Stereo)\n");
+                sbc_is_xq = false;
+                uint8_t freq = (sbc_cfg_octet0 & 0x20) ? 0x20 : 0x10;
+                sbc_cfg_octet0 = freq | 0x01; /* Joint Stereo */
+                sbc_bitpool = 53;
+                reinit_a2dp_sbc();
+
+                uint8_t set_cfg[12] = {
+                    (uint8_t)(remote_seid << 2), /* ACP SEID */
+                    (1 << 2),                    /* INT SEID = 1 */
+                    0x01, 0x00,                  /* Media Transport */
+                    0x07, 0x06, 0x00, 0x00,      /* Media Codec: Audio, SBC */
+                    sbc_cfg_octet0,
+                    sbc_cfg_octet1,
+                    2,                           /* min_bp */
+                    sbc_bitpool                  /* max_bp */
+                };
+                avdtp_send_cmd(AVDTP_SET_CONFIGURATION, set_cfg, sizeof(set_cfg));
+            }
         }
     }
 }
@@ -1147,7 +1178,7 @@ static void handle_hci_event(const uint8_t *pkt, size_t len)
                 const uint8_t *bd = &p[3];
                 if (status == 0x00) {
                     acl_handle = handle & 0x0FFF;
-                    acl_in_flight = 0;
+                    sbc_is_xq = false;
                     memcpy(active_bdaddr, bd, 6);
                     cid_sdp_remote = 0;
                     cid_avdtp_sig_remote = 0;
@@ -1200,6 +1231,7 @@ static void handle_hci_event(const uint8_t *pkt, size_t len)
         case 0x05: /* Disconnection Complete */ {
             acl_handle = 0xFFFF;
             a2dp_streaming = false;
+            sbc_is_xq = false;
             in_sniff_mode = false;
             avrcp_vol_notify_pending = false;
             memset(active_bdaddr, 0, 6);
@@ -1319,18 +1351,8 @@ static void handle_hci_event(const uint8_t *pkt, size_t len)
             break;
         }
 
-        case 0x13: /* Number Of Completed Packets (HCI ACL Flow Control) */ {
-            if (plen >= 5) {
-                uint8_t num_handles = p[0];
-                for (uint8_t i = 0; i < num_handles && (1 + (i + 1) * 4) <= plen; i++) {
-                    uint16_t completed = (uint16_t)p[3 + i * 4] | ((uint16_t)p[4 + i * 4] << 8);
-                    acl_in_flight -= completed;
-                    if (acl_in_flight < 0)
-                        acl_in_flight = 0;
-                }
-            }
+        case 0x13: /* Number Of Completed Packets */
             break;
-        }
 
         default:
             break;
@@ -1451,7 +1473,8 @@ static void drain_a2dp_pcm_and_transmit(void)
 
     size_t samples_per_pkt = samples_per_frame * frames_per_pkt;
 
-    while (acl_in_flight < acl_max_pkts)
+    int pkts_sent = 0;
+    while (pkts_sent < 4)
     {
         size_t r = pcm_ring_r;
         size_t w = pcm_ring_w;
@@ -1459,7 +1482,7 @@ static void drain_a2dp_pcm_and_transmit(void)
         if (avail < samples_per_pkt)
             break;
 
-        uint8_t rtp_pkt[896];
+        uint8_t rtp_pkt[1024];
         /* 12-byte RTP Header + 1-byte A2DP SBC Payload Header */
         rtp_pkt[0]  = 0x80; /* RTP v2 */
         rtp_pkt[1]  = 0x60; /* Payload type 96 (Dynamic) */
@@ -1494,10 +1517,12 @@ static void drain_a2dp_pcm_and_transmit(void)
                 pkt_len += (size_t)written;
             }
         }
-        pcm_ring_r = r;
 
         if (l2cap_send_pdu(cid_avdtp_med_remote, rtp_pkt, (uint16_t)pkt_len) < 0)
             break;
+
+        pcm_ring_r = r;
+        pkts_sent++;
     }
 }
 
@@ -1696,7 +1721,8 @@ const char *y1_bt_get_status_str(void)
                      connected_name[0] ? connected_name : "Audio Device");
             return status_buf;
         case Y1_BT_STATE_STREAMING:
-            snprintf(status_buf, sizeof(status_buf), "Streaming: %s",
+            snprintf(status_buf, sizeof(status_buf), "Streaming (%s): %s",
+                     sbc_is_xq ? "SBC XQ" : "SBC",
                      connected_name[0] ? connected_name : "Audio Device");
             return status_buf;
         case Y1_BT_STATE_ERROR:      return "Hardware Error";

@@ -17472,7 +17472,7 @@
 </phrase>
 <phrase>
   id: LANG_Y1_BLUETOOTH
-  desc: in Settings -> Nugget -> Bluetooth
+  desc: in Settings -> Bluetooth
   user: core
   <source>
     *: "Bluetooth"
@@ -17482,6 +17482,90 @@
   </dest>
   <voice>
     *: "Bluetooth"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_NUGGET
+  desc: in Settings -> General Settings -> Nugget
+  user: core
+  <source>
+    *: "Nugget"
+  </source>
+  <dest>
+    *: "Nugget"
+  </dest>
+  <voice>
+    *: "Nugget"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_DEVICE
+  desc: in Settings -> General Settings -> Nugget -> Device
+  user: core
+  <source>
+    *: "Device"
+  </source>
+  <dest>
+    *: "Device"
+  </dest>
+  <voice>
+    *: "Device"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_CPU_MODE
+  desc: in Settings -> Nugget -> Device
+  user: core
+  <source>
+    *: "CPU Frequency Mode"
+  </source>
+  <dest>
+    *: "CPU Frequency Mode"
+  </dest>
+  <voice>
+    *: "CPU frequency mode"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_BT_PAIRED_DEVICES
+  desc: in Settings -> Bluetooth
+  user: core
+  <source>
+    *: "Paired Devices..."
+  </source>
+  <dest>
+    *: "Paired Devices..."
+  </dest>
+  <voice>
+    *: "Paired devices"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_BT_SEARCH_DEVICES
+  desc: in Settings -> Bluetooth
+  user: core
+  <source>
+    *: "Search New Devices..."
+  </source>
+  <dest>
+    *: "Search New Devices..."
+  </dest>
+  <voice>
+    *: "Search new devices"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_BT_DISCONNECT
+  desc: in Settings -> Bluetooth
+  user: core
+  <source>
+    *: "Disconnect Audio"
+  </source>
+  <dest>
+    *: "Disconnect Audio"
+  </dest>
+  <voice>
+    *: "Disconnect audio"
   </voice>
 </phrase>
 

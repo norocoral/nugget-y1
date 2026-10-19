@@ -2573,7 +2573,7 @@ const struct settings_list settings[] = {
 #if defined(INNIOASIS_Y1)
     CHOICE_SETTING(0,
                    y1_cpu_mode,
-                   LANG_IBASSO_FREQ_SCALING_GOVERNOR,
+                   LANG_Y1_CPU_MODE,
                    Y1_CPU_DYNAMIC,
                    "cpu frequency mode",
                    "dynamic,powersave_598mhz,balanced_1001mhz,perf_1196mhz,turbo_1300mhz",
