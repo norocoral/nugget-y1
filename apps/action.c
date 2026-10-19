@@ -53,6 +53,14 @@
 #endif
 #endif /* HAVE_BACKLIGHT */
 
+#if defined(INNIOASIS_Y1)
+extern bool y1_is_display_power_saving(void);
+extern void y1_set_display_power_saving(bool enable);
+#define Y1_IS_SCREEN_SLEEPING() (!is_backlight_on(false) || y1_is_display_power_saving())
+#else
+#define Y1_IS_SCREEN_SLEEPING() (!is_backlight_on(false))
+#endif
+
 /*#define LOGF_ENABLE*/
 #include "logf.h"
 
@@ -888,9 +896,9 @@ static inline void do_softlock(action_last_t *last, action_cur_t *cur)
     if (action == ACTION_STD_KEYLOCK)
     {
 #ifdef HAVE_BACKLIGHT
-        if (is_backlight_on(false))
+        if (!Y1_IS_SCREEN_SLEEPING())
         {
-            /* If backlight is on, pressing power button turns off backlight and enters hold */
+            /* If screen is on, pressing power button turns off backlight and enters hold */
             backlight_off();
             do_key_lock(true);
 #ifndef BOOTLOADER
@@ -902,7 +910,7 @@ static inline void do_softlock(action_last_t *last, action_cur_t *cur)
         }
         else
         {
-            /* If backlight is off, power button does not wake (only Center unholds) */
+            /* If screen is sleeping, power button does not wake (only Center unholds) */
             cur->action = ACTION_NONE;
             last->button = BUTTON_NONE;
             return;
@@ -932,9 +940,9 @@ static inline void do_softlock(action_last_t *last, action_cur_t *cur)
         if (sl_activate)
         { /*All non-std softlock options are set to 0 if advanced sl is disabled*/
 #ifdef HAVE_BACKLIGHT
-            if (!is_backlight_on(false))
+            if (Y1_IS_SCREEN_SLEEPING())
             {
-                /* Backlight is off: do not wake up screen or notify on blocked actions */
+                /* Screen is sleeping: do not wake up screen or notify on blocked actions */
                 notify_user = false;
                 action = ACTION_NONE;
             }
@@ -958,7 +966,7 @@ static inline void do_softlock(action_last_t *last, action_cur_t *cur)
     notify_user |= (has_flag(cur->button, BUTTON_POWER|BUTTON_REL)
                     && last->keys_locked
 #ifdef HAVE_BACKLIGHT
-                    && is_backlight_on(false)
+                    && !Y1_IS_SCREEN_SLEEPING()
 #endif
                    );
 #endif
@@ -1083,14 +1091,26 @@ static inline int do_backlight(action_last_t *last, action_cur_t *cur, int actio
         return action;
     }
 
-    bool filtered;
     bool bl_activate = false;
-    bool bl_is_off = !is_backlight_on(false);
+    bool bl_is_off = Y1_IS_SCREEN_SLEEPING();
 
 #if CONFIG_CHARGING /* disable if on external power */
     bl_is_off &= !(has_flag(last->backlight_mask, SEL_ACTION_NOEXT)
                      && power_input_present());
 #endif
+#if defined(INNIOASIS_Y1)
+    (void)cur;
+    /* On Y1, when screen is sleeping, non-center buttons NEVER activate backlight */
+    if (bl_is_off)
+    {
+        bl_activate = false;
+    }
+    else
+    {
+        bl_activate = true;
+    }
+#else
+    bool filtered;
     /* skip if backlight on | incorrect context | SEL_ACTION_NOEXT + ext pwr */
     if (bl_is_off && (cur->context == CONTEXT_FM || cur->context == CONTEXT_WPS ||
        cur->context == CONTEXT_MAINMENU))
@@ -1102,6 +1122,7 @@ static inline int do_backlight(action_last_t *last, action_cur_t *cur, int actio
     {
         bl_activate = true;
     }
+#endif
 
     if (action != ACTION_NONE && bl_activate)
     {
@@ -1155,11 +1176,11 @@ static int get_action_worker(action_last_t *last, action_cur_t *cur)
     }
 
 #ifdef HAVE_BACKLIGHT
-    bool bl_off = !is_backlight_on(false);
+    bool bl_off = Y1_IS_SCREEN_SLEEPING();
 
     if (bl_off)
     {
-        /* Backlight is off: device is automatically in HOLD mode */
+        /* Screen is sleeping: device is automatically in HOLD mode */
         last->keys_locked = true;
 
         int raw_btn = cur->button & ~(BUTTON_REPEAT | BUTTON_REL);
@@ -1171,7 +1192,13 @@ static int get_action_worker(action_last_t *last, action_cur_t *cur)
             if (!is_rel)
             {
                 /* Center button pressed: wake screen and unlock keys */
+#if defined(INNIOASIS_Y1)
+                if (y1_is_display_power_saving()) {
+                    y1_set_display_power_saving(false);
+                }
+#endif
                 backlight_on();
+                buttonlight_on();
                 reset_poweroff_timer();
                 last->keys_locked = false;
                 do_key_lock(false);

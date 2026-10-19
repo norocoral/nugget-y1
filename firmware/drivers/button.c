@@ -32,6 +32,12 @@
 #include "serial.h"
 #include "power.h"
 #include "powermgmt.h"
+#if defined(INNIOASIS_Y1)
+extern bool y1_is_display_power_saving(void);
+static inline bool y1_screen_sleeping(void) {
+    return (!is_backlight_on(false) || y1_is_display_power_saving());
+}
+#endif
 #if defined(HAVE_SDL)
 #include <SDL.h>
 #if (SDL_MAJOR_VERSION > 1)
@@ -169,7 +175,9 @@ static bool filter_first_keypress_disabled(int button, int data)
 
 static bool filter_first_keypress_enabled(int button, int data)
 {
-#if defined(HAVE_TRANSFLECTIVE_LCD) && defined(HAVE_LCD_SLEEP)
+#if defined(INNIOASIS_Y1)
+    return filter_first_keypress_disabled(button, data);
+#elif defined(HAVE_TRANSFLECTIVE_LCD) && defined(HAVE_LCD_SLEEP)
     if (is_backlight_on(false) && lcd_active())
 #else
     if (is_backlight_on(false))
@@ -376,8 +384,15 @@ static void button_tick(void)
                         else
 #endif
                         {
+#if defined(INNIOASIS_Y1)
+                            if (!y1_screen_sleeping()) {
+                                backlight_on();
+                                buttonlight_on();
+                            }
+#else
                             backlight_on();
                             buttonlight_on();
+#endif
                         }
 #endif
                     }
@@ -394,8 +409,15 @@ static void button_tick(void)
 #endif
                     {
                         skip_release = keypress_filter_fn(btn, data);
+#if defined(INNIOASIS_Y1)
+                        if (!y1_screen_sleeping()) {
+                            backlight_on();
+                            buttonlight_on();
+                        }
+#else
                         backlight_on();
                         buttonlight_on();
+#endif
                     }
 #else /* no backlight, nothing to skip */
                     button_queue_try_post(btn, data);

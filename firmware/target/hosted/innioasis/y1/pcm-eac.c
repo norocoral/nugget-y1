@@ -120,16 +120,15 @@ void audiohw_set_volume(int vol_l, int vol_r)
     /* vol_l and vol_r are passed in centibels (tenths of a dB, -740 to +60).
      * pcm_set_master_volume expects centibels directly.
      * At <= -740 (-74 dB), mute completely via PCM_MUTE_LEVEL.
-     * Cap digital volume at 0 dB (0 centibels) to avoid digital clipping distortion
-     * since the MT6323 hardware amplifier provides high analog output gain. */
-    int sw_volume_l = (vol_l <= -740) ? PCM_MUTE_LEVEL : (vol_l > 0 ? 0 : vol_l);
-    int sw_volume_r = (vol_r <= -740) ? PCM_MUTE_LEVEL : (vol_r > 0 ? 0 : vol_r);
+     * Support full volume scale without artificial software attenuation cap. */
+    int sw_volume_l = (vol_l <= -740) ? PCM_MUTE_LEVEL : vol_l;
+    int sw_volume_r = (vol_r <= -740) ? PCM_MUTE_LEVEL : vol_r;
     pcm_set_master_volume(sw_volume_l, sw_volume_r);
 
     if (eac_fd >= 0)
     {
-        /* Keep headphone amplifier firmly powered and set to maximum analog gain (0x0014, +12dB). */
-        set_anareg(eac_fd, 0x70a, 0x0014, 0xffff);
+        /* Keep headphone amplifier firmly powered and set to maximum analog gain (0x7714, +14dB Left & Right). */
+        set_anareg(eac_fd, 0x70a, 0x7714, 0xffff);
     }
 }
 static pthread_t pcm_thread;
@@ -341,8 +340,8 @@ static void sink_dma_init(void)
             /* 10. Power up MT6323 PMIC Audio Downlink DAC & Clocks */
             set_anareg(eac_fd, 0x700, 0x7800, 0x7f80);
             set_anareg(eac_fd, 0x704, 0x00f0, 0x00ff);
-            set_anareg(eac_fd, 0x702, 0x0000, 0x0700); /* Maximum preamp buffer gain */
-            set_anareg(eac_fd, 0x700, 0x0000, 0x0070); /* Maximum preamp buffer gain */
+            set_anareg(eac_fd, 0x702, 0x0500, 0x0700); /* Maximum preamp buffer gain Right (5 << 8) */
+            set_anareg(eac_fd, 0x700, 0x0050, 0x0070); /* Maximum preamp buffer gain Left (5 << 4) */
             set_anareg(eac_fd, 0x710, 0x0008, 0x0008);
             set_anareg(eac_fd, 0x700, 0x0180, 0x0180);
             set_anareg(eac_fd, 0x704, 0x0003, 0x0003);
@@ -354,7 +353,7 @@ static void sink_dma_init(void)
             set_anareg(eac_fd, 0x708, 0x007c, 0xffff);
             usleep(10000); /* 10ms settling time */
             set_anareg(eac_fd, 0x70c, 0xf5ba, 0xffff);
-            set_anareg(eac_fd, 0x70a, 0x0014, 0xffff); /* Max +12dB analog gain, Headphone powered */
+            set_anareg(eac_fd, 0x70a, 0x7714, 0xffff); /* Max +14dB analog gain Left & Right, Headphone powered */
             ioctl(eac_fd, SET_HEADPHONE_ON, 3);
 
             /* 12. Configure MT6323 PMIC Digital Audio Downlink (NewIF & Codec) */

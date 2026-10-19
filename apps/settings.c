@@ -88,16 +88,24 @@
 extern void y1_set_resolution_setting(int mode);
 bool y1_system_booted = false;
 
+static int current_applied_resolution = -1;
+
 void y1_apply_resolution_setting(int mode)
 {
     /* During boot, set screen dimensions before viewports/themes initialize */
     if (!y1_system_booted) {
+        current_applied_resolution = mode;
         y1_set_resolution_setting(mode);
         screens[SCREEN_MAIN].lcdwidth = (mode == 1) ? 320 : 480;
         screens[SCREEN_MAIN].lcdheight = (mode == 1) ? 240 : 360;
         lcd_set_dimensions(screens[SCREEN_MAIN].lcdwidth, screens[SCREEN_MAIN].lcdheight);
         return;
     }
+
+    if (current_applied_resolution != -1 && current_applied_resolution == mode) {
+        return;
+    }
+    current_applied_resolution = mode;
 
     /* User changed screen resolution in settings.
      * Do not restart automatically (the user will manually restart).
@@ -1199,7 +1207,6 @@ void settings_apply(bool read_disk)
 #if defined(INNIOASIS_Y1)
     y1_set_cpu_mode(global_settings.y1_cpu_mode);
     y1_set_cpu_cores_setting(global_settings.y1_cpu_cores);
-    y1_apply_resolution_setting(global_settings.y1_screen_resolution);
 #endif
 
     /* This should stay last */

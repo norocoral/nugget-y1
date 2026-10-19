@@ -488,11 +488,6 @@ MENUITEM_FUNCTION(debug_menu_item, 0, ID2P(LANG_DEBUG),
 MENUITEM_FUNCTION(show_legal_item, 0, ID2P(LANG_LEGAL_NOTICES),
                   show_legal, NULL, Icon_NOICON);
 
-#if defined(INNIOASIS_Y1)
-#include "cpufreq-y1.h"
-MENUITEM_SETTING_W_TEXT(y1_cpu_mode_item, &global_settings.y1_cpu_mode, "CPU Performance", NULL);
-#endif
-
 #ifdef HAVE_SW_POWEROFF
 static int menu_power_off(void)
 {
@@ -513,9 +508,6 @@ MENUITEM_FUNCTION(reboot_item, 0, "Reboot",
 
 MAKE_MENU(info_menu, ID2P(LANG_SYSTEM), 0, Icon_System_menu,
           &show_info_item,
-#if defined(INNIOASIS_Y1)
-          &y1_cpu_mode_item,
-#endif
           &show_credits_item,
           &show_runtime_item, &show_legal_item, &debug_menu_item
 #ifdef HAVE_SW_POWEROFF

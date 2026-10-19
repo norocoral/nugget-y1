@@ -422,8 +422,19 @@ MENUITEM_SETTING(governor, &global_settings.governor, NULL);
 #if defined(INNIOASIS_Y1)
 #include "cpufreq-y1.h"
 MENUITEM_SETTING_W_TEXT(y1_screen_res_setting, &global_settings.y1_screen_resolution, "Screen Resolution", NULL);
+MENUITEM_SETTING_W_TEXT(y1_always_on_screen_item, &global_settings.always_on_screen, "Always On Screen", NULL);
+MENUITEM_SETTING_W_TEXT(y1_cpu_mode_setting, &global_settings.y1_cpu_mode, "CPU Frequency Mode", NULL);
 MENUITEM_SETTING_W_TEXT(y1_cpu_cores_setting, &global_settings.y1_cpu_cores, "Second CPU Core", NULL);
-MENUITEM_SETTING_W_TEXT(y1_cpu_mode_setting, &global_settings.y1_cpu_mode, "CPU Performance", NULL);
+
+MAKE_MENU(nugget_device_menu, "Device", 0, Icon_NOICON,
+          &y1_screen_res_setting,
+          &y1_always_on_screen_item,
+          &y1_cpu_mode_setting,
+          &y1_cpu_cores_setting);
+
+MAKE_MENU(nugget_menu, "Nugget", 0, Icon_NOICON,
+          &nugget_device_menu);
+
 #ifdef HAVE_SW_POWEROFF
 static int menu_power_off_settings(void)
 {
@@ -516,9 +527,6 @@ MAKE_MENU(system_menu, ID2P(LANG_SYSTEM),
             &governor,
 #endif
 #if defined(INNIOASIS_Y1)
-            &y1_screen_res_setting,
-            &y1_cpu_cores_setting,
-            &y1_cpu_mode_setting,
 #ifdef HAVE_SW_POWEROFF
             &power_off_setting_item,
             &reboot_setting_item,
@@ -875,6 +883,9 @@ MENUITEM_FUNCTION_W_PARAM(browse_langs, 0, ID2P(LANG_LANGUAGE),
 
 MAKE_MENU(settings_menu_item, ID2P(LANG_GENERAL_SETTINGS), 0,
           Icon_General_settings_menu,
+#if defined(INNIOASIS_Y1)
+          &nugget_menu,
+#endif
           &wps_settings,
           &playlist_settings, &file_menu,
 #ifdef HAVE_TAGCACHE
