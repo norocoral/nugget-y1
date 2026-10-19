@@ -19,11 +19,13 @@
  * KIND, either express or implied.
  *
  ****************************************************************************/
+#define RB_FILESYSTEM_OS
 #include <poll.h>
 #include <errno.h>
 #include <stdio.h>
 #include <unistd.h>
 #include <sys/types.h>
+#include <sys/ioctl.h>
 #include <linux/input.h>
 #include <fcntl.h>
 #include <string.h>
@@ -54,12 +56,15 @@
 
 static int num_devices = 0;
 static struct pollfd poll_fds[NR_POLL_DESC];
+static bool is_accdet_dev[NR_POLL_DESC];
 
 void button_add_input_device(int i)
 {
     int fd = poll_fds[i].fd;
     if (fd >= 0)
         close(fd);
+
+    is_accdet_dev[i] = false;
 
     char path[32];
     snprintf(path, sizeof(path), "/dev/input/event%d", i);
@@ -72,8 +77,37 @@ void button_add_input_device(int i)
         if (num_devices <= i)
             num_devices = i + 1;
 
-        char logmsg[128];
-        snprintf(logmsg, sizeof(logmsg), "[button-devinput] Opened %s (fd=%d)\n", path, fd);
+        char dev_name[64];
+        memset(dev_name, 0, sizeof(dev_name));
+        if (ioctl(fd, EVIOCGNAME(sizeof(dev_name) - 1), dev_name) < 0)
+        {
+            char sys_path[64];
+            snprintf(sys_path, sizeof(sys_path), "/sys/class/input/event%d/device/name", i);
+            int sfd = open(sys_path, O_RDONLY | O_CLOEXEC);
+            if (sfd >= 0) {
+                ssize_t r = read(sfd, dev_name, sizeof(dev_name) - 1);
+                if (r > 0) {
+                    dev_name[r] = '\0';
+                    for (ssize_t k = 0; k < r; k++) {
+                        if (dev_name[k] == '\n' || dev_name[k] == '\r')
+                            dev_name[k] = '\0';
+                    }
+                }
+                close(sfd);
+            }
+        }
+
+        if (strstr(dev_name, "ACCDET") != NULL ||
+            strstr(dev_name, "accdet") != NULL ||
+            strstr(dev_name, "headset") != NULL ||
+            strstr(dev_name, "Headset") != NULL)
+        {
+            is_accdet_dev[i] = true;
+        }
+
+        char logmsg[160];
+        snprintf(logmsg, sizeof(logmsg), "[button-devinput] Opened %s (name='%s', accdet=%d, fd=%d)\n",
+                 path, dev_name, is_accdet_dev[i] ? 1 : 0, fd);
         int kfd = open("/dev/kmsg", O_WRONLY | O_CLOEXEC);
         if (kfd >= 0) {
             write(kfd, logmsg, strlen(logmsg));
@@ -226,7 +260,7 @@ int button_read_device(BDATA)
                     switch(event.type) {
                     case EV_KEY: {
 #if defined(HAVE_CUSTOM_KEY_HANDLER)
-                        if (button_handle_key_event(event.code, event.value))
+                        if (button_handle_key_event(event.code, event.value, is_accdet_dev[i]))
                             break;
 #endif
                         /* map linux event code to rockbox button bitmap */
@@ -304,8 +338,21 @@ int button_read_device(BDATA)
     }
 
 #ifdef HAVE_SCROLLWHEEL
-    /* Reset backlight and poweroff timers */
+    /* Reset backlight and poweroff timers only when not in HOLD / sleep mode */
     if (wheel_ticks) {
+#if defined(INNIOASIS_Y1)
+        extern bool y1_is_display_power_saving(void);
+        extern bool is_keys_locked(void);
+        if (is_backlight_on(false) && !y1_is_display_power_saving() && !is_keys_locked()) {
+#ifdef HAVE_BACKLIGHT
+            backlight_on();
+#endif
+#ifdef HAVE_BUTTON_LIGHT
+            buttonlight_on();
+#endif
+            reset_poweroff_timer();
+        }
+#else
 #ifdef HAVE_BACKLIGHT
         backlight_on();
 #endif
@@ -313,6 +360,7 @@ int button_read_device(BDATA)
         buttonlight_on();
 #endif
         reset_poweroff_timer();
+#endif
     }
 
     if (wheel_ticks > 0)

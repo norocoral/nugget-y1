@@ -36,11 +36,16 @@
 #define POWEROFF_BUTTON BUTTON_POWER
 #define POWEROFF_COUNT  25
 
+#include <stdbool.h>
+#include <stdint.h>
+
 #define HAVE_CUSTOM_KEY_HANDLER
 int button_map(int keycode);
-bool button_handle_key_event(int keycode, int value);
+bool button_handle_key_event(int keycode, int value, bool is_accdet);
 void y1_mfb_init(void);
 bool headphones_inserted(void);
+int y1_read_pmic_reg(uint32_t offset);
+void y1_write_pmic_reg(uint32_t offset, uint32_t val, uint32_t mask);
 
 #endif /* _BUTTON_TARGET_H_ */
 

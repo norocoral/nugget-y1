@@ -61,12 +61,30 @@ int lang_load(const char *filename, const unsigned char *builtin,
               unsigned int max_id)
 {
     int lang_size;
-    int fd = open(filename, O_RDONLY);
+    int fd;
     int retcode=0;
     unsigned char lang_header[HEADER_SIZE];
     unsigned char sub_header[SUBHEADER_SIZE];
     unsigned int id, foffset;
 
+    if (!filename || !filename[0]) {
+        lang_init(builtin, dest, max_id);
+        lang_options = 0;
+        return 0;
+    }
+
+    /* Built-in English is always authoritative and up-to-date */
+    const char *base = strrchr(filename, '/');
+    base = base ? (base + 1) : filename;
+    if (user_num == 0 &&
+        (strcasecmp(base, "english.lng") == 0 || strcasecmp(base, "english") == 0))
+    {
+        lang_init(builtin, dest, max_id);
+        lang_options = 0;
+        return 0;
+    }
+
+    fd = open(filename, O_RDONLY);
     if(fd < 0)
         return 1;
 
@@ -74,6 +92,7 @@ int lang_load(const char *filename, const unsigned char *builtin,
        ((lang_header[0] == LANGUAGE_COOKIE) &&
        (lang_header[1] == LANGUAGE_VERSION) &&
        (lang_header[2] == TARGET_ID))) {
+        bool legacy_id_shift = ((lang_header[3] & 0x80) == 0);
         /* jump to the proper entry in the table of subheaders */
         lseek(fd, user_num * SUBHEADER_SIZE, SEEK_CUR);
         if (read(fd, sub_header, SUBHEADER_SIZE) != SUBHEADER_SIZE)
@@ -96,6 +115,11 @@ int lang_load(const char *filename, const unsigned char *builtin,
             while(lang_size>3) {
                 id = ((buffer[0]<<8) | buffer[1]); /* get two-byte id */
                 buffer += 2;                       /* pass the id */
+                if (legacy_id_shift && user_num == 0 && id >= 113 && id < 0x8000) {
+                    /* .lng files built before HAVE_HEADPHONE_DETECTION were missing
+                       3 IDs (113..115: LANG_HEADPHONE_UNPLUG*) */
+                    id += 3;
+                }
                 if(id < max_id) {
 #if 0
                     DEBUGF("%2x New: %30s ", id, buffer);
@@ -121,7 +145,7 @@ int lang_load(const char *filename, const unsigned char *builtin,
         retcode = 3;
     }
     close(fd);
-    lang_options = retcode ? 0 : lang_header[3];
+    lang_options = retcode ? 0 : (lang_header[3] & 0x7f);
     return retcode;
 }
 

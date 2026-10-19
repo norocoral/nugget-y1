@@ -121,21 +121,21 @@ static void update_non_static(void)
 
 void wps_do_action(enum wps_do_action_type action, bool updatewps)
 {
+    struct wps_state *state = get_wps_state();
     if (action == WPS_PLAYPAUSE) /* toggle the status */
     {
-        struct wps_state *state = get_wps_state();
-        if (state->paused)
+        if (state->paused || (audio_status() & AUDIO_STATUS_PAUSE))
             action = WPS_PLAY;
-
-        state->paused = !state->paused;
     }
 
     if (action == WPS_PLAY) /* unpause_action */
     {
+        state->paused = false;
         audio_resume();
     }
     else /* WPS_PAUSE pause_action */
     {
+        state->paused = true;
         audio_pause();
 
         if (global_settings.pause_rewind) {

@@ -361,16 +361,34 @@ static inline bool action_poll_button(action_last_t *last, action_cur_t *cur)
         { /* remember the button for button eating on context change */
             last->wait_for_release = false;
             last->button = *button;
+            *button = ACTION_NONE;
         }
-
-        *button = ACTION_NONE;
+#ifdef HAVE_SCROLLWHEEL
+        else if ((*button & (BUTTON_SCROLL_BACK | BUTTON_SCROLL_FWD)) != 0)
+        {
+            last->wait_for_release = false;
+            last->button |= BUTTON_REL;
+            ret = false;
+        }
+#endif
+        else if (!has_flag(*button, BUTTON_REPEAT) && button_status() == (*button & ~BUTTON_REL))
+        {
+            /* Previous button was already released; this is a brand new press */
+            last->wait_for_release = false;
+            last->button |= BUTTON_REL;
+            ret = false;
+        }
+        else
+        {
+            *button = ACTION_NONE;
+        }
     }
 #ifdef HAVE_SCROLLWHEEL
    /* *********************************************
     * Scrollwheel doesn't generate release events
     * further processing needed
     */
-    else if ((last->button & (BUTTON_SCROLL_BACK | BUTTON_SCROLL_FWD)) != 0)
+    else if (((last->button | *button) & (BUTTON_SCROLL_BACK | BUTTON_SCROLL_FWD)) != 0)
     {
         ret = false;
     }
@@ -385,9 +403,18 @@ static inline bool action_poll_button(action_last_t *last, action_cur_t *cur)
         {
             last->button = *button;
             last->action = ACTION_NONE;
+            *button = ACTION_NONE;
         }
-
-        *button = ACTION_NONE; /* "safest" return value */
+        else if (!has_flag(*button, BUTTON_REPEAT))
+        {
+            /* Previous button release was already cleared; allow new press in new context */
+            last->button |= BUTTON_REL;
+            ret = false;
+        }
+        else
+        {
+            *button = ACTION_NONE; /* "safest" return value */
+        }
     }
    /* ****************************
     * regular button press,
@@ -759,7 +786,8 @@ static inline void action_code_lookup(action_last_t *last, action_cur_t *cur)
 static inline void do_key_lock(bool lock)
 {
     action_last.keys_locked = lock;
-    action_last.button = BUTTON_NONE;
+    action_last.wait_for_release = false;
+    action_last.button = BUTTON_NONE | BUTTON_REL;
     button_clear_queue();
 #if defined(HAVE_TOUCHPAD) || defined(HAVE_TOUCHSCREEN)
  /* disable touch device on keylock if std behavior or selected disable touch */
@@ -768,6 +796,14 @@ static inline void do_key_lock(bool lock)
     {
         button_enable_touch(!lock);
     }
+#endif
+}
+
+void y1_enter_hold_mode(void)
+{
+    do_key_lock(true);
+#ifndef BOOTLOADER
+    skin_request_update_locked(true);
 #endif
 }
 
@@ -915,14 +951,14 @@ static inline void do_softlock(action_last_t *last, action_cur_t *cur)
             skin_request_update_locked(true);
 #endif
             cur->action = ACTION_NONE;
-            last->button = BUTTON_NONE;
+            last->button = BUTTON_NONE | BUTTON_REL;
             return;
         }
         else
         {
             /* If screen is sleeping, power button does not wake (only Center unholds) */
             cur->action = ACTION_NONE;
-            last->button = BUTTON_NONE;
+            last->button = BUTTON_NONE | BUTTON_REL;
             return;
         }
 #else
@@ -949,6 +985,11 @@ static inline void do_softlock(action_last_t *last, action_cur_t *cur)
 
         if (sl_activate)
         { /*All non-std softlock options are set to 0 if advanced sl is disabled*/
+#if defined(INNIOASIS_Y1)
+            /* On Y1 in HOLD mode, blocked buttons/wheel spins never wake the screen */
+            notify_user = false;
+            action = ACTION_NONE;
+#else
 #ifdef HAVE_BACKLIGHT
             if (Y1_IS_SCREEN_SLEEPING())
             {
@@ -965,6 +1006,7 @@ static inline void do_softlock(action_last_t *last, action_cur_t *cur)
             }
             else
                 action = ACTION_NONE;
+#endif
         }
         else if (!filtered)
         { /* catch blocked actions on fast repeated presses */
@@ -972,7 +1014,7 @@ static inline void do_softlock(action_last_t *last, action_cur_t *cur)
         }
      }/* keys_locked */
 
-#ifdef BUTTON_POWER /*always notify if power button pressed while keys locked*/
+#if defined(BUTTON_POWER) && !defined(INNIOASIS_Y1) /*always notify if power button pressed while keys locked*/
     notify_user |= (has_flag(cur->button, BUTTON_POWER|BUTTON_REL)
                     && last->keys_locked
 #ifdef HAVE_BACKLIGHT
@@ -1008,7 +1050,7 @@ static inline void do_softlock(action_last_t *last, action_cur_t *cur)
         }
 
         action       = ACTION_REDRAW;
-        last->button = BUTTON_NONE;
+        last->button = BUTTON_NONE | BUTTON_REL;
         button_clear_queue();
     }
 
@@ -1094,6 +1136,15 @@ static inline int do_backlight(action_last_t *last, action_cur_t *cur, int actio
     (void) cur;
     return action;
 #else
+#if defined(INNIOASIS_Y1)
+    if ((action & (SYS_EVENT|BUTTON_MULTIMEDIA)) == 0 &&
+        (last->keys_locked || Y1_IS_SCREEN_SLEEPING()))
+    {
+        /* On Y1, when in HOLD mode or screen is sleeping, non-center buttons NEVER wake backlight */
+        action_handle_backlight(false, true);
+        return action;
+    }
+#endif
     if (!has_flag(last->backlight_mask, SEL_ACTION_ENABLED)
         || (action & (SYS_EVENT|BUTTON_MULTIMEDIA)) != 0
         || action == ACTION_REDRAW)
@@ -1141,7 +1192,7 @@ static inline int do_backlight(action_last_t *last, action_cur_t *cur, int actio
         if (has_flag(last->backlight_mask, SEL_ACTION_FFKEYPRESS) && bl_is_off)
         {
             action       = ACTION_NONE;
-            last->button = BUTTON_NONE;
+            last->button = BUTTON_NONE | BUTTON_REL;
         }
     }
     else
@@ -1188,15 +1239,20 @@ static int get_action_worker(action_last_t *last, action_cur_t *cur)
 #ifdef HAVE_BACKLIGHT
     bool bl_off = Y1_IS_SCREEN_SLEEPING();
 
-    if (bl_off)
+    if (bl_off && !last->keys_locked)
     {
-        /* Screen is sleeping: device is automatically in HOLD mode */
         last->keys_locked = true;
+#ifndef BOOTLOADER
+        skin_request_update_locked(true);
+#endif
+    }
 
+    if (bl_off || last->keys_locked)
+    {
         int raw_btn = cur->button & ~(BUTTON_REPEAT | BUTTON_REL);
         bool is_rel = (cur->button & BUTTON_REL) != 0;
 
-        /* Just press the center button to UNHOLD */
+        /* Only the Center button (BUTTON_SELECT) wakes the device and exits HOLD mode */
         if (raw_btn == BUTTON_SELECT)
         {
             if (!is_rel)
@@ -1207,8 +1263,14 @@ static int get_action_worker(action_last_t *last, action_cur_t *cur)
                     y1_set_display_power_saving(false);
                 }
 #endif
+                backlight_on_ignore(false, 0);
+#ifdef HAVE_BUTTON_LIGHT
+                buttonlight_on_ignore(false, 0);
+#endif
                 backlight_on();
+#ifdef HAVE_BUTTON_LIGHT
                 buttonlight_on();
+#endif
                 reset_poweroff_timer();
                 last->keys_locked = false;
                 do_key_lock(false);
@@ -1217,7 +1279,7 @@ static int get_action_worker(action_last_t *last, action_cur_t *cur)
 #endif
                 center_unheld_screen = true;
                 cur->action = ACTION_NONE;
-                last->button = BUTTON_NONE;
+                last->button = BUTTON_NONE | BUTTON_REL;
                 return ACTION_NONE;
             }
             else
@@ -1227,7 +1289,7 @@ static int get_action_worker(action_last_t *last, action_cur_t *cur)
                 {
                     center_unheld_screen = false;
                     cur->action = ACTION_NONE;
-                    last->button = BUTTON_NONE;
+                    last->button = BUTTON_NONE | BUTTON_REL;
                     return ACTION_NONE;
                 }
             }
@@ -1235,14 +1297,14 @@ static int get_action_worker(action_last_t *last, action_cur_t *cur)
     }
     else
     {
-        /* Backlight is ON */
+        /* Backlight is ON and keys are not locked */
         if (center_unheld_screen)
         {
             if ((cur->button & BUTTON_REL) && ((cur->button & ~BUTTON_REL) == BUTTON_SELECT))
             {
                 center_unheld_screen = false;
                 cur->action = ACTION_NONE;
-                last->button = BUTTON_NONE;
+                last->button = BUTTON_NONE | BUTTON_REL;
                 return ACTION_NONE;
             }
             center_unheld_screen = false;
@@ -1387,9 +1449,14 @@ bool action_userabort(int timeout)
 
 void action_wait_for_release(void)
 {
-    if (!(action_last.button & BUTTON_REL))
-        action_last.wait_for_release = true;
     button_clear_pressed();
+    if (!(action_last.button & BUTTON_REL) && button_status() != 0)
+        action_last.wait_for_release = true;
+    else
+    {
+        action_last.wait_for_release = false;
+        action_last.button |= BUTTON_REL;
+    }
 }
 
 int get_action(int context, int timeout)
@@ -1568,11 +1635,12 @@ bool is_keys_locked(void)
 /* Enable selected actions to bypass a locked state */
 void set_selective_softlock_actions(bool selective, unsigned int mask)
 {
-    action_last.keys_locked = false;
+    if (!Y1_IS_SCREEN_SLEEPING())
+        action_last.keys_locked = false;
 #if defined(HAVE_TOUCHPAD) || defined(HAVE_TOUCHSCREEN)
     button_enable_touch(true);
 #endif
-    if (selective)
+    if (selective || (mask & (SEL_ACTION_VOL | SEL_ACTION_PLAY | SEL_ACTION_SEEK | SEL_ACTION_SKIP)))
     {
         action_last.softlock_mask = mask | SEL_ACTION_ENABLED;
     }

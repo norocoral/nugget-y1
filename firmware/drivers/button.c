@@ -34,8 +34,9 @@
 #include "powermgmt.h"
 #if defined(INNIOASIS_Y1)
 extern bool y1_is_display_power_saving(void);
+extern bool is_keys_locked(void);
 static inline bool y1_screen_sleeping(void) {
-    return (!is_backlight_on(false) || y1_is_display_power_saving());
+    return (!is_backlight_on(false) || y1_is_display_power_saving() || is_keys_locked());
 }
 #endif
 #if defined(HAVE_SDL)

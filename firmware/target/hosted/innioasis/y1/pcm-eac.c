@@ -10,6 +10,7 @@
  * MediaTek MT6572 direct /dev/eac PCM Sink Driver
  ****************************************************************************/
 
+#define RB_FILESYSTEM_OS
 #include "autoconf.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -82,6 +83,23 @@ static inline uint32_t get_anareg(int fd, uint32_t offset)
     if (ioctl(fd, AUDDRV_GET_ANAREG, &reg) == 0)
         return reg.value;
     return 0;
+}
+
+int y1_read_pmic_reg(uint32_t offset)
+{
+    if (eac_fd < 0)
+        return -1;
+    struct Register_Control reg = { offset, 0, ~0U };
+    if (ioctl(eac_fd, AUDDRV_GET_ANAREG, &reg) == 0)
+        return (int)reg.value;
+    return -1;
+}
+
+void y1_write_pmic_reg(uint32_t offset, uint32_t val, uint32_t mask)
+{
+    if (eac_fd < 0)
+        return;
+    set_anareg(eac_fd, offset, val, mask);
 }
 
 static inline void top_ctl_trigger(int fd)

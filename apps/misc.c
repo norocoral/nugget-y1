@@ -817,6 +817,7 @@ long default_event_handler_ex(long event, void (*callback)(void *), void *parame
         case BUTTON_MULTIMEDIA_VOLUME_DOWN:
         case BUTTON_MULTIMEDIA_VOLUME_DOWN|BUTTON_REPEAT:
             adjust_volume(-1);
+            return event;
         case BUTTON_MULTIMEDIA_FFWD:
         {
             struct mp3entry *id3 = audio_current_track();

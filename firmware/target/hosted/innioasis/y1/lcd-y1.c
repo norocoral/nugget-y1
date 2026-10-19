@@ -63,6 +63,10 @@ static int red_shift = 16;
 static int green_shift = 8;
 static int blue_shift = 0;
 
+static uint32_t rgb565_lut[65536] __attribute__((aligned(64)));
+static bool lut_inited = false;
+static uint32_t sw_backbuf[480 * 360] __attribute__((aligned(64)));
+
 fb_data *framebuffer = NULL; /* global variable referenced by lcd-memframe / lcd-target.h */
 
 static void klog(const char *msg)
@@ -75,7 +79,7 @@ static void klog(const char *msg)
     write(1, msg, strlen(msg));
 }
 
-static inline uint32_t rgb565_to_xrgb8888(fb_data px)
+static inline uint32_t rgb565_to_xrgb8888_calc(uint32_t px)
 {
     uint32_t r = (px >> 11) & 0x1F;
     uint32_t g = (px >> 5) & 0x3F;
@@ -86,7 +90,32 @@ static inline uint32_t rgb565_to_xrgb8888(fb_data px)
     uint32_t g8 = (g << 2) | (g >> 4);
     uint32_t b8 = (b << 3) | (b >> 2);
 
-    return 0xFF000000 | (r8 << red_shift) | (g8 << green_shift) | (b8 << blue_shift);
+    return 0xFF000000U | (r8 << red_shift) | (g8 << green_shift) | (b8 << blue_shift);
+}
+
+static void init_rgb565_lut(void)
+{
+    for (uint32_t i = 0; i < 65536; i++) {
+        rgb565_lut[i] = rgb565_to_xrgb8888_calc(i);
+    }
+    lut_inited = true;
+}
+
+static inline uint32_t rgb565_to_xrgb8888(fb_data px)
+{
+    return rgb565_lut[(uint16_t)px];
+}
+
+/* Fast SWAR 24-bit RGB888 50/50 pixel average */
+static inline uint32_t avg_xrgb8888(uint32_t a, uint32_t b)
+{
+    return (a & b) + (((a ^ b) & 0xFEFEFEFEU) >> 1);
+}
+
+/* Fast SWAR 16-bit RGB565 50/50 pixel average */
+static inline uint16_t avg_rgb565(uint16_t a, uint16_t b)
+{
+    return (uint16_t)((a & b) + (((a ^ b) & 0xF7DEU) >> 1));
 }
 
 static void redraw_hw(void)
@@ -140,6 +169,8 @@ void lcd_init_device(void)
         snprintf(logbuf, sizeof(logbuf), "[lcd-y1] 32bpp shifts: R=%d G=%d B=%d\n", red_shift, green_shift, blue_shift);
         klog(logbuf);
     }
+
+    init_rgb565_lut();
 
     /* Unblank the display hardware */
     ioctl(fb_fd, FBIOBLANK, VESA_NO_BLANKING);
@@ -229,31 +260,18 @@ bool y1_is_display_power_saving(void)
 }
 
 static int y1_resolution_mode = 0; /* 0 = Normal (480x360), 1 = Classic (320x240 stretched) */
-static uint16_t scale_x[480];
-static uint16_t scale_y[360];
-static bool tables_inited = false;
-
-static void init_scale_tables(void)
-{
-    if (tables_inited) return;
-    for (int x = 0; x < 480; x++) {
-        scale_x[x] = (x * 2) / 3; /* 0..479 -> 0..319 */
-    }
-    for (int y = 0; y < 360; y++) {
-        scale_y[y] = (y * 2) / 3; /* 0..359 -> 0..239 */
-    }
-    tables_inited = true;
-}
 
 void y1_set_resolution_setting(int mode)
 {
     y1_resolution_mode = mode;
-    init_scale_tables();
 }
 
 void lcd_update(void)
 {
-    lcd_update_rect(0, 0, LCD_WIDTH, LCD_HEIGHT);
+    if (y1_resolution_mode == 1)
+        lcd_update_rect(0, 0, 320, 240);
+    else
+        lcd_update_rect(0, 0, LCD_WIDTH, LCD_HEIGHT);
 }
 
 void lcd_update_rect(int x, int y, int width, int height)
@@ -263,6 +281,10 @@ void lcd_update_rect(int x, int y, int width, int height)
 #ifdef HAVE_LCD_ENABLE
     if (!lcd_active()) return;
 #endif
+
+    if (!lut_inited) {
+        init_rgb565_lut();
+    }
 
     if (y1_display_powersave) {
         if (!y1_should_always_on()) {
@@ -277,6 +299,11 @@ void lcd_update_rect(int x, int y, int width, int height)
             return;
         }
         last_powersave_tick = current_tick;
+        /* In 1 FPS AOD mode, update the full screen cleanly */
+        x = 0;
+        y = 0;
+        width = (y1_resolution_mode == 1) ? 320 : LCD_WIDTH;
+        height = (y1_resolution_mode == 1) ? 240 : LCD_HEIGHT;
     }
 
     int stride = finfo.line_length;
@@ -288,29 +315,102 @@ void lcd_update_rect(int x, int y, int width, int height)
     if (!src_base) return;
 
     if (y1_resolution_mode == 1) {
-        init_scale_tables();
+        /* Clamp to 320x240 Classic bounds */
+        if (x < 0) { width += x; x = 0; }
+        if (y < 0) { height += y; y = 0; }
+        if (x + width > 320) width = 320 - x;
+        if (y + height > 240) height = 240 - y;
+        if (width <= 0 || height <= 0) return;
+
+        /* Align dirty vertical range to 2-row source blocks (3-row destination blocks) */
+        int sy0 = (y / 2) * 2;
+        int sy1 = ((y + height + 1) / 2) * 2;
+        if (sy1 > 240) sy1 = 240;
+        int dy0 = (sy0 * 3) / 2;
+        int dy1 = (sy1 * 3) / 2;
+
         if (vinfo.bits_per_pixel == 32) {
-            for (int r = 0; r < 360; r++) {
-                const fb_data *src_row = src_base + scale_y[r] * LCD_WIDTH;
-                uint32_t *dst_row = (uint32_t *)(mapped_fb + r * stride);
-                for (int c = 0; c < 480; c++) {
-                    dst_row[c] = rgb565_to_xrgb8888(src_row[scale_x[c]]);
+            /* Smooth 2x2 -> 3x3 area-averaged bilinear interpolation in cached backbuffer */
+            for (int sy = sy0, dy = dy0; sy < sy1; sy += 2, dy += 3) {
+                const fb_data *srow0 = src_base + sy * LCD_WIDTH;
+                const fb_data *srow1 = src_base + (sy + 1) * LCD_WIDTH;
+                uint32_t *drow0 = &sw_backbuf[dy * 480];
+                uint32_t *drow1 = &sw_backbuf[(dy + 1) * 480];
+                uint32_t *drow2 = &sw_backbuf[(dy + 2) * 480];
+
+                for (int sx = 0, dx = 0; sx < 320; sx += 2, dx += 3) {
+                    uint32_t t0 = rgb565_lut[(uint16_t)srow0[sx]];
+                    uint32_t t1 = rgb565_lut[(uint16_t)srow0[sx + 1]];
+                    uint32_t b0 = rgb565_lut[(uint16_t)srow1[sx]];
+                    uint32_t b1 = rgb565_lut[(uint16_t)srow1[sx + 1]];
+
+                    uint32_t tm = avg_xrgb8888(t0, t1);
+                    uint32_t bm = avg_xrgb8888(b0, b1);
+
+                    drow0[dx]     = t0;
+                    drow0[dx + 1] = tm;
+                    drow0[dx + 2] = t1;
+
+                    drow1[dx]     = avg_xrgb8888(t0, b0);
+                    drow1[dx + 1] = avg_xrgb8888(tm, bm);
+                    drow1[dx + 2] = avg_xrgb8888(t1, b1);
+
+                    drow2[dx]     = b0;
+                    drow2[dx + 1] = bm;
+                    drow2[dx + 2] = b1;
+                }
+            }
+
+            /* Burst-copy updated rows from cached RAM backbuffer to hardware framebuffer */
+            if (stride == 480 * 4) {
+                memcpy(mapped_fb + dy0 * stride,
+                       &sw_backbuf[dy0 * 480],
+                       (size_t)(dy1 - dy0) * (480 * 4));
+            } else {
+                for (int r = dy0; r < dy1; r++) {
+                    memcpy(mapped_fb + r * stride, &sw_backbuf[r * 480], 480 * 4);
                 }
             }
         } else {
-            for (int r = 0; r < 360; r++) {
-                const fb_data *src_row = src_base + scale_y[r] * LCD_WIDTH;
-                uint16_t *dst_row = (uint16_t *)(mapped_fb + r * stride);
-                for (int c = 0; c < 480; c++) {
-                    dst_row[c] = src_row[scale_x[c]];
+            uint16_t *sw_backbuf16 = (uint16_t *)sw_backbuf;
+            for (int sy = sy0, dy = dy0; sy < sy1; sy += 2, dy += 3) {
+                const fb_data *srow0 = src_base + sy * LCD_WIDTH;
+                const fb_data *srow1 = src_base + (sy + 1) * LCD_WIDTH;
+                uint16_t *drow0 = &sw_backbuf16[dy * 480];
+                uint16_t *drow1 = &sw_backbuf16[(dy + 1) * 480];
+                uint16_t *drow2 = &sw_backbuf16[(dy + 2) * 480];
+
+                for (int sx = 0, dx = 0; sx < 320; sx += 2, dx += 3) {
+                    uint16_t t0 = (uint16_t)srow0[sx];
+                    uint16_t t1 = (uint16_t)srow0[sx + 1];
+                    uint16_t b0 = (uint16_t)srow1[sx];
+                    uint16_t b1 = (uint16_t)srow1[sx + 1];
+
+                    uint16_t tm = avg_rgb565(t0, t1);
+                    uint16_t bm = avg_rgb565(b0, b1);
+
+                    drow0[dx]     = t0;
+                    drow0[dx + 1] = tm;
+                    drow0[dx + 2] = t1;
+
+                    drow1[dx]     = avg_rgb565(t0, b0);
+                    drow1[dx + 1] = avg_rgb565(tm, bm);
+                    drow1[dx + 2] = avg_rgb565(t1, b1);
+
+                    drow2[dx]     = b0;
+                    drow2[dx + 1] = bm;
+                    drow2[dx + 2] = b1;
                 }
+            }
+            for (int r = dy0; r < dy1; r++) {
+                memcpy(mapped_fb + r * stride, &sw_backbuf16[r * 480], 480 * 2);
             }
         }
         redraw_hw();
         return;
     }
 
-    /* Clamp boundaries */
+    /* Clamp boundaries for Normal (480x360) mode */
     if (x < 0) { width += x; x = 0; }
     if (y < 0) { height += y; y = 0; }
     if (x + width > LCD_WIDTH) width = LCD_WIDTH - x;
@@ -318,12 +418,24 @@ void lcd_update_rect(int x, int y, int width, int height)
     if (width <= 0 || height <= 0) return;
 
     if (vinfo.bits_per_pixel == 32) {
-        /* Convert 16-bit RGB565 rockbox buffer to 32-bit ARGB8888 hardware buffer */
+        /* Convert 16-bit RGB565 rockbox buffer into cached 32-bit backbuffer using LUT */
         for (int r = y; r < y + height; r++) {
             const fb_data *src_row = src_base + r * LCD_WIDTH + x;
-            uint32_t *dst_row = (uint32_t *)(mapped_fb + r * stride + x * 4);
+            uint32_t *dst_row = &sw_backbuf[r * 480 + x];
             for (int c = 0; c < width; c++) {
-                dst_row[c] = rgb565_to_xrgb8888(src_row[c]);
+                dst_row[c] = rgb565_lut[(uint16_t)src_row[c]];
+            }
+        }
+        /* Burst-copy from cached backbuffer to hardware framebuffer to prevent tearing */
+        if (x == 0 && width == 480 && stride == 480 * 4) {
+            memcpy(mapped_fb + y * stride,
+                   &sw_backbuf[y * 480],
+                   (size_t)height * (480 * 4));
+        } else {
+            for (int r = y; r < y + height; r++) {
+                memcpy(mapped_fb + r * stride + x * 4,
+                       &sw_backbuf[r * 480 + x],
+                       (size_t)width * 4);
             }
         }
     } else {

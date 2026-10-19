@@ -86,6 +86,7 @@ static int last_bl = -1;
 #if defined(BACKLIGHT_INNIOASIS)
 #include "cpufreq-y1.h"
 #include "lcd-target.h"
+extern void y1_enter_hold_mode(void);
 static int bl_fd = -1;
 static void write_bl_hw(int val)
 {
@@ -130,6 +131,8 @@ void backlight_hw_off(void)
     int target_bl = y1_should_always_on() ? BACKLIGHT_POWER_REDUCED : BACKLIGHT_POWER_OFF;
     if (last_bl != target_bl) {
         last_bl = target_bl;
+        /* Apply HOLD mode immediately when screen goes idle */
+        y1_enter_hold_mode();
         y1_set_screen_off_power_mode(true);
         if (target_bl == BACKLIGHT_POWER_REDUCED) {
             /* Always On Screen mode:

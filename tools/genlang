@@ -215,7 +215,7 @@ sub readenglish {
     my @idnum = ((0));       # start with a true number
     my @vidnum = ((0x8001)); # first voice id
 
-    if ($binary and file_is_newer("$binpath/english.list", $english)) {
+    if (0 and $binary and file_is_newer("$binpath/english.list", $english)) {
         open(ENG, "<$binpath/english.list") ||
             die "Error: can't open $binpath/english.list";
         while (<ENG>) {
@@ -605,7 +605,7 @@ elsif($binary || $binvoice) {
         open(OUTF, ">$binary") or die "Error: Can't create $binary";
         binmode OUTF;
         printf OUTF ("%c%c%c%c", $LANGUAGE_COOKIE, $LANGUAGE_VERSION, $target_id,
-            $langoptions); # magic lang file header
+            ($langoptions | 0x80)); # magic lang file header (0x80 = synced IDs)
     }
     if($binvoice) {
         open(OUTV, ">$binvoice") or die "Error: Can't create $binary";
@@ -726,7 +726,7 @@ if($verbose) {
     }
 }
 
-if ($binary and !file_is_newer("$binpath/english.list", $english)) {
+if (0 and $binary and !file_is_newer("$binpath/english.list", $english)) {
     open(ENGLIST, ">$binpath/english.list") ||
         die "Failed creating $binpath/english.list";
     for my $user (keys %users) {
