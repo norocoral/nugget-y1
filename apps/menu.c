@@ -155,6 +155,10 @@ static const char* get_menu_item_name(int selected_item,
             menu->menu_get_name_and_icon->list_get_name_data, buffer, buffer_len);
 
     type = (menu->flags&MENU_TYPE_MASK);
+    if (type == MT_SETTING_W_TEXT && (menu->flags & MENU_HAS_DESC))
+    {
+        return P2STR(menu->callback_and_desc->desc);
+    }
     if ((type == MT_SETTING) || (type == MT_SETTING_W_TEXT))
     {
         const struct settings_list *v = find_setting(menu->variable);

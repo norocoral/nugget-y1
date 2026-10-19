@@ -17302,3 +17302,157 @@
     recording_remote: "remote recording screen skin"
   </voice>
 </phrase>
+<phrase>
+  id: LANG_Y1_SCREEN_RESOLUTION
+  desc: in Settings -> Nugget -> Device
+  user: core
+  <source>
+    *: "Screen Resolution"
+  </source>
+  <dest>
+    *: "Screen Resolution"
+  </dest>
+  <voice>
+    *: "Screen Resolution"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_ALWAYS_ON_SCREEN
+  desc: in Settings -> Nugget -> Device
+  user: core
+  <source>
+    *: "Always On Display"
+  </source>
+  <dest>
+    *: "Always On Display"
+  </dest>
+  <voice>
+    *: "Always On Display"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_AOD_WPS_ONLY
+  desc: in Settings -> Nugget -> Device
+  user: core
+  <source>
+    *: "AOD: On WPS Only"
+  </source>
+  <dest>
+    *: "AOD: On WPS Only"
+  </dest>
+  <voice>
+    *: "AOD on WPS only"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_AOD_PLAYBACK_ONLY
+  desc: in Settings -> Nugget -> Device
+  user: core
+  <source>
+    *: "AOD: When Playing Only"
+  </source>
+  <dest>
+    *: "AOD: When Playing Only"
+  </dest>
+  <voice>
+    *: "AOD when playing only"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_CPU_CORES
+  desc: in Settings -> Nugget -> Device
+  user: core
+  <source>
+    *: "Second CPU Core"
+  </source>
+  <dest>
+    *: "Second CPU Core"
+  </dest>
+  <voice>
+    *: "Second CPU Core"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_HEADPHONE_REMOTE
+  desc: in Settings -> Nugget -> Device
+  user: core
+  <source>
+    *: "Headphone Controls"
+  </source>
+  <dest>
+    *: "Headphone Controls"
+  </dest>
+  <voice>
+    *: "Headphone Controls"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_MFB_SINGLE_CLICK
+  desc: in Settings -> Nugget -> Device -> Headphone Controls
+  user: core
+  <source>
+    *: "1 Click MFB"
+  </source>
+  <dest>
+    *: "1 Click MFB"
+  </dest>
+  <voice>
+    *: "One click MFB"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_MFB_DOUBLE_CLICK
+  desc: in Settings -> Nugget -> Device -> Headphone Controls
+  user: core
+  <source>
+    *: "Double Click MFB"
+  </source>
+  <dest>
+    *: "Double Click MFB"
+  </dest>
+  <voice>
+    *: "Double click MFB"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_MFB_TRIPLE_CLICK
+  desc: in Settings -> Nugget -> Device -> Headphone Controls
+  user: core
+  <source>
+    *: "Triple Click MFB"
+  </source>
+  <dest>
+    *: "Triple Click MFB"
+  </dest>
+  <voice>
+    *: "Triple click MFB"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_MFB_HOLD_2S
+  desc: in Settings -> Nugget -> Device -> Headphone Controls
+  user: core
+  <source>
+    *: "Hold MFB for 2s"
+  </source>
+  <dest>
+    *: "Hold MFB for 2s"
+  </dest>
+  <voice>
+    *: "Hold MFB for two seconds"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_MFB_HOLD_5S
+  desc: in Settings -> Nugget -> Device -> Headphone Controls
+  user: core
+  <source>
+    *: "Hold MFB for 5s"
+  </source>
+  <dest>
+    *: "Hold MFB for 5s"
+  </dest>
+  <voice>
+    *: "Hold MFB for five seconds"
+  </voice>
+</phrase>

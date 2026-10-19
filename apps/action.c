@@ -771,6 +771,16 @@ static inline void do_key_lock(bool lock)
 #endif
 }
 
+void y1_toggle_key_lock(void)
+{
+    bool lock = !action_last.keys_locked;
+    do_key_lock(lock);
+#ifndef BOOTLOADER
+    skin_request_update_locked(lock);
+#endif
+    splashf(HZ, "%s", str(lock ? LANG_KEYLOCK_ON : LANG_KEYLOCK_OFF));
+}
+
 /**********************************************
 * do_auto_softlock when user selects autolock
 * unlock_combo stored for later unlock

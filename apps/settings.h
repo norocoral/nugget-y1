@@ -933,6 +933,13 @@ struct user_settings
     int y1_cpu_cores;
     int y1_screen_resolution;
     bool always_on_screen;
+    bool aod_wps_only;
+    bool aod_playback_only;
+    int mfb_single_click;
+    int mfb_double_click;
+    int mfb_triple_click;
+    int mfb_hold_2s;
+    int mfb_hold_5s;
 #endif
 #if !defined(SIMULATOR) && !defined(USB_NONE) && (defined(HAVE_USB_ADB) || defined(HAVE_USB_POWER))
     int usb_mode;

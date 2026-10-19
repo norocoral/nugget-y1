@@ -817,11 +817,57 @@ long default_event_handler_ex(long event, void (*callback)(void *), void *parame
         case BUTTON_MULTIMEDIA_VOLUME_DOWN:
         case BUTTON_MULTIMEDIA_VOLUME_DOWN|BUTTON_REPEAT:
             adjust_volume(-1);
-            return event;
-        case BUTTON_MULTIMEDIA_REW:
         case BUTTON_MULTIMEDIA_FFWD:
-            /* not supported yet, needs to be done in the WPS */
-            return 0;
+        {
+            struct mp3entry *id3 = audio_current_track();
+            if (id3 && (audio_status() & AUDIO_STATUS_PLAY))
+            {
+                long newpos = id3->elapsed + 5000;
+                if (newpos > (long)id3->length)
+                    newpos = id3->length;
+                audio_pre_ff_rewind();
+                audio_ff_rewind(newpos);
+            }
+            return event;
+        }
+        case BUTTON_MULTIMEDIA_REW:
+        {
+            struct mp3entry *id3 = audio_current_track();
+            if (id3 && (audio_status() & AUDIO_STATUS_PLAY))
+            {
+                long newpos = (long)id3->elapsed - 5000;
+                if (newpos < 0)
+                    newpos = 0;
+                audio_pre_ff_rewind();
+                audio_ff_rewind(newpos);
+            }
+            return event;
+        }
+        case BUTTON_MULTIMEDIA_KEYLOCK:
+        {
+#if !defined(HAS_BUTTON_HOLD)
+            extern void y1_toggle_key_lock(void);
+            y1_toggle_key_lock();
+#endif
+            return event;
+        }
+        case BUTTON_MULTIMEDIA_MUTE:
+        {
+            static int saved_vol = 0;
+            static bool is_muted = false;
+            if (!is_muted)
+            {
+                saved_vol = global_status.volume;
+                sound_set_volume(sound_min(SOUND_VOLUME));
+                is_muted = true;
+            }
+            else
+            {
+                sound_set_volume(saved_vol);
+                is_muted = false;
+            }
+            return event;
+        }
 #endif
     }
     return 0;

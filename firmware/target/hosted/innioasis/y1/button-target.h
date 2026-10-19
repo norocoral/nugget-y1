@@ -36,7 +36,10 @@
 #define POWEROFF_BUTTON BUTTON_POWER
 #define POWEROFF_COUNT  25
 
+#define HAVE_CUSTOM_KEY_HANDLER
 int button_map(int keycode);
+bool button_handle_key_event(int keycode, int value);
+void y1_mfb_init(void);
 bool headphones_inserted(void);
 
 #endif /* _BUTTON_TARGET_H_ */

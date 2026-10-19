@@ -455,5 +455,6 @@ int action_get_touchscreen_press_in_vp(short *x1, short *y1, struct viewport *vp
 * from normal button events.
 */
 void action_wait_for_release(void);
+void y1_toggle_key_lock(void);
 
 #endif /* __ACTION_H__ */

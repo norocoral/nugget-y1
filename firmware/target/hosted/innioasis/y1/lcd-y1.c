@@ -28,6 +28,9 @@
 #include "backlight-target.h"
 #include "panic.h"
 #include "kernel.h"
+#include "settings.h"
+#include "misc.h"
+#include "audio.h"
 
 #ifndef VESA_NO_BLANKING
 #define VESA_NO_BLANKING 0
@@ -189,6 +192,24 @@ bool y1_is_always_on_screen(void)
     return y1_always_on_enabled;
 }
 
+bool y1_should_always_on(void)
+{
+    if (!global_settings.always_on_screen)
+        return false;
+
+    if (global_settings.aod_wps_only && get_current_activity() != ACTIVITY_WPS)
+        return false;
+
+    if (global_settings.aod_playback_only)
+    {
+        int stat = audio_status();
+        if (!((stat & AUDIO_STATUS_PLAY) && !(stat & AUDIO_STATUS_PAUSE)))
+            return false;
+    }
+
+    return true;
+}
+
 void y1_set_display_power_saving(bool enable)
 {
     y1_display_powersave = enable;
@@ -247,6 +268,11 @@ void lcd_update_rect(int x, int y, int width, int height)
 #endif
 
     if (y1_display_powersave) {
+        if (!y1_should_always_on()) {
+            y1_set_display_power_saving(false);
+            backlight_hw_off();
+            return;
+        }
         /* When display is in Always-On Screen power saving mode:
          * Rate-limit updates to at most once per second (1 FPS).
          * This saves 97% of memory bus bandwidth and GPU/DDP power consumption. */

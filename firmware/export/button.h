@@ -108,6 +108,8 @@ int button_apply_acceleration(const unsigned int data);
 #define BUTTON_MULTIMEDIA_FFWD      (BUTTON_MULTIMEDIA|0x20)
 #define BUTTON_MULTIMEDIA_VOLUME_UP   (BUTTON_MULTIMEDIA|0x40)
 #define BUTTON_MULTIMEDIA_VOLUME_DOWN (BUTTON_MULTIMEDIA|0x80)
+#define BUTTON_MULTIMEDIA_KEYLOCK     (BUTTON_MULTIMEDIA|0x100)
+#define BUTTON_MULTIMEDIA_MUTE        (BUTTON_MULTIMEDIA|0x200)
 
 #define BUTTON_MULTIMEDIA_ALL       (BUTTON_MULTIMEDIA_PLAYPAUSE| \
                                      BUTTON_MULTIMEDIA_STOP| \
@@ -116,7 +118,23 @@ int button_apply_acceleration(const unsigned int data);
                                      BUTTON_MULTIMEDIA_REW | \
                                      BUTTON_MULTIMEDIA_FFWD| \
                                      BUTTON_MULTIMEDIA_VOLUME_UP| \
-                                     BUTTON_MULTIMEDIA_VOLUME_DOWN)
+                                     BUTTON_MULTIMEDIA_VOLUME_DOWN| \
+                                     BUTTON_MULTIMEDIA_KEYLOCK| \
+                                     BUTTON_MULTIMEDIA_MUTE)
+
+enum mfb_action {
+    MFB_ACTION_PLAYPAUSE = 0,
+    MFB_ACTION_NEXT,
+    MFB_ACTION_PREV,
+    MFB_ACTION_VOL_UP,
+    MFB_ACTION_VOL_DOWN,
+    MFB_ACTION_FFWD,
+    MFB_ACTION_REW,
+    MFB_ACTION_KEYLOCK,
+    MFB_ACTION_MUTE,
+    MFB_ACTION_NONE,
+    MFB_NUM_ACTIONS
+};
 
 #ifdef HAVE_TOUCHSCREEN
 long touchscreen_last_touch(void);

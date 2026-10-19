@@ -15,8 +15,19 @@
   - Authentic Rockbox logarithmic volume scale (-74 dB to +6 dB in 1 dB steps) with digital clipping protection ($\le 0\text{ dB}$) and full +12dB hardware analog headphone amplifier gain.
 - 🖥️ **Dual Screen Resolutions & Always-On Display:**
   - **Normal (480x360):** Native 1:1 hardware resolution.
-  - **Classic (320x240 stretched):** Nearest-neighbor full-screen scaling for native iPod Classic Rockbox themes. Configurable in `Settings -> General Settings -> System -> Screen Resolution` (applies on next manual reboot).
-  - **Always On Screen Mode:** In `Settings -> General Settings -> Display -> Always On Screen`. When enabled, dimming reduces backlight by 50% rather than turning it off, turns off the button LEDs, throttles hardware display refresh rate to 1 FPS, and puts the MTK display subsystem into power-saving mode (saving 97% of display bus bandwidth).
+  - **Classic (320x240 stretched):** Nearest-neighbor full-screen scaling for native iPod Classic Rockbox themes. Configurable in `Settings -> Nugget -> Device -> Screen Resolution` (applies on next manual reboot).
+  - **Always On Display:** In `Settings -> Nugget -> Device -> Always On Display`. When enabled, dimming reduces backlight by 50% rather than turning it off, turns off the button LEDs, throttles hardware display refresh rate to 1 FPS, and puts the MTK display subsystem into power-saving mode (saving 97% of display bus bandwidth).
+  - **AOD: On WPS Only:** (Default: ON) Only enables Always On Display when on the While Playing Screen (WPS). If navigating other menus or in file browser, screen powers off normally to conserve battery.
+  - **AOD: When Playing Only:** (Default: OFF) Optional setting to only enable Always On Display while music is actively playing.
+- 🎧 **Wired Headphone Inline Controls (MFB):**
+  - Full support for 3.5mm headphone remote inline button (MFB / Headset Hook) even while the screen is off and device is in HOLD mode!
+  - Fully customizable actions under `Settings -> Nugget -> Device -> Headphone Controls`:
+    - **1 Click MFB** (Default: Play / Pause)
+    - **Double Click MFB** (Default: Next Track)
+    - **Triple Click MFB** (Default: Previous Track)
+    - **Hold MFB for 2s** (Default: Fast Forward 5s)
+    - **Hold MFB for 5s** (Default: Key Lock / HOLD toggle)
+  - Configurable actions include Play/Pause, Next Track, Previous Track, Volume Up, Volume Down, Fast Forward, Rewind, Key Lock, Mute, or None.
 - ⚡ **Aggressive Battery Optimizations:**
   - **Zero Quiescent Idle Current:** Analog headphone amplifier and MT6323 audio clocks power down when audio playback stops/pauses.
   - **Screen-Off CPU Throttling:** Automatically drops CPU clock to 598 MHz power-saving mode while screen is off, restoring dynamic clocking upon wake.
@@ -51,8 +62,8 @@
 
 ### SHA-256 Checksums
 ```text
-348cfb8f1023b5f9d72f1ed222bc9780a79333e0dd689c4d3eb02a2eabab4fc2  boot_rockbox.img
-026b36846fb7c8a2e06b87fd04518beeaeba5d1534be66d1fd3c01405259a7d3  rockbox_sdcard.zip
+b03a68ecc0434622d0bb033ebaa5eeb3797b8bbc6a8acc6985fa9be20ca14c47  boot_rockbox.img
+507e2595e93051c55f7c1d99ad9e06c13e008c5758aeed80dad66ce60b9d1c28  rockbox_sdcard.zip
 ```
 
 ---

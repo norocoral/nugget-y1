@@ -422,15 +422,33 @@ MENUITEM_SETTING(governor, &global_settings.governor, NULL);
 #if defined(INNIOASIS_Y1)
 #include "cpufreq-y1.h"
 MENUITEM_SETTING_W_TEXT(y1_screen_res_setting, &global_settings.y1_screen_resolution, "Screen Resolution", NULL);
-MENUITEM_SETTING_W_TEXT(y1_always_on_screen_item, &global_settings.always_on_screen, "Always On Screen", NULL);
+MENUITEM_SETTING_W_TEXT(y1_always_on_screen_item, &global_settings.always_on_screen, "Always On Display", NULL);
+MENUITEM_SETTING_W_TEXT(y1_aod_wps_item, &global_settings.aod_wps_only, "AOD: On WPS Only", NULL);
+MENUITEM_SETTING_W_TEXT(y1_aod_playback_item, &global_settings.aod_playback_only, "AOD: When Playing Only", NULL);
 MENUITEM_SETTING_W_TEXT(y1_cpu_mode_setting, &global_settings.y1_cpu_mode, "CPU Frequency Mode", NULL);
 MENUITEM_SETTING_W_TEXT(y1_cpu_cores_setting, &global_settings.y1_cpu_cores, "Second CPU Core", NULL);
+
+MENUITEM_SETTING_W_TEXT(y1_mfb_single_item, &global_settings.mfb_single_click, "1 Click MFB", NULL);
+MENUITEM_SETTING_W_TEXT(y1_mfb_double_item, &global_settings.mfb_double_click, "Double Click MFB", NULL);
+MENUITEM_SETTING_W_TEXT(y1_mfb_triple_item, &global_settings.mfb_triple_click, "Triple Click MFB", NULL);
+MENUITEM_SETTING_W_TEXT(y1_mfb_hold_2s_item, &global_settings.mfb_hold_2s, "Hold MFB for 2s", NULL);
+MENUITEM_SETTING_W_TEXT(y1_mfb_hold_5s_item, &global_settings.mfb_hold_5s, "Hold MFB for 5s", NULL);
+
+MAKE_MENU(nugget_headphone_menu, "Headphone Controls", 0, Icon_NOICON,
+          &y1_mfb_single_item,
+          &y1_mfb_double_item,
+          &y1_mfb_triple_item,
+          &y1_mfb_hold_2s_item,
+          &y1_mfb_hold_5s_item);
 
 MAKE_MENU(nugget_device_menu, "Device", 0, Icon_NOICON,
           &y1_screen_res_setting,
           &y1_always_on_screen_item,
+          &y1_aod_wps_item,
+          &y1_aod_playback_item,
           &y1_cpu_mode_setting,
-          &y1_cpu_cores_setting);
+          &y1_cpu_cores_setting,
+          &nugget_headphone_menu);
 
 MAKE_MENU(nugget_menu, "Nugget", 0, Icon_NOICON,
           &nugget_device_menu);

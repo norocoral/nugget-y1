@@ -685,8 +685,8 @@ static void unmute_audio(void)
     /* Power up MT6323 PMIC Audio Downlink DAC & Clocks */
     set_anareg(fd, 0x700, 0x7800, 0x7f80);
     set_anareg(fd, 0x704, 0x00f0, 0x00ff);
-    set_anareg(fd, 0x702, 0x0000, 0x0700); /* Maximum preamp buffer gain */
-    set_anareg(fd, 0x700, 0x0000, 0x0070); /* Maximum preamp buffer gain */
+    set_anareg(fd, 0x702, 0x0500, 0x0700); /* Maximum preamp buffer gain Right (5 << 8) */
+    set_anareg(fd, 0x700, 0x0050, 0x0070); /* Maximum preamp buffer gain Left (5 << 4) */
     set_anareg(fd, 0x710, 0x0008, 0x0008);
     set_anareg(fd, 0x700, 0x0180, 0x0180);
     set_anareg(fd, 0x704, 0x0003, 0x0003);
@@ -698,7 +698,7 @@ static void unmute_audio(void)
     set_anareg(fd, 0x708, 0x007c, 0xffff);
     usleep(10000);
     set_anareg(fd, 0x70c, 0xf5ba, 0xffff);
-    set_anareg(fd, 0x70a, 0x0014, 0xffff); /* Max +12dB analog gain, Headphone powered */
+    set_anareg(fd, 0x70a, 0x7714, 0xffff); /* Max +14dB analog gain Left & Right, Headphone powered */
 
     /* Configure MT6323 PMIC Digital Audio Downlink (NewIF & Codec) */
     set_anareg(fd, 0x4024, (7 << 12) | 0x330, 0xffff); /* PMIC NewIF DL 44.1kHz (0x7330) */

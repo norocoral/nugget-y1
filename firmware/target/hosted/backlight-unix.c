@@ -104,7 +104,7 @@ void backlight_hw_on(void)
 {
     if (last_bl != BACKLIGHT_POWER_ON) {
 #if defined(BACKLIGHT_INNIOASIS)
-        if (y1_is_always_on_screen()) {
+        if (y1_is_always_on_screen() || y1_is_display_power_saving()) {
             y1_set_display_power_saving(false);
         }
         y1_set_screen_off_power_mode(false);
@@ -129,7 +129,7 @@ void backlight_hw_off(void)
         last_bl = BACKLIGHT_POWER_REDUCED;
 #if defined(BACKLIGHT_INNIOASIS)
         y1_set_screen_off_power_mode(true);
-        if (y1_is_always_on_screen()) {
+        if (y1_should_always_on()) {
             /* Always On Screen mode:
              * Instead of turning off backlight completely:
              * 1. Reduce brightness to 50% of the current brightness
@@ -170,7 +170,7 @@ void backlight_hw_brightness(int brightness)
     if (last_bl == BACKLIGHT_POWER_ON || last_bl == -1) {
         int hw_val = (brightness * 255) / 100;
         write_bl_hw(hw_val);
-    } else if (last_bl == BACKLIGHT_POWER_REDUCED && y1_is_always_on_screen()) {
+    } else if (last_bl == BACKLIGHT_POWER_REDUCED && y1_should_always_on()) {
         int dimmed = brightness / 2;
         if (dimmed < 5) dimmed = 5;
         write_bl_hw((dimmed * 255) / 100);
