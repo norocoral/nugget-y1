@@ -37,9 +37,9 @@
 - 🔌 **Pause on Headphone Unplug:**
   - Full native Rockbox setting support (`Settings -> Playback Settings -> Pause on Headphone Unplug`).
   - Automatically pauses audio playback when 3.5mm headphones are removed and resumes when reconnected via the MT6572 `accdet` / `h2w` hardware detection switch.
-- 💽 **Disk Access Indicator:**
-  - Native Rockbox virtual disk activity LED support (`CONFIG_LED LED_VIRTUAL`).
-  - Real-time disk activity indicator in the status bar and theme skins (WPS `%lh` token) during file reading, streaming, and database operations.
+- 💽 **Disk Activity Indicator:**
+  - Native in-Rockbox Disk Activity Indicator support.
+  - Real-time disk access notification in the status bar and theme skins (`%lh` token) during file reading, directory browsing, streaming, and database operations.
 - 🔒 **Automatic HOLD Mode & Advanced Key Lock:**
   - **Auto-Hold:** Whenever the backlight turns off (via timeout or pressing the Power button), the device automatically enters HOLD mode.
   - **Advanced Key Lock:** Settings in `Settings -> General Settings -> System -> Advanced Key Lock` are applied while the screen is off (e.g. keep Volume or Play/Pause buttons active in your pocket). All other buttons are silently blocked without waking the screen.
@@ -51,7 +51,7 @@
   - MicroSD mounted as `/` (`PIVOT_ROOT`) for full `.rock` plugin and game compatibility.
   - Built-in USB Mass Storage gadget allows drag-and-drop music and theme transfer directly from Windows, Mac, or Linux.
 - 🖼️ **Hardware Status Screens:**
-  - `boot.png` hardware bootscreen on startup cleanly disappears upon Rockbox initialization via immediate display controller update.
+  - `boot.png` hardware bootscreen on startup cleanly disappears upon Rockbox initialization.
   - `sdcard.png` alert if MicroSD card or `.rockbox` directory is missing (with USB Mass Storage active to add files).
   - Native Rockbox USB screen during file transfer.
   - Automatic continuation once issues are resolved.
@@ -68,8 +68,8 @@
 
 ### SHA-256 Checksums
 ```text
-5d6440c8cededcc9424731bad6aab1d4335ffca27f0b5c21420883fd9943c853  boot_rockbox.img
-e76a64f8e6d8146ef4da8c1c95f58e57a5ec3f361d4e2f8135997029e197cb93  rockbox_sdcard.zip
+024ac8697eced2bc7a243f17177c6fcdf93705e827d81255bb9cea9fcd7fc62c  boot_rockbox.img
+6023f895075ef52bb1f718118b2a3a4bc7cedbd33a5323161338dff2c0c5e26d  rockbox_sdcard.zip
 ```
 
 ---

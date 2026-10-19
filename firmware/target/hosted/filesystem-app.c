@@ -230,6 +230,10 @@ const char * handle_special_dirs(const char *dir, unsigned flags,
 	/* Unless it's a MULTIDRIVE dir, in which case use as-is */
 	&& strncmp(MULTIDRIVE_DIR, dir, MULTIDRIVE_DIR_LEN)
 #endif
+	&& strncmp("/dev/", dir, 5)
+	&& strncmp("/sys/", dir, 5)
+	&& strncmp("/proc/", dir, 6)
+	&& strncmp("/etc/", dir, 5)
        )
     {
         while (*dir == PATH_SEPCH) dir++; /* strip leading slashes */
@@ -406,7 +410,13 @@ DIR * app_opendir(const char *dirname)
 
     strmemcpy(this->path, fname, name_len);
 
+#if (CONFIG_LED == LED_VIRTUAL)
+    led(true);
+#endif
     rc = os_opendir_and_fd(this->path, &this->osdirp, &this->osfd);
+#if (CONFIG_LED == LED_VIRTUAL)
+    led(false);
+#endif
     if (rc < 0)
         FILE_ERROR(ERRNO, RC);
 

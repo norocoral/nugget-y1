@@ -19,6 +19,7 @@
  * KIND, either express or implied.
  *
  ****************************************************************************/
+#define RB_FILESYSTEM_OS
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
@@ -125,11 +126,12 @@ void backlight_hw_on(void)
 
 void backlight_hw_off(void)
 {
-    if (last_bl != BACKLIGHT_POWER_REDUCED) {
-        last_bl = BACKLIGHT_POWER_REDUCED;
 #if defined(BACKLIGHT_INNIOASIS)
+    int target_bl = y1_should_always_on() ? BACKLIGHT_POWER_REDUCED : BACKLIGHT_POWER_OFF;
+    if (last_bl != target_bl) {
+        last_bl = target_bl;
         y1_set_screen_off_power_mode(true);
-        if (y1_should_always_on()) {
+        if (target_bl == BACKLIGHT_POWER_REDUCED) {
             /* Always On Screen mode:
              * Instead of turning off backlight completely:
              * 1. Reduce brightness to 50% of the current brightness
@@ -146,13 +148,22 @@ void backlight_hw_off(void)
         }
         write_bl_hw(0);
         sysfs_set_int("/sys/class/leds/button-backlight/brightness", 0);
-#endif
         if (sysfs_bl_power)
             sysfs_set_int(sysfs_bl_power, last_bl);
 #ifdef HAVE_LCD_ENABLE
         lcd_enable(false);
 #endif
     }
+#else
+    if (last_bl != BACKLIGHT_POWER_REDUCED) {
+        last_bl = BACKLIGHT_POWER_REDUCED;
+        if (sysfs_bl_power)
+            sysfs_set_int(sysfs_bl_power, last_bl);
+#ifdef HAVE_LCD_ENABLE
+        lcd_enable(false);
+#endif
+    }
+#endif
 }
 
 void backlight_hw_brightness(int brightness)

@@ -13,6 +13,7 @@
  * as published by the Free Software Foundation; either version 2
  * of the License, or (at your option) any later version.
  ****************************************************************************/
+#define RB_FILESYSTEM_OS
 #include <linux/input.h>
 #include <stdbool.h>
 #include <stdio.h>

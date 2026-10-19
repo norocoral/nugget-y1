@@ -12,6 +12,7 @@
  * automatic stride handling, and MTK overlay unblanking / pan display.
  ****************************************************************************/
 
+#define RB_FILESYSTEM_OS
 #include <stdlib.h>
 #include <stdint.h>
 #include <unistd.h>
@@ -45,9 +46,6 @@
 #endif
 #ifndef MTKFB_POWEROFF
 #define MTKFB_POWEROFF           0x4f0d /* _IO('O', 13) */
-#endif
-#ifndef MTKFB_CONFIG_IMMEDIATE_UPDATE
-#define MTKFB_CONFIG_IMMEDIATE_UPDATE 0x40044f04 /* _IOW('O', 4, unsigned long) */
 #endif
 #ifndef MTKFB_CHANGE_UPDATESPEED
 #define MTKFB_CHANGE_UPDATESPEED 0x40044f13 /* _IOW('O', 19, unsigned long) */
@@ -96,8 +94,6 @@ static void redraw_hw(void)
     if (fb_fd < 0) return;
     vinfo.yoffset = 0;
     vinfo.xoffset = 0;
-    vinfo.vmode ^= 1;
-    vinfo.activate = FB_ACTIVATE_NOW | FB_ACTIVATE_FORCE;
     ioctl(fb_fd, FBIOPAN_DISPLAY, &vinfo);
 }
 
@@ -148,10 +144,6 @@ void lcd_init_device(void)
     /* Unblank the display hardware */
     ioctl(fb_fd, FBIOBLANK, VESA_NO_BLANKING);
 
-    /* Enable immediate update mode on MTKFB */
-    unsigned long imm_update = 1;
-    ioctl(fb_fd, MTKFB_CONFIG_IMMEDIATE_UPDATE, &imm_update);
-
     /* Map framebuffer into memory */
     size_t map_size = finfo.smem_len ? finfo.smem_len : (vinfo.xres * vinfo.yres * (vinfo.bits_per_pixel / 8));
     mapped_fb = (uint8_t *)mmap(NULL, map_size, PROT_READ | PROT_WRITE, MAP_SHARED, fb_fd, 0);
@@ -177,13 +169,9 @@ void lcd_enable(bool on)
 
     lcd_set_active(on);
     if (on) {
-        ioctl(fb_fd, MTKFB_POWERON, 0);
         ioctl(fb_fd, FBIOBLANK, VESA_NO_BLANKING);
         send_event(LCD_EVENT_ACTIVATION, NULL);
         lcd_update();
-    } else {
-        ioctl(fb_fd, MTKFB_POWEROFF, 0);
-        ioctl(fb_fd, FBIOBLANK, VESA_POWERDOWN);
     }
 }
 
@@ -278,7 +266,7 @@ void lcd_update_rect(int x, int y, int width, int height)
 
     if (y1_display_powersave) {
         if (!y1_should_always_on()) {
-            y1_set_display_power_saving(false);
+            y1_display_powersave = false;
             backlight_hw_off();
             return;
         }
