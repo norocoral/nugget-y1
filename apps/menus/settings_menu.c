@@ -494,7 +494,7 @@ static int menu_y1_bt_paired_action(void)
 
     struct gui_synclist bt_list;
     gui_synclist_init(&bt_list, y1_bt_paired_list_get_name, NULL, false, 1, NULL);
-    gui_synclist_set_title(&bt_list, ID2P(LANG_Y1_BT_PAIRED_DEVICES), Icon_NOICON);
+    gui_synclist_set_title(&bt_list, str(LANG_Y1_BT_PAIRED_DEVICES), Icon_NOICON);
     gui_synclist_set_nb_items(&bt_list, ui_bt_dev_count > 0 ? ui_bt_dev_count : 1);
     gui_synclist_select_item(&bt_list, 0);
     gui_synclist_draw(&bt_list);
@@ -593,7 +593,7 @@ static int menu_y1_bt_new_action(void)
 
     struct gui_synclist bt_list;
     gui_synclist_init(&bt_list, y1_bt_new_list_get_name, NULL, false, 1, NULL);
-    gui_synclist_set_title(&bt_list, ID2P(LANG_Y1_BT_SEARCH_DEVICES), Icon_NOICON);
+    gui_synclist_set_title(&bt_list, str(LANG_Y1_BT_SEARCH_DEVICES), Icon_NOICON);
     gui_synclist_set_nb_items(&bt_list, ui_bt_dev_count > 0 ? ui_bt_dev_count : 1);
     gui_synclist_select_item(&bt_list, 0);
     gui_synclist_draw(&bt_list);
