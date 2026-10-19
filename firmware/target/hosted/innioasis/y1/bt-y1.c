@@ -39,8 +39,9 @@
 #include "bt-y1.h"
 #include "sbc/sbc.h"
 
-#define PAIRED_DB_PATH "/mnt/sdcard/.rockbox/bt_paired.dat"
-#define PAIRED_MAGIC   0x59314254U /* 'Y1BT' */
+#define PAIRED_DB_PATH   "/mnt/sdcard/.rockbox/bt_paired.dat"
+#define PAIRED_MAGIC_V2  0x59314202U /* 'Y1B2' (v2 with pin and volume) */
+#define PAIRED_MAGIC_V1  0x59314254U /* 'Y1BT' (legacy v1) */
 
 /* HCI H4 Packet Types */
 #define HCI_PKT_CMD  0x01
@@ -123,6 +124,10 @@ static bool avdtp_initiator = false;
 static bool avdtp_discover_sent = false;
 static bool avdtp_opening_media = false;
 static volatile bool a2dp_streaming = false;
+static volatile bool in_sniff_mode = false;
+static uint32_t last_pcm_time_ms = 0;
+static bool avrcp_vol_notify_pending = false;
+static uint8_t avrcp_vol_notify_label = 0;
 
 static uint8_t remote_seid = 1;
 static uint8_t sbc_cfg_octet0 = 0x21; /* 44.1kHz, Joint Stereo */
@@ -167,6 +172,8 @@ struct paired_db_entry {
     char    name[64];
     uint8_t link_key[16];
     uint8_t key_type;
+    char    pin[16];
+    int32_t volume;
 };
 
 static void load_paired_devices(void)
@@ -176,22 +183,50 @@ static void load_paired_devices(void)
         return;
 
     uint32_t magic = 0, count = 0;
-    if (read(fd, &magic, 4) == 4 && magic == PAIRED_MAGIC &&
-        read(fd, &count, 4) == 4)
+    if (read(fd, &magic, 4) == 4 && read(fd, &count, 4) == 4)
     {
-        for (uint32_t i = 0; i < count && bt_num_devices < Y1_BT_MAX_DEVICES; i++)
+        if (magic == PAIRED_MAGIC_V2)
         {
-            struct paired_db_entry e;
-            if (read(fd, &e, sizeof(e)) != sizeof(e))
-                break;
-            struct y1_bt_device *d = &bt_devices[bt_num_devices++];
-            memset(d, 0, sizeof(*d));
-            memcpy(d->bdaddr, e.bdaddr, 6);
-            strncpy(d->name, e.name, sizeof(d->name) - 1);
-            memcpy(d->link_key, e.link_key, 16);
-            d->key_type = e.key_type;
-            d->paired = true;
-            d->rssi = -60;
+            for (uint32_t i = 0; i < count && bt_num_devices < Y1_BT_MAX_DEVICES; i++)
+            {
+                struct paired_db_entry e;
+                if (read(fd, &e, sizeof(e)) != sizeof(e))
+                    break;
+                struct y1_bt_device *d = &bt_devices[bt_num_devices++];
+                memset(d, 0, sizeof(*d));
+                memcpy(d->bdaddr, e.bdaddr, 6);
+                strncpy(d->name, e.name, sizeof(d->name) - 1);
+                memcpy(d->link_key, e.link_key, 16);
+                d->key_type = e.key_type;
+                strncpy(d->pin, e.pin, sizeof(d->pin) - 1);
+                d->volume = e.volume;
+                d->paired = true;
+                d->rssi = -60;
+            }
+        }
+        else if (magic == PAIRED_MAGIC_V1)
+        {
+            struct legacy_paired_entry {
+                uint8_t bdaddr[6];
+                char    name[64];
+                uint8_t link_key[16];
+                uint8_t key_type;
+            };
+            for (uint32_t i = 0; i < count && bt_num_devices < Y1_BT_MAX_DEVICES; i++)
+            {
+                struct legacy_paired_entry e;
+                if (read(fd, &e, sizeof(e)) != sizeof(e))
+                    break;
+                struct y1_bt_device *d = &bt_devices[bt_num_devices++];
+                memset(d, 0, sizeof(*d));
+                memcpy(d->bdaddr, e.bdaddr, 6);
+                strncpy(d->name, e.name, sizeof(d->name) - 1);
+                memcpy(d->link_key, e.link_key, 16);
+                d->key_type = e.key_type;
+                d->volume = -15;
+                d->paired = true;
+                d->rssi = -60;
+            }
         }
     }
     close(fd);
@@ -203,7 +238,7 @@ static void save_paired_devices(void)
     if (fd < 0)
         return;
 
-    uint32_t magic = PAIRED_MAGIC;
+    uint32_t magic = PAIRED_MAGIC_V2;
     uint32_t count = 0;
     for (int i = 0; i < bt_num_devices; i++) {
         if (bt_devices[i].paired)
@@ -219,6 +254,8 @@ static void save_paired_devices(void)
             strncpy(e.name, bt_devices[i].name, sizeof(e.name) - 1);
             memcpy(e.link_key, bt_devices[i].link_key, 16);
             e.key_type = bt_devices[i].key_type;
+            strncpy(e.pin, bt_devices[i].pin, sizeof(e.pin) - 1);
+            e.volume = bt_devices[i].volume;
             (void)!write(fd, &e, sizeof(e));
         }
     }
@@ -536,13 +573,18 @@ static void handle_avdtp_sig_pdu(const uint8_t *pdu, uint16_t len)
             case AVDTP_OPEN:
                 avdtp_send_accept(hdr, sig_id, NULL, 0);
                 break;
-            case AVDTP_START:
+            case AVDTP_START: {
+                bool was_streaming = a2dp_streaming;
                 reinit_a2dp_sbc();
                 avdtp_send_accept(hdr, sig_id, NULL, 0);
                 a2dp_streaming = true;
                 bt_state = Y1_BT_STATE_STREAMING;
                 bt_log("A2DP STREAMING STARTED (remote initiated)\n");
+                if (!was_streaming) {
+                    y1_bt_audio_connect_hook();
+                }
                 break;
+            }
             case AVDTP_SUSPEND:
                 avdtp_send_accept(hdr, sig_id, NULL, 0);
                 a2dp_streaming = false;
@@ -637,10 +679,14 @@ static void handle_avdtp_sig_pdu(const uint8_t *pdu, uint16_t len)
                 break;
             }
             case AVDTP_START: {
+                bool was_streaming = a2dp_streaming;
                 reinit_a2dp_sbc();
                 a2dp_streaming = true;
                 bt_state = Y1_BT_STATE_STREAMING;
                 bt_log("A2DP STREAMING STARTED (local initiated)\n");
+                if (!was_streaming) {
+                    y1_bt_audio_connect_hook();
+                }
                 break;
             }
             default:
@@ -700,6 +746,59 @@ static void handle_avctp_pdu(const uint8_t *pdu, uint16_t len)
             }
             if (btn != 0) {
                 button_queue_post(btn, 0);
+            }
+        }
+    }
+    else if (opcode == 0x00 && len >= 10) /* VENDOR DEPENDENT (Metadata & Absolute Volume) */
+    {
+        uint8_t pdu_id = pdu[9];
+        if (pdu_id == 0x50 && len >= 14) /* SetAbsoluteVolume */
+        {
+            uint8_t abs_vol = pdu[13] & 0x7F;
+            y1_bt_on_set_absolute_volume((int)abs_vol);
+
+            /* Send AVRCP Accepted Response */
+            uint8_t rsp[14];
+            rsp[0] = (uint8_t)(avctp_hdr | 0x02); /* Response bit */
+            rsp[1] = 0x11; rsp[2] = 0x0E;
+            rsp[3] = 0x09; /* ACCEPTED */
+            rsp[4] = pdu[4];
+            rsp[5] = 0x00; /* VENDOR DEPENDENT */
+            rsp[6] = 0x00; rsp[7] = 0x19; rsp[8] = 0x58; /* BT SIG */
+            rsp[9] = 0x50; /* SetAbsoluteVolume */
+            rsp[10] = 0x00;
+            rsp[11] = 0x00; rsp[12] = 0x01; /* Param len = 1 */
+            rsp[13] = abs_vol;
+            l2cap_send_pdu(cid_avctp_remote, rsp, 14);
+        }
+        else if (pdu_id == 0x31 && len >= 14) /* RegisterNotification */
+        {
+            uint8_t event_id = pdu[13];
+            if (event_id == 0x0D) /* EVENT_VOLUME_CHANGED */
+            {
+                avrcp_vol_notify_label = avctp_hdr >> 4;
+                avrcp_vol_notify_pending = true;
+
+                int cur_vol = y1_bt_get_active_device_volume();
+                int min_vol = -74;
+                int abs_vol = 0;
+                if (cur_vol >= 0) abs_vol = 127;
+                else if (cur_vol > min_vol) abs_vol = ((cur_vol - min_vol) * 127) / (0 - min_vol);
+
+                /* Send INTERIM Response */
+                uint8_t rsp[15];
+                rsp[0] = (uint8_t)(avctp_hdr | 0x02);
+                rsp[1] = 0x11; rsp[2] = 0x0E;
+                rsp[3] = 0x0F; /* INTERIM */
+                rsp[4] = pdu[4];
+                rsp[5] = 0x00;
+                rsp[6] = 0x00; rsp[7] = 0x19; rsp[8] = 0x58;
+                rsp[9] = 0x31;
+                rsp[10] = 0x00;
+                rsp[11] = 0x00; rsp[12] = 0x02;
+                rsp[13] = 0x0D;
+                rsp[14] = (uint8_t)(abs_vol & 0x7F);
+                l2cap_send_pdu(cid_avctp_remote, rsp, 15);
             }
         }
     }
@@ -1101,6 +1200,9 @@ static void handle_hci_event(const uint8_t *pkt, size_t len)
         case 0x05: /* Disconnection Complete */ {
             acl_handle = 0xFFFF;
             a2dp_streaming = false;
+            in_sniff_mode = false;
+            avrcp_vol_notify_pending = false;
+            memset(active_bdaddr, 0, 6);
             cid_sdp_remote = 0;
             cid_avdtp_sig_remote = 0;
             cid_avdtp_med_remote = 0;
@@ -1113,6 +1215,7 @@ static void handle_hci_event(const uint8_t *pkt, size_t len)
                 bt_state = Y1_BT_STATE_IDLE;
             pthread_mutex_unlock(&bt_mtx);
             bt_log("ACL Disconnected\n");
+            y1_bt_audio_disconnect_hook();
             break;
         }
 
@@ -1134,13 +1237,28 @@ static void handle_hci_event(const uint8_t *pkt, size_t len)
             break;
         }
 
+        case 0x14: /* Mode Change (Sniff / Active) */ {
+            if (plen >= 6) {
+                uint8_t mode = p[3]; /* 0x00 = Active, 0x02 = Sniff */
+                in_sniff_mode = (mode == 0x02);
+            }
+            break;
+        }
+
         case 0x16: /* PIN Code Request (Legacy BT 2.0 devices) */ {
             if (plen >= 6) {
+                const uint8_t *bd = &p[0];
+                pthread_mutex_lock(&bt_mtx);
+                struct y1_bt_device *d = find_or_create_device(bd);
+                const char *pin = (d && d->pin[0]) ? d->pin : "0000";
+                uint8_t pin_len = (uint8_t)strlen(pin);
+                if (pin_len > 16) pin_len = 16;
                 uint8_t reply[23];
                 memset(reply, 0, sizeof(reply));
-                memcpy(&reply[0], &p[0], 6);
-                reply[6] = 4;
-                memcpy(&reply[7], "0000", 4);
+                memcpy(&reply[0], bd, 6);
+                reply[6] = pin_len;
+                memcpy(&reply[7], pin, pin_len);
+                pthread_mutex_unlock(&bt_mtx);
                 hci_send_cmd(0x040D, reply, 23); /* HCI_PIN_Code_Request_Reply */
             }
             break;
@@ -1471,9 +1589,28 @@ static void *bt_worker_thread(void *arg)
         /* Drain PCM ringbuffer into A2DP SBC packets when streaming */
         drain_a2dp_pcm_and_transmit();
 
+        /* Low-Power Sniff Mode optimization: enter sniff mode if idle for >= 2.0s */
+        if (acl_handle != 0xFFFF && !in_sniff_mode && !req_connect && !req_scan && !resolving_names) {
+            struct timespec now;
+            clock_gettime(CLOCK_MONOTONIC, &now);
+            uint32_t now_ms = (uint32_t)(now.tv_sec * 1000 + now.tv_nsec / 1000000);
+            if (now_ms - last_pcm_time_ms >= 2000 && pcm_ring_r == pcm_ring_w) {
+                in_sniff_mode = true;
+                uint8_t sniff_cmd[10];
+                sniff_cmd[0] = (uint8_t)(acl_handle & 0xFF);
+                sniff_cmd[1] = (uint8_t)(acl_handle >> 8);
+                sniff_cmd[2] = 0x20; sniff_cmd[3] = 0x03; /* Max Interval = 800 slots = 500ms */
+                sniff_cmd[4] = 0x90; sniff_cmd[5] = 0x01; /* Min Interval = 400 slots = 250ms */
+                sniff_cmd[6] = 0x04; sniff_cmd[7] = 0x00; /* Attempt = 4 slots */
+                sniff_cmd[8] = 0x01; sniff_cmd[9] = 0x00; /* Timeout = 1 slot */
+                hci_send_cmd(0x0803, sniff_cmd, 10);      /* HCI_Sniff_Mode */
+                bt_log("Bluetooth idle: entered low-power Sniff Mode\n");
+            }
+        }
+
         /* Poll /dev/stpbt for incoming HCI events and ACL packets */
         struct pollfd pfd = { .fd = stpbt_fd, .events = POLLIN };
-        int timeout_ms = a2dp_streaming ? 4 : 25;
+        int timeout_ms = a2dp_streaming ? 4 : (in_sniff_mode ? 100 : 25);
         int pr = poll(&pfd, 1, timeout_ms);
         if (pr > 0 && (pfd.revents & POLLIN))
         {
@@ -1596,6 +1733,36 @@ int y1_bt_get_devices(struct y1_bt_device *out_devs, int max_devs)
     return n;
 }
 
+int y1_bt_get_paired_devices(struct y1_bt_device *out_devs, int max_devs)
+{
+    pthread_mutex_lock(&bt_mtx);
+    int count = 0;
+    for (int i = 0; i < bt_num_devices && count < max_devs; i++) {
+        if (bt_devices[i].paired) {
+            if (out_devs)
+                out_devs[count] = bt_devices[i];
+            count++;
+        }
+    }
+    pthread_mutex_unlock(&bt_mtx);
+    return count;
+}
+
+int y1_bt_get_new_devices(struct y1_bt_device *out_devs, int max_devs)
+{
+    pthread_mutex_lock(&bt_mtx);
+    int count = 0;
+    for (int i = 0; i < bt_num_devices && count < max_devs; i++) {
+        if (!bt_devices[i].paired) {
+            if (out_devs)
+                out_devs[count] = bt_devices[i];
+            count++;
+        }
+    }
+    pthread_mutex_unlock(&bt_mtx);
+    return count;
+}
+
 int y1_bt_connect_device(const uint8_t bdaddr[6])
 {
     if (!bt_target_enabled)
@@ -1605,9 +1772,28 @@ int y1_bt_connect_device(const uint8_t bdaddr[6])
     return 0;
 }
 
+int y1_bt_connect_device_with_pin(const uint8_t bdaddr[6], const char *pin)
+{
+    if (!bt_target_enabled)
+        y1_bt_set_enabled(true);
+
+    pthread_mutex_lock(&bt_mtx);
+    struct y1_bt_device *d = find_or_create_device(bdaddr);
+    if (d && pin) {
+        strncpy(d->pin, pin, sizeof(d->pin) - 1);
+        d->pin[sizeof(d->pin) - 1] = '\0';
+    }
+    pthread_mutex_unlock(&bt_mtx);
+
+    memcpy(req_connect_bdaddr, bdaddr, 6);
+    req_connect = true;
+    return 0;
+}
+
 void y1_bt_disconnect(void)
 {
     req_disconnect = true;
+    y1_bt_audio_disconnect_hook();
 }
 
 void y1_bt_forget_device(const uint8_t bdaddr[6])
@@ -1615,8 +1801,10 @@ void y1_bt_forget_device(const uint8_t bdaddr[6])
     pthread_mutex_lock(&bt_mtx);
     for (int i = 0; i < bt_num_devices; i++) {
         if (memcmp(bt_devices[i].bdaddr, bdaddr, 6) == 0) {
-            if (bt_devices[i].connected)
+            if (bt_devices[i].connected) {
                 req_disconnect = true;
+                y1_bt_audio_disconnect_hook();
+            }
             for (int j = i; j + 1 < bt_num_devices; j++)
                 bt_devices[j] = bt_devices[j + 1];
             bt_num_devices--;
@@ -1627,9 +1815,67 @@ void y1_bt_forget_device(const uint8_t bdaddr[6])
     pthread_mutex_unlock(&bt_mtx);
 }
 
+int y1_bt_get_active_device_volume(void)
+{
+    pthread_mutex_lock(&bt_mtx);
+    int vol = -15;
+    for (int i = 0; i < bt_num_devices; i++) {
+        if (memcmp(bt_devices[i].bdaddr, active_bdaddr, 6) == 0) {
+            if (bt_devices[i].volume != 0)
+                vol = bt_devices[i].volume;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&bt_mtx);
+    return vol;
+}
+
+void y1_bt_sync_volume_changed(int vol)
+{
+    if (vol > 0) vol = 0;
+    pthread_mutex_lock(&bt_mtx);
+    for (int i = 0; i < bt_num_devices; i++) {
+        if (memcmp(bt_devices[i].bdaddr, active_bdaddr, 6) == 0) {
+            bt_devices[i].volume = vol;
+            save_paired_devices();
+            break;
+        }
+    }
+    pthread_mutex_unlock(&bt_mtx);
+
+    if (avrcp_vol_notify_pending && cid_avctp_remote != 0) {
+        avrcp_vol_notify_pending = false;
+        int min_vol = -74;
+        int abs_vol = 0;
+        if (vol >= 0) abs_vol = 127;
+        else if (vol > min_vol) abs_vol = ((vol - min_vol) * 127) / (0 - min_vol);
+
+        uint8_t rsp[15];
+        rsp[0] = (uint8_t)((avrcp_vol_notify_label << 4) | 0x02);
+        rsp[1] = 0x11; rsp[2] = 0x0E;
+        rsp[3] = 0x09; /* CHANGED */
+        rsp[4] = 0x48;
+        rsp[5] = 0x00;
+        rsp[6] = 0x00; rsp[7] = 0x19; rsp[8] = 0x58;
+        rsp[9] = 0x31;
+        rsp[10] = 0x00;
+        rsp[11] = 0x00; rsp[12] = 0x02;
+        rsp[13] = 0x0D;
+        rsp[14] = (uint8_t)(abs_vol & 0x7F);
+        l2cap_send_pdu(cid_avctp_remote, rsp, 15);
+    }
+}
+
 bool y1_bt_a2dp_is_streaming(void)
 {
     return a2dp_streaming && (cid_avdtp_med_remote != 0);
+}
+
+static inline int16_t bt_soft_clamp(int16_t sample)
+{
+    if (sample > 31000) return 31000;
+    if (sample < -31000) return -31000;
+    return sample;
 }
 
 /* Called from pcm-eac.c worker thread with 16-bit signed stereo PCM */
@@ -1637,6 +1883,18 @@ void y1_bt_a2dp_write_pcm(const void *buf, size_t bytes, unsigned long sampr)
 {
     if (!a2dp_streaming || !buf || bytes < 4)
         return;
+
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    last_pcm_time_ms = (uint32_t)(ts.tv_sec * 1000 + ts.tv_nsec / 1000000);
+
+    if (in_sniff_mode && acl_handle != 0xFFFF) {
+        in_sniff_mode = false;
+        uint8_t exit_sniff[2];
+        exit_sniff[0] = (uint8_t)(acl_handle & 0xFF);
+        exit_sniff[1] = (uint8_t)(acl_handle >> 8);
+        hci_send_cmd(0x0804, exit_sniff, 2); /* HCI_Exit_Sniff_Mode */
+    }
 
     const int16_t *src = (const int16_t *)buf;
     size_t in_frames = bytes >> 2;
@@ -1651,8 +1909,8 @@ void y1_bt_a2dp_write_pcm(const void *buf, size_t bytes, unsigned long sampr)
             if (((w - r) & (PCM_RING_SAMPLES - 1)) >= PCM_RING_SAMPLES - 2)
                 break;
             size_t idx = (w & (PCM_RING_SAMPLES - 1)) * 2;
-            pcm_ring[idx + 0] = src[i * 2 + 0];
-            pcm_ring[idx + 1] = src[i * 2 + 1];
+            pcm_ring[idx + 0] = bt_soft_clamp(src[i * 2 + 0]);
+            pcm_ring[idx + 1] = bt_soft_clamp(src[i * 2 + 1]);
             w = (w + 1) & (PCM_RING_SAMPLES - 1);
         }
     } else {
@@ -1664,8 +1922,8 @@ void y1_bt_a2dp_write_pcm(const void *buf, size_t bytes, unsigned long sampr)
                 break;
             size_t s_idx = (pos_fp >> 16) * 2;
             size_t d_idx = (w & (PCM_RING_SAMPLES - 1)) * 2;
-            pcm_ring[d_idx + 0] = src[s_idx + 0];
-            pcm_ring[d_idx + 1] = src[s_idx + 1];
+            pcm_ring[d_idx + 0] = bt_soft_clamp(src[s_idx + 0]);
+            pcm_ring[d_idx + 1] = bt_soft_clamp(src[s_idx + 1]);
             w = (w + 1) & (PCM_RING_SAMPLES - 1);
             pos_fp += step_fp;
         }

@@ -143,6 +143,14 @@ void audiohw_set_volume(int vol_l, int vol_r)
      * Support full volume scale without artificial software attenuation cap. */
     int sw_volume_l = (vol_l <= -740) ? PCM_MUTE_LEVEL : vol_l;
     int sw_volume_r = (vol_r <= -740) ? PCM_MUTE_LEVEL : vol_r;
+
+    if (y1_bt_a2dp_is_streaming())
+    {
+        /* Clamp to 0 dBFS (0 centibels) when Bluetooth audio is streaming to prevent digital peaking/distortion */
+        if (sw_volume_l > 0) sw_volume_l = 0;
+        if (sw_volume_r > 0) sw_volume_r = 0;
+    }
+
     pcm_set_master_volume(sw_volume_l, sw_volume_r);
 
     if (eac_fd >= 0)

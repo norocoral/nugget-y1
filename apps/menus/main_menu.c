@@ -533,6 +533,9 @@ MAKE_MENU(main_menu_, ID2P(LANG_SETTINGS), NULL,
         Icon_Submenu_Entered,
         &sound_settings,
         &playback_settings,
+#if defined(INNIOASIS_Y1)
+        &nugget_bluetooth_menu,
+#endif
         &settings_menu_item, &theme_menu,
 #ifdef HAVE_RECORDING
         &recording_settings,

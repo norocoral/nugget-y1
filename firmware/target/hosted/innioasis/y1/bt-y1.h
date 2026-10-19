@@ -38,6 +38,8 @@ struct y1_bt_device {
     bool    connected;
     uint8_t link_key[16];
     uint8_t key_type;
+    char    pin[16];
+    int     volume;    /* Remembered volume for this specific device */
 };
 
 void y1_bt_init(void);
@@ -50,13 +52,22 @@ const char *y1_bt_get_connected_name(void);
 int  y1_bt_start_scan(void);
 bool y1_bt_is_scanning(void);
 int  y1_bt_get_devices(struct y1_bt_device *out_devs, int max_devs);
+int  y1_bt_get_paired_devices(struct y1_bt_device *out_devs, int max_devs);
+int  y1_bt_get_new_devices(struct y1_bt_device *out_devs, int max_devs);
 
 int  y1_bt_connect_device(const uint8_t bdaddr[6]);
+int  y1_bt_connect_device_with_pin(const uint8_t bdaddr[6], const char *pin);
 void y1_bt_disconnect(void);
 void y1_bt_forget_device(const uint8_t bdaddr[6]);
 
 bool y1_bt_a2dp_is_streaming(void);
 void y1_bt_a2dp_write_pcm(const void *buf, size_t bytes, unsigned long sampr);
+
+void y1_bt_audio_disconnect_hook(void);
+void y1_bt_audio_connect_hook(void);
+void y1_bt_sync_volume_changed(int vol);
+int  y1_bt_get_active_device_volume(void);
+int  y1_bt_on_set_absolute_volume(int abs_vol);
 
 #endif /* _BT_Y1_H_ */
 

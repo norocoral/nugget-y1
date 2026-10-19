@@ -58,6 +58,9 @@
 #include "splash.h"
 #include "tagcache.h"
 #include "sound.h"
+#if defined(INNIOASIS_Y1)
+#include "bt-y1.h"
+#endif
 #include "playlist.h"
 #include "yesno.h"
 #include "viewport.h"
@@ -644,6 +647,84 @@ static void lo_unplug_change(bool inserted)
 }
 #endif /*HAVE_LINEOUT_DETECTION*/
 
+#if defined(INNIOASIS_Y1)
+static int wired_saved_volume = 0;
+static bool bt_audio_active = false;
+static bool bt_caused_pause = false;
+
+void y1_bt_audio_connect_hook(void)
+{
+    if (!bt_audio_active)
+    {
+        wired_saved_volume = global_status.volume;
+        bt_audio_active = true;
+    }
+
+    int dev_vol = y1_bt_get_active_device_volume();
+    if (dev_vol == 0)
+        dev_vol = -15;
+
+    if (dev_vol > 0)
+        dev_vol = 0;
+    if (dev_vol < sound_min(SOUND_VOLUME))
+        dev_vol = sound_min(SOUND_VOLUME);
+
+    global_status.volume = dev_vol;
+    sound_set_volume(dev_vol);
+    status_save(false);
+
+    if (global_settings.unplug_mode)
+    {
+        int audio_stat = audio_status();
+        if ((audio_stat & AUDIO_STATUS_PLAY) &&
+            bt_caused_pause &&
+            global_settings.unplug_mode > 1)
+        {
+            unpause_action(true);
+        }
+        bt_caused_pause = false;
+    }
+}
+
+void y1_bt_audio_disconnect_hook(void)
+{
+    if (bt_audio_active)
+    {
+        bt_audio_active = false;
+        global_status.volume = wired_saved_volume;
+        sound_set_volume(wired_saved_volume);
+        status_save(false);
+    }
+
+    if (global_settings.unplug_mode)
+    {
+        int audio_stat = audio_status();
+        if ((audio_stat & AUDIO_STATUS_PLAY) &&
+            !(audio_stat & AUDIO_STATUS_PAUSE))
+        {
+            bt_caused_pause = true;
+            pause_action(false);
+        }
+    }
+}
+
+int y1_bt_on_set_absolute_volume(int abs_vol)
+{
+    int min_vol = sound_min(SOUND_VOLUME);
+    int new_vol = min_vol + (abs_vol * (0 - min_vol)) / 127;
+    if (new_vol > 0)
+        new_vol = 0;
+    if (new_vol < min_vol)
+        new_vol = min_vol;
+
+    global_status.volume = new_vol;
+    sound_set_volume(new_vol);
+    status_save(false);
+    y1_bt_sync_volume_changed(new_vol);
+    return new_vol;
+}
+#endif
+
 long default_event_handler_ex(long event, void (*callback)(void *), void *parameter)
 {
 #if CONFIG_PLATFORM & (PLATFORM_ANDROID)
@@ -931,6 +1012,15 @@ void check_bootfile(bool do_rolo)
 /* set volume and save settings */
 void setvol(void)
 {
+#if defined(INNIOASIS_Y1)
+    if (y1_bt_a2dp_is_streaming())
+    {
+        /* Enforce 0 dB max digital volume cap on Bluetooth to prevent distortion */
+        if (global_status.volume > 0)
+            global_status.volume = 0;
+        y1_bt_sync_volume_changed(global_status.volume);
+    }
+#endif
     sound_set_volume(global_status.volume);
     iap_on_volume(global_status.volume);
     global_status.last_volume_change = current_tick;

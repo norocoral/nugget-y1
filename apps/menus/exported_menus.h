@@ -42,6 +42,9 @@ extern const struct menu_item_ex
         audiohw_eq_tone_controls,   /* audiohw_eq_menu.c */
 #endif
         radio_settings_menu,        /* radio_menu.c     */
+#if defined(INNIOASIS_Y1)
+        nugget_bluetooth_menu,      /* settings_menu.c  */
+#endif
         theme_menu;                 /* theme_menu.c     */
 
 struct browse_folder_info {
