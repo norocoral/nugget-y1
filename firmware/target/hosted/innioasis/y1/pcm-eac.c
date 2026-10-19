@@ -41,6 +41,7 @@
 #include "pcm_sink.h"
 #include "pcm_sw_volume.h"
 #include "audiohw.h"
+#include "bt-y1.h"
 
 #define SET_SPEAKER_OFF          0x400443a2
 #define SET_HEADPHONE_ON         0x400443a4
@@ -64,6 +65,7 @@ struct Register_Control {
 };
 
 static int eac_fd = -1;
+static unsigned long current_sampr = 44100;
 
 static inline void set_afereg(int fd, uint32_t offset, uint32_t val, uint32_t mask)
 {
@@ -163,6 +165,7 @@ static size_t pcm_size = 0;
 static void *pcm_worker(void *arg)
 {
     (void)arg;
+    static const char zero_buf[4096] = { 0 };
 
     while (!pcm_thread_exit)
     {
@@ -199,7 +202,8 @@ static void *pcm_worker(void *arg)
                 if (chunk == 0)
                     break;
 
-                ssize_t written = write(eac_fd, buf, chunk);
+                bool bt_active = y1_bt_a2dp_is_streaming();
+                ssize_t written = write(eac_fd, bt_active ? zero_buf : buf, chunk);
                 if (written < 0 && errno != EAGAIN && errno != EINTR) {
                     char wmsg[128];
                     snprintf(wmsg, sizeof(wmsg), "[pcm-eac] write error: %zd (errno=%d %s)\n",
@@ -214,6 +218,9 @@ static void *pcm_worker(void *arg)
                     if (written == 0) {
                         usleep(1000);
                         continue;
+                    }
+                    if (bt_active) {
+                        y1_bt_a2dp_write_pcm(buf, (size_t)written, current_sampr);
                     }
                     remaining -= written;
                     buf += written;
@@ -403,9 +410,8 @@ static void sink_dma_postinit(void)
     play_lock_recursion = 0;
     dma_locked = 0;
     audiohw_postinit();
+    y1_bt_init();
 }
-
-static unsigned long current_sampr = 0;
 
 static void sink_set_freq(uint16_t freq)
 {

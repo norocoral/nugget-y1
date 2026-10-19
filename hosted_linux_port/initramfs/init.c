@@ -201,6 +201,13 @@ static void make_device_nodes(void)
         }
     }
 
+    /* MediaTek WMT / STP / Bluetooth character device nodes */
+    if (access("/dev/stpwmt", F_OK) != 0)  mknod("/dev/stpwmt",  S_IFCHR | 0666, makedev(190, 0));
+    if (access("/dev/stpgps", F_OK) != 0)  mknod("/dev/stpgps",  S_IFCHR | 0666, makedev(191, 0));
+    if (access("/dev/stpbt",  F_OK) != 0)  mknod("/dev/stpbt",   S_IFCHR | 0666, makedev(192, 0));
+    if (access("/dev/wmtWifi", F_OK) != 0) mknod("/dev/wmtWifi", S_IFCHR | 0666, makedev(153, 0));
+    if (access("/dev/urandom", F_OK) != 0) mknod("/dev/urandom", S_IFCHR | 0666, makedev(1, 9));
+
     /* Note: mmcblk1 and partition nodes are created dynamically via /proc/partitions */
 }
 
@@ -290,7 +297,8 @@ static void link_sdcard_to_root(void)
             strcmp(de->d_name, "mnt") == 0 || strcmp(de->d_name, "init") == 0 ||
             strcmp(de->d_name, "rootfs") == 0 || strcmp(de->d_name, "usr") == 0 ||
             strcmp(de->d_name, "storage") == 0 || strcmp(de->d_name, "rockbox") == 0 ||
-            strcmp(de->d_name, "lib") == 0)
+            strcmp(de->d_name, "lib") == 0 || strcmp(de->d_name, "system") == 0 ||
+            strcmp(de->d_name, "data") == 0)
             continue;
 
         char target[512], linkname[512];
@@ -720,6 +728,133 @@ static void unmute_audio(void)
     close(fd);
 }
 
+#include <sys/syscall.h>
+#include <poll.h>
+
+static int load_kernel_module(const char *path, const char *params)
+{
+    int fd = open(path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return -1;
+    struct stat st;
+    if (fstat(fd, &st) < 0 || st.st_size <= 0) {
+        close(fd);
+        return -1;
+    }
+    void *image = malloc(st.st_size);
+    if (!image) {
+        close(fd);
+        return -1;
+    }
+    ssize_t rb = read(fd, image, st.st_size);
+    close(fd);
+    if (rb != st.st_size) {
+        free(image);
+        return -1;
+    }
+    long ret = syscall(__NR_init_module, image, (unsigned long)st.st_size, params ? params : "");
+    free(image);
+    return (ret == 0 || errno == EEXIST) ? 0 : -1;
+}
+
+#define WMT_IOCTL_SET_PATCH_NAME  0x4004a004
+#define WMT_IOCTL_SET_STP_MODE    0x4004a005
+#define WMT_IOCTL_PORT_NAME       0x4004a00d
+#define WMT_IOCTL_SET_PATCH_NUM   0x4004a00e
+#define WMT_IOCTL_SET_PATCH_INFO  0x4004a00f
+#define WMT_IOCTL_GET_CHIP_INFO   0x8004a004
+#define WMT_IOCTL_QUERY_CHIP_ID   0x8004a00c
+
+struct wmt_patch_info {
+    int download_seq;
+    char addresse[4];
+    char patch_name[256];
+};
+
+static void init_bluetooth_subsystem(void)
+{
+    /* Ensure /system/etc/firmware symlink points to /etc/firmware for mtk_stp_wmt.ko */
+    mkdir("/system", 0755);
+    mkdir("/system/etc", 0755);
+    unlink("/system/etc/firmware");
+    (void)!symlink("/etc/firmware", "/system/etc/firmware");
+    mkdir("/data", 0777);
+
+    if (load_kernel_module("/lib/modules/mtk_stp_wmt.ko", "") == 0) {
+        log_line("Loaded MT6572 WMT combo driver (mtk_stp_wmt.ko).\n");
+    } else if (load_kernel_module("/mnt/sdcard/.rockbox/bt/mtk_stp_wmt.ko", "") == 0) {
+        log_line("Loaded MT6572 WMT combo driver from SD card.\n");
+    }
+
+    if (load_kernel_module("/lib/modules/mtk_stp_bt.ko", "") == 0) {
+        log_line("Loaded MT6572 STP Bluetooth driver (mtk_stp_bt.ko).\n");
+    } else if (load_kernel_module("/mnt/sdcard/.rockbox/bt/mtk_stp_bt.ko", "") == 0) {
+        log_line("Loaded MT6572 STP Bluetooth driver from SD card.\n");
+    }
+
+    if (access("/dev/stpwmt", F_OK) != 0) mknod("/dev/stpwmt", S_IFCHR | 0666, makedev(190, 0));
+    if (access("/dev/stpbt",  F_OK) != 0) mknod("/dev/stpbt",  S_IFCHR | 0666, makedev(192, 0));
+
+    /* Fork background WMT firmware launcher daemon (replaces 6620_launcher -m 3 -p /etc/firmware) */
+    pid_t wmt_pid = fork();
+    if (wmt_pid == 0) {
+        int wmt_fd = -1;
+        for (int retry = 0; retry < 20; retry++) {
+            wmt_fd = open("/dev/stpwmt", O_RDWR | O_NOCTTY);
+            if (wmt_fd >= 0) break;
+            usleep(200000);
+        }
+        if (wmt_fd < 0) _exit(1);
+
+        ioctl(wmt_fd, WMT_IOCTL_SET_PATCH_NAME, "/etc/firmware");
+        ioctl(wmt_fd, WMT_IOCTL_SET_STP_MODE, (3 & 0x0F) | 0x20); /* Mode 3: BTIF */
+        ioctl(wmt_fd, WMT_IOCTL_PORT_NAME, 0);
+
+        struct pollfd pfd;
+        pfd.fd = wmt_fd;
+        pfd.events = POLLIN;
+
+        while (1) {
+            int pr = poll(&pfd, 1, 2000);
+            if (pr > 0 && (pfd.revents & POLLIN)) {
+                char cmd[256] = {0};
+                ssize_t rb = read(wmt_fd, cmd, 255);
+                if (rb > 0 && strncmp(cmd, "srh_patch", 9) == 0) {
+                    (void)ioctl(wmt_fd, WMT_IOCTL_QUERY_CHIP_ID, 0);
+                    (void)ioctl(wmt_fd, WMT_IOCTL_GET_CHIP_INFO, 2);
+
+                    const char *patch_path = "/etc/firmware/mt6572_82_patch_e1_0_hdr.bin";
+                    int pfd_bin = open(patch_path, O_RDONLY);
+                    if (pfd_bin >= 0) {
+                        unsigned char hdr[28] = {0};
+                        if (read(pfd_bin, hdr, sizeof(hdr)) == sizeof(hdr)) {
+                            int patch_num = (hdr[24] >> 4) & 0x0F;
+                            int dl_seq    = hdr[24] & 0x0F;
+                            if (patch_num <= 0) patch_num = 1;
+                            if (dl_seq <= 0) dl_seq = 1;
+
+                            ioctl(wmt_fd, WMT_IOCTL_SET_PATCH_NUM, patch_num);
+
+                            struct wmt_patch_info pinfo;
+                            memset(&pinfo, 0, sizeof(pinfo));
+                            pinfo.download_seq = dl_seq;
+                            pinfo.addresse[0] = 0;
+                            pinfo.addresse[1] = (char)hdr[25];
+                            pinfo.addresse[2] = (char)hdr[26];
+                            pinfo.addresse[3] = (char)hdr[27];
+                            strncpy(pinfo.patch_name, patch_path, sizeof(pinfo.patch_name) - 1);
+
+                            ioctl(wmt_fd, WMT_IOCTL_SET_PATCH_INFO, &pinfo);
+                        }
+                        close(pfd_bin);
+                    }
+                    (void)!write(wmt_fd, "ok", 2);
+                }
+            }
+        }
+        _exit(0);
+    }
+}
+
 static void enable_touch_keys(void)
 {
     int fd = open("/proc/tpd_keys_enable", O_WRONLY | O_CLOEXEC);
@@ -863,9 +998,10 @@ int main(int argc, char *argv[])
     /* 7. Apply aggressive battery and power saving optimizations */
     optimize_power_and_battery();
 
-    /* 8. Hardware initialization & USB Gadget */
+    /* 8. Hardware initialization, Bluetooth WMT/STP subsystem, & USB Gadget */
     enable_touch_keys();
     unmute_audio();
+    init_bluetooth_subsystem();
     setup_usb_gadget(active_sd_dev[0] ? active_sd_dev : NULL,
                      active_ext_dev[0] ? active_ext_dev : NULL);
 

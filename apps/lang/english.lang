@@ -17470,3 +17470,18 @@
     *: "Double click to unhold"
   </voice>
 </phrase>
+<phrase>
+  id: LANG_Y1_BLUETOOTH
+  desc: in Settings -> Nugget -> Bluetooth
+  user: core
+  <source>
+    *: "Bluetooth"
+  </source>
+  <dest>
+    *: "Bluetooth"
+  </dest>
+  <voice>
+    *: "Bluetooth"
+  </voice>
+</phrase>
+

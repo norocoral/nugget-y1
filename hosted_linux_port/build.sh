@@ -102,6 +102,16 @@ for lib in ld-linux-armhf.so.3 libc.so.6; do
     $STRIP --strip-unneeded "$ROOTFS_DIR/lib/$lib" 2>/dev/null || true
 done
 
+# Bundle MT6572 Bluetooth kernel modules and CONNSYS firmware
+if [ -d "$SCRIPT_DIR/bt_blobs" ]; then
+    echo "[*] Bundling MT6572 Bluetooth kernel modules and CONNSYS firmware..."
+    mkdir -p "$ROOTFS_DIR/lib/modules" "$ROOTFS_DIR/etc/firmware"
+    cp "$SCRIPT_DIR/bt_blobs/mtk_stp_wmt.ko" "$ROOTFS_DIR/lib/modules/" 2>/dev/null || true
+    cp "$SCRIPT_DIR/bt_blobs/mtk_stp_bt.ko" "$ROOTFS_DIR/lib/modules/" 2>/dev/null || true
+    cp "$SCRIPT_DIR/bt_blobs/mt6572_82_patch_e1_0_hdr.bin" "$ROOTFS_DIR/etc/firmware/" 2>/dev/null || true
+    cp "$SCRIPT_DIR/bt_blobs/WMT_SOC.cfg" "$ROOTFS_DIR/etc/firmware/" 2>/dev/null || true
+fi
+
 # 4. Build Rockbox
 echo "[3/5] Configuring and compiling Rockbox..."
 mkdir -p "$BUILD_DIR"
@@ -126,11 +136,14 @@ chmod +x "$ROOTFS_DIR/rockbox"
 # Package SD card assets (.rockbox folder with all codecs and plugins)
 if [ -f "$BUILD_DIR/rockbox.zip" ]; then
     cp "$BUILD_DIR/rockbox.zip" "$SCRIPT_DIR/rockbox_sdcard.zip"
-    # Also add the raw and png image assets into .rockbox on the SD card
+    # Also add the raw and png image assets and BT blobs into .rockbox on the SD card
     cd "$ROOTFS_DIR"
-    mkdir -p .rockbox
+    mkdir -p .rockbox .rockbox/bt
     cp etc/*.raw etc/*.png .rockbox/ 2>/dev/null || true
-    zip -u -q "$SCRIPT_DIR/rockbox_sdcard.zip" .rockbox/*.raw .rockbox/*.png 2>/dev/null || true
+    if [ -d "$SCRIPT_DIR/bt_blobs" ]; then
+        cp "$SCRIPT_DIR/bt_blobs/"* .rockbox/bt/ 2>/dev/null || true
+    fi
+    zip -u -q "$SCRIPT_DIR/rockbox_sdcard.zip" .rockbox/*.raw .rockbox/*.png .rockbox/bt/* 2>/dev/null || true
     rm -rf .rockbox
     cd "$SCRIPT_DIR"
     echo "[+] Created SD card asset archive: $SCRIPT_DIR/rockbox_sdcard.zip"

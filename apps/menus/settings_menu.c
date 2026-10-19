@@ -426,12 +426,188 @@ MENUITEM_SETTING(governor, &global_settings.governor, NULL);
 
 #if defined(INNIOASIS_Y1)
 #include "cpufreq-y1.h"
+#include "bt-y1.h"
+#include "list.h"
+
 MENUITEM_SETTING_W_TEXT(y1_screen_res_setting, &global_settings.y1_screen_resolution, "Screen Resolution", NULL);
 MENUITEM_SETTING_W_TEXT(y1_always_on_screen_item, &global_settings.always_on_screen, "Always On Display", NULL);
 MENUITEM_SETTING_W_TEXT(y1_aod_wps_item, &global_settings.aod_wps_only, "AOD: On WPS Only", NULL);
 MENUITEM_SETTING_W_TEXT(y1_aod_playback_item, &global_settings.aod_playback_only, "AOD: When Playing Only", NULL);
 MENUITEM_SETTING_W_TEXT(y1_cpu_mode_setting, &global_settings.y1_cpu_mode, "CPU Frequency Mode", NULL);
 MENUITEM_SETTING_W_TEXT(y1_cpu_cores_setting, &global_settings.y1_cpu_cores, "Second CPU Core", NULL);
+MENUITEM_SETTING(y1_bt_enable_item, &global_settings.bt_enabled, NULL);
+
+static struct y1_bt_device ui_bt_devs[Y1_BT_MAX_DEVICES];
+static int ui_bt_dev_count = 0;
+
+static char *y1_bt_status_getname(int selected_item, void *data, char *buffer, size_t buffer_len)
+{
+    (void)selected_item;
+    (void)data;
+    snprintf(buffer, buffer_len, "Status: %s", y1_bt_get_status_str());
+    return buffer;
+}
+
+static int y1_bt_status_speak(int selected_item, void *data)
+{
+    (void)selected_item;
+    (void)data;
+    return 0;
+}
+
+static int y1_bt_status_action(void)
+{
+    splashf(HZ * 2, "Bluetooth: %s", y1_bt_get_status_str());
+    return 0;
+}
+
+MENUITEM_FUNCTION_DYNTEXT(y1_bt_status_item, 0, y1_bt_status_action,
+                          y1_bt_status_getname, y1_bt_status_speak,
+                          NULL, NULL, Icon_NOICON);
+
+static const char *y1_bt_list_get_name(int selected_item, void *data,
+                                       char *buffer, size_t buffer_len)
+{
+    (void)data;
+    if (ui_bt_dev_count == 0) {
+        if (y1_bt_is_scanning())
+            return "Scanning for devices...";
+        return "No devices found (Select to rescan)";
+    }
+    if (selected_item < 0 || selected_item >= ui_bt_dev_count)
+        return "";
+
+    const struct y1_bt_device *d = &ui_bt_devs[selected_item];
+    if (d->connected) {
+        snprintf(buffer, buffer_len, "[Connected] %s", d->name);
+    } else if (d->paired) {
+        snprintf(buffer, buffer_len, "[Paired] %s", d->name);
+    } else {
+        snprintf(buffer, buffer_len, "%s (%d dBm)", d->name, (int)d->rssi);
+    }
+    return buffer;
+}
+
+static int menu_y1_bt_scan_and_connect(void)
+{
+    if (!global_settings.bt_enabled) {
+        global_settings.bt_enabled = true;
+        y1_bt_set_enabled(true);
+        settings_save();
+    }
+
+    y1_bt_start_scan();
+    ui_bt_dev_count = y1_bt_get_devices(ui_bt_devs, Y1_BT_MAX_DEVICES);
+
+    struct gui_synclist bt_list;
+    gui_synclist_init(&bt_list, y1_bt_list_get_name, NULL, false, 1, NULL);
+    gui_synclist_set_title(&bt_list, "Bluetooth Devices", Icon_NOICON);
+    gui_synclist_set_nb_items(&bt_list, ui_bt_dev_count > 0 ? ui_bt_dev_count : 1);
+    gui_synclist_select_item(&bt_list, 0);
+    gui_synclist_draw(&bt_list);
+
+    while (true)
+    {
+        int action = get_action(CONTEXT_LIST, HZ / 2);
+
+        /* Refresh discovered device list dynamically */
+        int new_count = y1_bt_get_devices(ui_bt_devs, Y1_BT_MAX_DEVICES);
+        if (new_count != ui_bt_dev_count || action == ACTION_NONE) {
+            ui_bt_dev_count = new_count;
+            int disp_items = ui_bt_dev_count > 0 ? ui_bt_dev_count : 1;
+            gui_synclist_set_nb_items(&bt_list, disp_items);
+            if (gui_synclist_get_sel_pos(&bt_list) >= disp_items)
+                gui_synclist_select_item(&bt_list, disp_items - 1);
+            gui_synclist_draw(&bt_list);
+        }
+
+        if (action == ACTION_NONE)
+            continue;
+
+        if (gui_synclist_do_button(&bt_list, &action))
+            continue;
+
+        if (action == ACTION_STD_CANCEL)
+            break;
+
+        if (action == ACTION_STD_OK)
+        {
+            if (ui_bt_dev_count == 0) {
+                y1_bt_start_scan();
+                gui_synclist_draw(&bt_list);
+                continue;
+            }
+            int sel = gui_synclist_get_sel_pos(&bt_list);
+            if (sel >= 0 && sel < ui_bt_dev_count) {
+                struct y1_bt_device target = ui_bt_devs[sel];
+                y1_bt_connect_device(target.bdaddr);
+                splashf(HZ, "Connecting to %s...", target.name);
+
+                /* Wait up to 7 seconds for connection / A2DP streaming */
+                for (int w = 0; w < 14; w++) {
+                    sleep(HZ / 2);
+                    enum y1_bt_state st = y1_bt_get_state();
+                    if (st == Y1_BT_STATE_STREAMING || st == Y1_BT_STATE_CONNECTED) {
+                        splashf(HZ, "Connected: %s", target.name);
+                        break;
+                    }
+                }
+                ui_bt_dev_count = y1_bt_get_devices(ui_bt_devs, Y1_BT_MAX_DEVICES);
+                gui_synclist_set_nb_items(&bt_list, ui_bt_dev_count > 0 ? ui_bt_dev_count : 1);
+                gui_synclist_draw(&bt_list);
+            }
+        }
+        else if (action == ACTION_STD_CONTEXT)
+        {
+            int sel = gui_synclist_get_sel_pos(&bt_list);
+            if (ui_bt_dev_count > 0 && sel >= 0 && sel < ui_bt_dev_count) {
+                struct y1_bt_device target = ui_bt_devs[sel];
+                const char *lines[] = { "Forget Bluetooth Device?", target.name };
+                const struct text_message message = { lines, 2 };
+                if (gui_syncyesno_run(&message, NULL, NULL) == YESNO_YES) {
+                    y1_bt_forget_device(target.bdaddr);
+                    ui_bt_dev_count = y1_bt_get_devices(ui_bt_devs, Y1_BT_MAX_DEVICES);
+                    gui_synclist_set_nb_items(&bt_list, ui_bt_dev_count > 0 ? ui_bt_dev_count : 1);
+                    gui_synclist_select_item(&bt_list, 0);
+                }
+                gui_synclist_draw(&bt_list);
+            } else {
+                y1_bt_start_scan();
+                gui_synclist_draw(&bt_list);
+            }
+        }
+    }
+    return 0;
+}
+
+static int menu_y1_bt_rescan_action(void)
+{
+    if (!global_settings.bt_enabled) {
+        global_settings.bt_enabled = true;
+        y1_bt_set_enabled(true);
+        settings_save();
+    }
+    y1_bt_start_scan();
+    return menu_y1_bt_scan_and_connect();
+}
+
+static int menu_y1_bt_disconnect_action(void)
+{
+    y1_bt_disconnect();
+    splash(HZ, "Bluetooth Disconnected");
+    return 0;
+}
+
+MENUITEM_FUNCTION(y1_bt_scan_item, 0, "Scan & Pair Device...",
+                  menu_y1_bt_rescan_action, NULL, Icon_NOICON);
+MENUITEM_FUNCTION(y1_bt_disconnect_item, 0, "Disconnect Audio",
+                  menu_y1_bt_disconnect_action, NULL, Icon_NOICON);
+
+MAKE_MENU(nugget_bluetooth_menu, ID2P(LANG_Y1_BLUETOOTH), 0, Icon_NOICON,
+          &y1_bt_enable_item,
+          &y1_bt_status_item,
+          &y1_bt_scan_item,
+          &y1_bt_disconnect_item);
 
 MENUITEM_SETTING_W_TEXT(y1_mfb_single_item, &global_settings.mfb_single_click, "1 Click MFB", NULL);
 MENUITEM_SETTING_W_TEXT(y1_mfb_double_item, &global_settings.mfb_double_click, "Double Click MFB", NULL);
@@ -457,6 +633,7 @@ MAKE_MENU(nugget_device_menu, "Device", 0, Icon_NOICON,
           &nugget_headphone_menu);
 
 MAKE_MENU(nugget_menu, "Nugget", 0, Icon_NOICON,
+          &nugget_bluetooth_menu,
           &nugget_device_menu);
 
 #ifdef HAVE_SW_POWEROFF
@@ -909,6 +1086,7 @@ MAKE_MENU(settings_menu_item, ID2P(LANG_GENERAL_SETTINGS), 0,
           Icon_General_settings_menu,
 #if defined(INNIOASIS_Y1)
           &nugget_menu,
+          &nugget_bluetooth_menu,
 #endif
           &wps_settings,
           &playlist_settings, &file_menu,

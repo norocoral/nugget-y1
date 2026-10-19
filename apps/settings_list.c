@@ -81,6 +81,7 @@
 #endif
 #if defined(INNIOASIS_Y1)
 #include "cpufreq-y1.h"
+#include "bt-y1.h"
 extern void y1_set_resolution_setting(int mode);
 extern void y1_apply_resolution_setting(int mode);
 extern void y1_set_always_on_screen(bool on);
@@ -2684,6 +2685,12 @@ const struct settings_list settings[] = {
                   false,
                   "double click unhold",
                   NULL),
+    OFFON_SETTING(0,
+                  bt_enabled,
+                  LANG_Y1_BLUETOOTH,
+                  false,
+                  "bluetooth",
+                  y1_bt_set_enabled),
 #endif
 #if !defined(SIMULATOR) && !defined(USB_NONE) && (defined(HAVE_USB_ADB) || defined(HAVE_USB_POWER))
     CHOICE_SETTING(0,
