@@ -13,10 +13,16 @@
   - Dynamic sample rate switching: bit-perfect native playback for both **44.1 kHz** and **48 kHz** tracks without pitch or speed distortion.
   - Real-time audio thread priority (`SCHED_FIFO` 80) and 4-byte frame alignment preventing jitter, underruns, or channel phase slips.
   - Authentic Rockbox logarithmic volume scale (-74 dB to +6 dB in 1 dB steps) with digital clipping protection ($\le 0\text{ dB}$) and full +12dB hardware analog headphone amplifier gain.
-- 🖥️ **Dual Screen Resolutions:**
+- 🖥️ **Dual Screen Resolutions & Always-On Display:**
   - **Normal (480x360):** Native 1:1 hardware resolution.
-  - **Classic (320x240 stretched):** Nearest-neighbor full-screen scaling for native iPod Classic Rockbox themes.
-  - Configurable in `Settings -> General Settings -> System -> Screen Resolution` (applies on next manual reboot).
+  - **Classic (320x240 stretched):** Nearest-neighbor full-screen scaling for native iPod Classic Rockbox themes. Configurable in `Settings -> General Settings -> System -> Screen Resolution` (applies on next manual reboot).
+  - **Always On Screen Mode:** In `Settings -> General Settings -> Display -> Always On Screen`. When enabled, dimming reduces backlight by 50% rather than turning it off, turns off the button LEDs, throttles hardware display refresh rate to 1 FPS, and puts the MTK display subsystem into power-saving mode (saving 97% of display bus bandwidth).
+- ⚡ **Aggressive Battery Optimizations:**
+  - **Zero Quiescent Idle Current:** Analog headphone amplifier and MT6323 audio clocks power down when audio playback stops/pauses.
+  - **Screen-Off CPU Throttling:** Automatically drops CPU clock to 598 MHz power-saving mode while screen is off, restoring dynamic clocking upon wake.
+  - **Single-Core Audio Processing:** Power-gates secondary Cortex-A7 core during playback.
+  - **SPM Deep Idle:** MediaTek SPM deep idle state with CPU power down active during idle.
+  - **Storage Power Management:** Linux VM dirty writeback interval extended to 120s with runtime PM enabled across MMC controllers.
 - 🔒 **Automatic HOLD Mode & Advanced Key Lock:**
   - **Auto-Hold:** Whenever the backlight turns off (via timeout or pressing the Power button), the device automatically enters HOLD mode.
   - **Advanced Key Lock:** Settings in `Settings -> General Settings -> System -> Advanced Key Lock` are applied while the screen is off (e.g. keep Volume or Play/Pause buttons active in your pocket). All other buttons are silently blocked without waking the screen.
@@ -39,14 +45,14 @@
 
 | File | Size | Description |
 | :--- | :--- | :--- |
-| `boot_rockbox.img` | 6,092,800 bytes | Flashable boot image (kernel + initramfs) for the `boot` (`BOOTIMG`) partition. Fits within 6MB partition limit. |
+| `boot_rockbox.img` | 6,094,848 bytes | Flashable boot image (kernel + initramfs) for the `boot` (`BOOTIMG`) partition. Fits within 6MB partition limit with 196,608 bytes headroom. |
 | `rockbox_sdcard.zip` | ~14.4 MB | SD card root files (`.rockbox` directory with all audio codecs, plugins, fonts, themes, and screen assets). |
 | `SHA256SUMS.txt` | Text | SHA-256 verification checksums for all release binaries. |
 
 ### SHA-256 Checksums
 ```text
-484ad91d5ecc9760c391179b141978a314c02af01934fea874c9f9096adccccd  boot_rockbox.img
-225c5ca7f1ee5eebc414514024cc2c947ac604777f37197d3b140c1e1c66562d  rockbox_sdcard.zip
+198fba3f33aa7cf27b2a7ba28b483728d8ba1ff43a7c409fae07e58cd53bd0a7  boot_rockbox.img
+3c34847d1c1ec674e6e6221530d1d2e915b5f9f4768d4afc0f8acd1ef13b004b  rockbox_sdcard.zip
 ```
 
 ---
@@ -91,9 +97,8 @@
 | **Scroll / Navigate** | Click Wheel | Clockwise = Next/Down, Counter-Clockwise = Prev/Up |
 | **Select / OK** | Center Button (Short Press) | Activates selected menu item / opens folder |
 | **Context Menu** | Center Button (Hold ~1s) | Opens track/file context menu |
-| **HOLD Mode (Lock)** | Center Button (Hold 5s) | Locks keypad with `Key lock on` notification |
-| **UNHOLD Mode (Unlock)** | Center (Hold 5s) $\to$ Click Center | Prompts `Click Center to unlock`, then 1 click to unlock |
-| **Wake Screen** | Any Button | Turns backlight ON without triggering actions |
+| **Auto HOLD Mode (Screen Off)** | Backlight Timeout / Power | Automatically engages HOLD mode with Advanced Key Lock settings applied |
+| **UNHOLD Mode (Unlock)** | Center Button | Unlocks keypad and turns screen ON (wake click is swallowed) |
 | **Back / Menu** | Top Menu Button (Short Press) | Navigates back / returns to parent menu |
 | **Quick Screen** | Top Menu Button (Long Press) | Opens Rockbox Quick Screen settings |
 | **Play / Pause** | Bottom Play Button (Short Press) | Toggles playback |
