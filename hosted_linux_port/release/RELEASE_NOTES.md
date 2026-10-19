@@ -51,8 +51,8 @@
 
 ### SHA-256 Checksums
 ```text
-198fba3f33aa7cf27b2a7ba28b483728d8ba1ff43a7c409fae07e58cd53bd0a7  boot_rockbox.img
-3c34847d1c1ec674e6e6221530d1d2e915b5f9f4768d4afc0f8acd1ef13b004b  rockbox_sdcard.zip
+348cfb8f1023b5f9d72f1ed222bc9780a79333e0dd689c4d3eb02a2eabab4fc2  boot_rockbox.img
+026b36846fb7c8a2e06b87fd04518beeaeba5d1534be66d1fd3c01405259a7d3  rockbox_sdcard.zip
 ```
 
 ---
