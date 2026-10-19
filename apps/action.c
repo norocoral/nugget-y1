@@ -1226,6 +1226,15 @@ static int get_action_worker(action_last_t *last, action_cur_t *cur)
 {
 #ifdef HAVE_BACKLIGHT
     static bool center_unheld_screen = false;
+#if defined(INNIOASIS_Y1) && !defined(BOOTLOADER)
+    static long last_center_click_tick = 0;
+    static bool waiting_second_center_click = false;
+#endif
+#endif
+
+#if defined(INNIOASIS_Y1)
+    extern void y1_backlight_idle_check(void);
+    y1_backlight_idle_check();
 #endif
 
     send_event(GUI_EVENT_ACTIONUPDATE, NULL);
@@ -1251,13 +1260,32 @@ static int get_action_worker(action_last_t *last, action_cur_t *cur)
     {
         int raw_btn = cur->button & ~(BUTTON_REPEAT | BUTTON_REL);
         bool is_rel = (cur->button & BUTTON_REL) != 0;
+        bool is_rep = (cur->button & BUTTON_REPEAT) != 0;
 
         /* Only the Center button (BUTTON_SELECT) wakes the device and exits HOLD mode */
         if (raw_btn == BUTTON_SELECT)
         {
-            if (!is_rel)
+            if (!is_rel && !is_rep)
             {
-                /* Center button pressed: wake screen and unlock keys */
+#if defined(INNIOASIS_Y1) && !defined(BOOTLOADER)
+                if (global_settings.double_click_unhold)
+                {
+                    if (waiting_second_center_click &&
+                        TIME_BEFORE(current_tick, last_center_click_tick + (HZ / 2)))
+                    {
+                        waiting_second_center_click = false;
+                    }
+                    else
+                    {
+                        waiting_second_center_click = true;
+                        last_center_click_tick = current_tick;
+                        cur->action = ACTION_NONE;
+                        last->button = BUTTON_NONE | BUTTON_REL;
+                        return ACTION_NONE;
+                    }
+                }
+#endif
+                /* Center button pressed (or double-clicked): wake screen and unlock keys */
 #if defined(INNIOASIS_Y1)
                 if (y1_is_display_power_saving()) {
                     y1_set_display_power_saving(false);
@@ -1284,19 +1312,19 @@ static int get_action_worker(action_last_t *last, action_cur_t *cur)
             }
             else
             {
-                /* Center button release: swallow cleanly */
-                if (center_unheld_screen)
-                {
-                    center_unheld_screen = false;
-                    cur->action = ACTION_NONE;
-                    last->button = BUTTON_NONE | BUTTON_REL;
-                    return ACTION_NONE;
-                }
+                /* Center button repeat or release while locked: swallow cleanly */
+                center_unheld_screen = false;
+                cur->action = ACTION_NONE;
+                last->button = BUTTON_NONE | BUTTON_REL;
+                return ACTION_NONE;
             }
         }
     }
     else
     {
+#if defined(INNIOASIS_Y1) && !defined(BOOTLOADER)
+        waiting_second_center_click = false;
+#endif
         /* Backlight is ON and keys are not locked */
         if (center_unheld_screen)
         {

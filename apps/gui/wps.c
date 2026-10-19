@@ -769,6 +769,10 @@ long gui_wps_show(void)
         else
         {
             gwps_caption_backlight(state);
+#if defined(INNIOASIS_Y1)
+            extern void y1_backlight_idle_check(void);
+            y1_backlight_idle_check();
+#endif
 
             FOR_NB_SCREENS(i)
             {

@@ -2678,6 +2678,12 @@ const struct settings_list settings[] = {
                    NULL,
                    10,
                    MFB_ACTION_CHOICES),
+    OFFON_SETTING(0,
+                  double_click_unhold,
+                  LANG_Y1_DOUBLE_CLICK_UNHOLD,
+                  false,
+                  "double click unhold",
+                  NULL),
 #endif
 #if !defined(SIMULATOR) && !defined(USB_NONE) && (defined(HAVE_USB_ADB) || defined(HAVE_USB_POWER))
     CHOICE_SETTING(0,

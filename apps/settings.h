@@ -940,6 +940,7 @@ struct user_settings
     int mfb_triple_click;
     int mfb_hold_2s;
     int mfb_hold_5s;
+    bool double_click_unhold;
 #endif
 #if !defined(SIMULATOR) && !defined(USB_NONE) && (defined(HAVE_USB_ADB) || defined(HAVE_USB_POWER))
     int usb_mode;

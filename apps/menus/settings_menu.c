@@ -410,9 +410,14 @@ MENUITEM_SETTING(bt_selective_actions,
 MENUITEM_FUNCTION(sel_softlock_mask, 0, ID2P(LANG_SETTINGS),
                   selectivesoftlock_set_mask, selectivesoftlock_callback,
                   Icon_Menu_setting);
-
+#if defined(INNIOASIS_Y1)
+MENUITEM_SETTING_W_TEXT(y1_double_click_unhold_item, &global_settings.double_click_unhold, "Double Click to unHOLD", NULL);
+MAKE_MENU(sel_softlock, ID2P(LANG_SOFTLOCK_SELECTIVE),
+          NULL, Icon_Menu_setting, &bt_selective_actions, &sel_softlock_mask, &y1_double_click_unhold_item);
+#else
 MAKE_MENU(sel_softlock, ID2P(LANG_SOFTLOCK_SELECTIVE),
           NULL, Icon_Menu_setting, &bt_selective_actions, &sel_softlock_mask);
+#endif
 #endif /* !HAS_BUTTON_HOLD */
 
 #if defined(DX50) || defined(DX90)
@@ -446,6 +451,7 @@ MAKE_MENU(nugget_device_menu, "Device", 0, Icon_NOICON,
           &y1_always_on_screen_item,
           &y1_aod_wps_item,
           &y1_aod_playback_item,
+          &y1_double_click_unhold_item,
           &y1_cpu_mode_setting,
           &y1_cpu_cores_setting,
           &nugget_headphone_menu);

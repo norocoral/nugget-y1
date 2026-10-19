@@ -130,17 +130,24 @@ void backlight_hw_off(void)
 #if defined(BACKLIGHT_INNIOASIS)
     int target_bl = y1_should_always_on() ? BACKLIGHT_POWER_REDUCED : BACKLIGHT_POWER_OFF;
     if (last_bl != target_bl) {
+        int prev_bl = last_bl;
         last_bl = target_bl;
-        /* Apply HOLD mode immediately when screen goes idle */
-        y1_enter_hold_mode();
-        y1_set_screen_off_power_mode(true);
+        if (prev_bl == BACKLIGHT_POWER_ON || prev_bl == -1) {
+            /* Apply HOLD mode immediately when screen goes idle */
+            y1_enter_hold_mode();
+            y1_set_screen_off_power_mode(true);
+        }
         if (target_bl == BACKLIGHT_POWER_REDUCED) {
             /* Always On Screen mode:
              * Instead of turning off backlight completely:
-             * 1. Reduce brightness to 50% of the current brightness
-             * 2. Turn off button backlight
-             * 3. Enable power saving mode on the display (1 FPS refresh rate)
+             * 1. Ensure LCD is active (in case we are waking into AOD from screen-off)
+             * 2. Reduce brightness to 50% of the current brightness
+             * 3. Turn off button backlight
+             * 4. Enable power saving mode on the display (1 FPS refresh rate)
              * Keep LCD panel active (do not suspend) */
+#ifdef HAVE_LCD_ENABLE
+            lcd_enable(true);
+#endif
             int dimmed = current_brightness / 2;
             if (dimmed < 5) dimmed = 5;
             int hw_val = (dimmed * 255) / 100;
@@ -148,6 +155,9 @@ void backlight_hw_off(void)
             sysfs_set_int("/sys/class/leds/button-backlight/brightness", 0);
             y1_set_display_power_saving(true);
             return;
+        }
+        if (y1_is_display_power_saving()) {
+            y1_set_display_power_saving(false);
         }
         write_bl_hw(0);
         sysfs_set_int("/sys/class/leds/button-backlight/brightness", 0);
@@ -168,6 +178,15 @@ void backlight_hw_off(void)
     }
 #endif
 }
+
+#if defined(BACKLIGHT_INNIOASIS)
+void y1_backlight_idle_check(void)
+{
+    if (last_bl == BACKLIGHT_POWER_REDUCED || last_bl == BACKLIGHT_POWER_OFF) {
+        backlight_hw_off();
+    }
+}
+#endif
 
 void backlight_hw_brightness(int brightness)
 {

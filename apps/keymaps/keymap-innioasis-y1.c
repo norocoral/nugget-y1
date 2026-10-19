@@ -103,11 +103,12 @@ static const struct button_mapping button_context_settings[] = {
 }; /* button_context_settings */
 
 static const struct button_mapping button_context_yesno[] = {
-    { ACTION_YESNO_ACCEPT,          BUTTON_SELECT,                      BUTTON_NONE },
-    { ACTION_YESNO_ACCEPT,          BUTTON_SELECT|BUTTON_REL,           BUTTON_NONE },
-    { ACTION_STD_CANCEL,            BUTTON_PLAY,                        BUTTON_NONE },
+    { ACTION_YESNO_ACCEPT,          BUTTON_PLAY,                        BUTTON_NONE },
+    { ACTION_YESNO_ACCEPT,          BUTTON_PLAY|BUTTON_REL,             BUTTON_NONE },
+    { ACTION_STD_CANCEL,            BUTTON_SELECT,                      BUTTON_NONE },
     { ACTION_STD_CANCEL,            BUTTON_MENU,                        BUTTON_NONE },
     { ACTION_STD_CANCEL,            BUTTON_LEFT,                        BUTTON_NONE },
+    { ACTION_STD_CANCEL,            BUTTON_RIGHT,                       BUTTON_NONE },
 
     LAST_ITEM_IN_LIST__NEXTLIST(CONTEXT_STD)
 }; /* button_context_yesno */
