@@ -37,6 +37,7 @@
 #include "button.h"
 #include "settings.h"
 #include "bt-y1.h"
+#include "sbc/sbc.h"
 
 #define PAIRED_DB_PATH "/mnt/sdcard/.rockbox/bt_paired.dat"
 #define PAIRED_MAGIC   0x59314254U /* 'Y1BT' */
@@ -269,300 +270,21 @@ static volatile size_t pcm_ring_w = 0;
 static uint16_t rtp_seq_num = 1;
 static uint32_t rtp_timestamp = 0;
 
-/* Official Bluetooth A2DP Specification 8-subband prototype filter C[0..79] (Q15 scaled) */
-static const int32_t sbc_proto_8[80] = {
-          0,       2,       5,       8,      13,      18,      24,      30,
-         37,      43,      49,      53,      56,      56,      52,      44,
-         29,       8,     -21,     -59,    -107,    -165,    -234,    -313,
-       -401,    -496,    -595,    -696,    -794,    -883,    -958,   -1011,
-      -1035,   -1022,    -963,    -851,    -676,    -433,    -114,     284,
-        763,    1324,    1966,    2685,    3475,    4326,    5227,    6163,
-       7119,    8076,    9013,    9911,   10746,   11499,   12149,   12679,
-      13075,   13326,   13425,   13371,   13166,   12818,   12338,   11743,
-      11051,   10285,    9469,    8626,    7780,    6953,    6166,    5435,
-       4774,    4192,    3695,    3283,    2954,    2701,    2515,    2384
-};
+static sbc_t a2dp_sbc;
+static bool  a2dp_sbc_ready = false;
 
-/* Cos table for 8-band analysis matrix M[k][i] = cos((i + 0.5)*(k - 4)*pi/8) in Q14 */
-static int16_t sbc_cos_mat[8][16];
-static int16_t sbc_X[2][80];
-static bool sbc_tables_ready = false;
-
-static void sbc_init_tables(void)
+static void reinit_a2dp_sbc(void)
 {
-    if (sbc_tables_ready)
-        return;
-    /* Precomputed Q14 cosine values for cos(n * pi / 16) for n = 0..31 */
-    static const int16_t cos_pi_16[32] = {
-         16384,  16069,  15137,  13623,  11585,   9102,   6270,   3196,
-             0,  -3196,  -6270,  -9102, -11585, -13623, -15137, -16069,
-        -16384, -16069, -15137, -13623, -11585,  -9102,  -6270,  -3196,
-             0,   3196,   6270,   9102,  11585,  13623,  15137,  16069
-    };
-    for (int i = 0; i < 8; i++) {
-        for (int k = 0; k < 16; k++) {
-            /* angle = (2*i + 1) * (k - 4) * pi / 16 */
-            int n = ((2 * i + 1) * (k - 4)) & 31;
-            sbc_cos_mat[i][k] = cos_pi_16[n];
-        }
-    }
-    memset(sbc_X, 0, sizeof(sbc_X));
-    sbc_tables_ready = true;
-}
-
-/* SBC CRC-8 (polynomial x^8 + x^4 + x^3 + x^2 + 1 = 0x1D, initial 0x0F) */
-static uint8_t sbc_crc8(const uint8_t *data, size_t nbits)
-{
-    uint8_t crc = 0x0F;
-    size_t nbytes = nbits >> 3;
-    for (size_t i = 0; i < nbytes; i++) {
-        uint8_t b = data[i];
-        for (int j = 7; j >= 0; j--) {
-            uint8_t bit = ((b >> j) ^ (crc >> 7)) & 1;
-            crc = (uint8_t)((crc << 1) ^ (bit ? 0x1D : 0));
-        }
-    }
-    size_t rem = nbits & 7;
-    if (rem) {
-        uint8_t b = data[nbytes];
-        for (int j = 7; j >= (int)(8 - rem); j--) {
-            uint8_t bit = ((b >> j) ^ (crc >> 7)) & 1;
-            crc = (uint8_t)((crc << 1) ^ (bit ? 0x1D : 0));
-        }
-    }
-    return crc;
-}
-
-/* Encode one 128-sample stereo SBC frame (16 blocks x 8 subbands) -> returns frame size in bytes */
-static size_t sbc_encode_frame(const int16_t *pcm_interleaved, uint8_t *out_frame)
-{
-    int32_t sb_sample[16][2][8];
-    int scale_factor[2][8];
-    int bits[2][8];
-
-    /* 1. Polyphase analysis filterbank for 16 blocks, 2 channels, 8 subbands */
-    for (int blk = 0; blk < 16; blk++) {
-        for (int ch = 0; ch < 2; ch++) {
-            int16_t *X = sbc_X[ch];
-            /* Shift X by 8 positions right */
-            memmove(&X[8], &X[0], 72 * sizeof(int16_t));
-            /* Insert 8 new audio samples in reverse order X[7..0] */
-            for (int i = 0; i < 8; i++) {
-                X[7 - i] = pcm_interleaved[(blk * 8 + i) * 2 + ch];
-            }
-            /* Window by prototype filter C and fold 80 -> 16 into Y[0..15] */
-            int32_t Y[16];
-            for (int k = 0; k < 16; k++) {
-                int32_t acc = 0;
-                for (int j = 0; j < 5; j++) {
-                    acc += ((int32_t)X[k + 16 * j] * sbc_proto_8[k + 16 * j]) >> 15;
-                }
-                Y[k] = acc;
-            }
-            /* Cosine matrixing 16 -> 8 subbands */
-            for (int sb = 0; sb < 8; sb++) {
-                int32_t sum = 0;
-                for (int k = 0; k < 16; k++) {
-                    sum += (Y[k] * sbc_cos_mat[sb][k]) >> 14;
-                }
-                sb_sample[blk][ch][sb] = sum;
-            }
-        }
-    }
-
-    bool use_joint = ((sbc_cfg_octet0 & 0x03) == 0x01); /* Joint Stereo */
-    uint8_t join_mask = 0;
-
-    if (use_joint) {
-        for (int sb = 0; sb < 7; sb++) {
-            int32_t max_l = 0, max_r = 0, max_m = 0, max_s = 0;
-            for (int blk = 0; blk < 16; blk++) {
-                int32_t l = sb_sample[blk][0][sb];
-                int32_t r = sb_sample[blk][1][sb];
-                int32_t m = (l + r) >> 1;
-                int32_t s = (l - r) >> 1;
-                if (l < 0) l = -l;
-                if (r < 0) r = -r;
-                if (m < 0) m = -m;
-                if (s < 0) s = -s;
-                if (l > max_l) max_l = l;
-                if (r > max_r) max_r = r;
-                if (m > max_m) max_m = m;
-                if (s > max_s) max_s = s;
-            }
-            if ((max_m + max_s) < (max_l + max_r)) {
-                join_mask |= (1 << (7 - sb));
-                for (int blk = 0; blk < 16; blk++) {
-                    int32_t l = sb_sample[blk][0][sb];
-                    int32_t r = sb_sample[blk][1][sb];
-                    sb_sample[blk][0][sb] = (l + r) >> 1;
-                    sb_sample[blk][1][sb] = (l - r) >> 1;
-                }
-            }
-        }
-    }
-
-    /* 2. Compute scale factors scf[ch][sb] in 0..15 */
-    for (int ch = 0; ch < 2; ch++) {
-        for (int sb = 0; sb < 8; sb++) {
-            uint32_t mx = 0;
-            for (int blk = 0; blk < 16; blk++) {
-                int32_t v = sb_sample[blk][ch][sb];
-                uint32_t a = (v < 0) ? (uint32_t)(-v) : (uint32_t)v;
-                if (a > mx) mx = a;
-            }
-            int scf = 0;
-            while (scf < 15 && mx >= (2U << scf))
-                scf++;
-            scale_factor[ch][sb] = scf;
-        }
-    }
-
-    /* 3. Standard A2DP Loudness/SNR bit allocation for Stereo / Joint Stereo */
-    static const int loudness_offset_44[8] = { -2, 0, 0, 0, 0, 0, 0, 1 };
-    int bitneed[2][8];
-    int max_bitneed = 0;
-    bool snr_mode = ((sbc_cfg_octet1 & 0x03) == 0x02);
-
-    for (int ch = 0; ch < 2; ch++) {
-        for (int sb = 0; sb < 8; sb++) {
-            if (snr_mode) {
-                bitneed[ch][sb] = scale_factor[ch][sb];
-            } else {
-                if (scale_factor[ch][sb] == 0) {
-                    bitneed[ch][sb] = -5;
-                } else {
-                    int sub = scale_factor[ch][sb] - loudness_offset_44[sb];
-                    bitneed[ch][sb] = (sub > 0) ? (sub >> 1) : sub;
-                }
-            }
-            if (bitneed[ch][sb] > max_bitneed)
-                max_bitneed = bitneed[ch][sb];
-        }
-    }
-
-    int bitcount = 0, slicecount = 0, bitslice = max_bitneed + 1;
-    do {
-        bitslice--;
-        bitcount += slicecount;
-        slicecount = 0;
-        for (int ch = 0; ch < 2; ch++) {
-            for (int sb = 0; sb < 8; sb++) {
-                if (bitneed[ch][sb] > bitslice + 1 && bitneed[ch][sb] < bitslice + 16)
-                    slicecount++;
-                else if (bitneed[ch][sb] == bitslice + 1)
-                    slicecount += 2;
-            }
-        }
-    } while (bitcount + slicecount < (int)sbc_bitpool);
-
-    if (bitcount + slicecount == (int)sbc_bitpool) {
-        bitcount += slicecount;
-        bitslice--;
-    }
-
-    for (int ch = 0; ch < 2; ch++) {
-        for (int sb = 0; sb < 8; sb++) {
-            if (bitneed[ch][sb] < bitslice + 2)
-                bits[ch][sb] = 0;
-            else {
-                int b = bitneed[ch][sb] - bitslice;
-                bits[ch][sb] = (b > 16) ? 16 : b;
-            }
-        }
-    }
-
-    for (int sb = 0; sb < 8 && bitcount < (int)sbc_bitpool; sb++) {
-        for (int ch = 0; ch < 2 && bitcount < (int)sbc_bitpool; ch++) {
-            if (bits[ch][sb] >= 2 && bits[ch][sb] < 16) {
-                bits[ch][sb]++;
-                bitcount++;
-            } else if (bitneed[ch][sb] == bitslice + 1 && (int)sbc_bitpool > bitcount + 1) {
-                bits[ch][sb] = 2;
-                bitcount += 2;
-            }
-        }
-    }
-    for (int sb = 0; sb < 8 && bitcount < (int)sbc_bitpool; sb++) {
-        for (int ch = 0; ch < 2 && bitcount < (int)sbc_bitpool; ch++) {
-            if (bits[ch][sb] < 16) {
-                bits[ch][sb]++;
-                bitcount++;
-            }
-        }
-    }
-
-    /* 4. Pack SBC frame header + CRC + scale factors + quantized audio samples */
-    uint8_t freq_bits = (sbc_cfg_octet0 & 0x80) ? 0 : ((sbc_cfg_octet0 & 0x40) ? 1 : ((sbc_cfg_octet0 & 0x20) ? 2 : 3));
-    uint8_t mode_bits = use_joint ? 3 : 2; /* 3 = Joint Stereo, 2 = Stereo */
-    uint8_t alloc_bit = snr_mode ? 1 : 0;
-
-    out_frame[0] = 0x9C; /* Syncword */
-    out_frame[1] = (uint8_t)((freq_bits << 6) | (3 << 4) | (mode_bits << 2) | (alloc_bit << 1) | 1);
-    out_frame[2] = sbc_bitpool;
-
-    /* Prepare CRC input buffer: byte 1, byte 2, optional join_mask (8 bits), and 16x4-bit scale factors */
-    uint8_t crc_buf[12];
-    size_t crc_bits = 16;
-    crc_buf[0] = out_frame[1];
-    crc_buf[1] = out_frame[2];
-
-    size_t bit_pos = 32; /* Start writing payload at byte 4 (bit 32) in out_frame */
-    memset(&out_frame[4], 0, 140);
-
-    if (use_joint) {
-        out_frame[4] = join_mask;
-        crc_buf[2] = join_mask;
-        crc_bits += 8;
-        bit_pos += 8;
-        for (int ch = 0; ch < 2; ch++) {
-            for (int sb = 0; sb < 8; sb += 2) {
-                uint8_t b = (uint8_t)(((scale_factor[ch][sb] & 0x0F) << 4) | (scale_factor[ch][sb + 1] & 0x0F));
-                out_frame[bit_pos >> 3] = b;
-                crc_buf[crc_bits >> 3] = b;
-                bit_pos += 8;
-                crc_bits += 8;
-            }
-        }
+    uint8_t conf[4] = { sbc_cfg_octet0, sbc_cfg_octet1, 2, sbc_bitpool };
+    if (a2dp_sbc_ready) {
+        sbc_reinit_a2dp(&a2dp_sbc, 0, conf, sizeof(conf));
     } else {
-        for (int ch = 0; ch < 2; ch++) {
-            for (int sb = 0; sb < 8; sb += 2) {
-                uint8_t b = (uint8_t)(((scale_factor[ch][sb] & 0x0F) << 4) | (scale_factor[ch][sb + 1] & 0x0F));
-                out_frame[bit_pos >> 3] = b;
-                crc_buf[crc_bits >> 3] = b;
-                bit_pos += 8;
-                crc_bits += 8;
-            }
-        }
+        if (sbc_init_a2dp(&a2dp_sbc, 0, conf, sizeof(conf)) == 0)
+            a2dp_sbc_ready = true;
     }
-
-    out_frame[3] = sbc_crc8(crc_buf, crc_bits);
-
-    /* Pack quantized subband samples MSB-first */
-    for (int blk = 0; blk < 16; blk++) {
-        for (int ch = 0; ch < 2; ch++) {
-            for (int sb = 0; sb < 8; sb++) {
-                int nb = bits[ch][sb];
-                if (nb > 0) {
-                    uint32_t levels = (1U << nb) - 1U;
-                    int scf = scale_factor[ch][sb];
-                    /* Map [-2^(scf+1), 2^(scf+1)] into [0, levels] */
-                    int64_t num = ((int64_t)sb_sample[blk][ch][sb] + (1LL << (scf + 1))) * (int64_t)levels;
-                    int32_t q = (int32_t)(num >> (scf + 2));
-                    if (q < 0) q = 0;
-                    if ((uint32_t)q > levels) q = (int32_t)levels;
-
-                    for (int b = nb - 1; b >= 0; b--) {
-                        if ((q >> b) & 1)
-                            out_frame[bit_pos >> 3] |= (uint8_t)(1U << (7 - (bit_pos & 7)));
-                        bit_pos++;
-                    }
-                }
-            }
-        }
+    if (a2dp_sbc_ready) {
+        a2dp_sbc.bitpool = sbc_bitpool;
     }
-
-    return (bit_pos + 7) >> 3;
 }
 
 /* ============================================================================
@@ -807,6 +529,7 @@ static void handle_avdtp_sig_pdu(const uint8_t *pdu, uint16_t len)
                             sbc_bitpool = 53;
                     }
                 }
+                reinit_a2dp_sbc();
                 avdtp_send_accept(hdr, sig_id, NULL, 0);
                 break;
             }
@@ -814,6 +537,7 @@ static void handle_avdtp_sig_pdu(const uint8_t *pdu, uint16_t len)
                 avdtp_send_accept(hdr, sig_id, NULL, 0);
                 break;
             case AVDTP_START:
+                reinit_a2dp_sbc();
                 avdtp_send_accept(hdr, sig_id, NULL, 0);
                 a2dp_streaming = true;
                 bt_state = Y1_BT_STATE_STREAMING;
@@ -884,6 +608,8 @@ static void handle_avdtp_sig_pdu(const uint8_t *pdu, uint16_t len)
                 sbc_cfg_octet1 = 0x14 | ((sup_o1 & 0x01) ? 0x01 : 0x02);
                 sbc_bitpool = (max_bp > 53) ? 53 : ((max_bp < 2) ? 35 : max_bp);
 
+                reinit_a2dp_sbc();
+
                 uint8_t set_cfg[12] = {
                     (uint8_t)(remote_seid << 2), /* ACP SEID */
                     (1 << 2),                    /* INT SEID = 1 */
@@ -911,6 +637,7 @@ static void handle_avdtp_sig_pdu(const uint8_t *pdu, uint16_t len)
                 break;
             }
             case AVDTP_START: {
+                reinit_a2dp_sbc();
                 a2dp_streaming = true;
                 bt_state = Y1_BT_STATE_STREAMING;
                 bt_log("A2DP STREAMING STARTED (local initiated)\n");
@@ -1590,19 +1317,31 @@ static bool mt6572_bt_hw_open_and_init(void)
  * ============================================================================ */
 static void drain_a2dp_pcm_and_transmit(void)
 {
-    if (!a2dp_streaming || cid_avdtp_med_remote == 0 || acl_handle == 0xFFFF)
+    if (!a2dp_streaming || cid_avdtp_med_remote == 0 || acl_handle == 0xFFFF || !a2dp_sbc_ready)
         return;
 
-    /* Pack up to 5 SBC frames (5 * 128 = 640 stereo samples = ~14.5ms) per L2CAP RTP packet */
+    size_t codesize = sbc_get_codesize(&a2dp_sbc);
+    if (codesize == 0 || codesize > 1024)
+        codesize = 512;
+
+    size_t samples_per_frame = codesize >> 2; /* 16-bit stereo = 4 bytes per sample */
+
+    size_t framelen = sbc_get_frame_length(&a2dp_sbc);
+    int frames_per_pkt = (framelen > 0) ? (int)((895 - 13) / framelen) : 5;
+    if (frames_per_pkt > 5) frames_per_pkt = 5;
+    if (frames_per_pkt < 1) frames_per_pkt = 1;
+
+    size_t samples_per_pkt = samples_per_frame * frames_per_pkt;
+
     while (acl_in_flight < acl_max_pkts)
     {
         size_t r = pcm_ring_r;
         size_t w = pcm_ring_w;
         size_t avail = (w - r) & (PCM_RING_SAMPLES - 1);
-        if (avail < 128 * 5)
+        if (avail < samples_per_pkt)
             break;
 
-        uint8_t rtp_pkt[768];
+        uint8_t rtp_pkt[896];
         /* 12-byte RTP Header + 1-byte A2DP SBC Payload Header */
         rtp_pkt[0]  = 0x80; /* RTP v2 */
         rtp_pkt[1]  = 0x60; /* Payload type 96 (Dynamic) */
@@ -1613,24 +1352,29 @@ static void drain_a2dp_pcm_and_transmit(void)
         rtp_pkt[5]  = (uint8_t)(rtp_timestamp >> 16);
         rtp_pkt[6]  = (uint8_t)(rtp_timestamp >> 8);
         rtp_pkt[7]  = (uint8_t)(rtp_timestamp & 0xFF);
+        rtp_timestamp += (uint32_t)samples_per_pkt;
         rtp_pkt[8]  = 0x00;
         rtp_pkt[9]  = 0x00;
         rtp_pkt[10] = 0x00;
         rtp_pkt[11] = 0x01; /* SSRC = 1 */
-        rtp_pkt[12] = 5;    /* 5 SBC frames in this RTP packet */
+        rtp_pkt[12] = (uint8_t)frames_per_pkt; /* Unfragmented SBC payload header */
 
         size_t pkt_len = 13;
-        for (int f = 0; f < 5; f++) {
-            int16_t block_pcm[128 * 2];
-            for (int s = 0; s < 128; s++) {
+        for (int f = 0; f < frames_per_pkt; f++) {
+            int16_t block_pcm[512];
+            for (size_t s = 0; s < samples_per_frame; s++) {
                 size_t idx = ((r + s) & (PCM_RING_SAMPLES - 1)) * 2;
                 block_pcm[s * 2 + 0] = pcm_ring[idx + 0];
                 block_pcm[s * 2 + 1] = pcm_ring[idx + 1];
             }
-            r = (r + 128) & (PCM_RING_SAMPLES - 1);
-            size_t flen = sbc_encode_frame(block_pcm, &rtp_pkt[pkt_len]);
-            pkt_len += flen;
-            rtp_timestamp += 128;
+            r = (r + samples_per_frame) & (PCM_RING_SAMPLES - 1);
+
+            ssize_t written = 0;
+            ssize_t res = sbc_encode(&a2dp_sbc, block_pcm, codesize,
+                                     &rtp_pkt[pkt_len], sizeof(rtp_pkt) - pkt_len, &written);
+            if (res > 0 && written > 0) {
+                pkt_len += (size_t)written;
+            }
         }
         pcm_ring_r = r;
 
@@ -1642,7 +1386,6 @@ static void drain_a2dp_pcm_and_transmit(void)
 static void *bt_worker_thread(void *arg)
 {
     (void)arg;
-    sbc_init_tables();
 
     pthread_mutex_lock(&bt_mtx);
     load_paired_devices();

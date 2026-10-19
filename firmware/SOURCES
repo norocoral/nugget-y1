@@ -308,6 +308,9 @@ target/hosted/innioasis/y1/usb-y1.c
 target/hosted/innioasis/y1/lcd-y1.c
 target/hosted/innioasis/y1/cpufreq-y1.c
 target/hosted/innioasis/y1/bt-y1.c
+target/hosted/innioasis/y1/sbc/sbc.c
+target/hosted/innioasis/y1/sbc/sbc_primitives.c
+target/hosted/innioasis/y1/sbc/sbc_primitives_armv6.c
 asm/lcd-as-memframe.c
 #ifdef HAVE_ALSA
 target/hosted/pcm-alsa.c
