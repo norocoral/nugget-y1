@@ -2,10 +2,7 @@
 
 # Nugget for Innioasis Y1
 
-[![Release](https://img.shields.io/badge/Release-v1.0.0-brightgreen.svg)](hosted_linux_port/release)
-[![License: GPL v2](https://img.shields.io/badge/License-GPL%20v2-blue.svg)](https://www.gnu.org/licenses/old-licenses/gpl-2.0.html)
 [![Platform](https://img.shields.io/badge/Platform-MediaTek%20MT6572-orange.svg)](#hardware-specifications)
-[![Headroom](https://img.shields.io/badge/BOOTIMG%20Headroom-196%20KB-success.svg)](#build-specifications)
 
 Nugget for Y1 is an open-source custom firmware for the Innioasis Y1 digital audio player. It eliminates Android completely, booting a minimal downstream Linux kernel directly into native Hosted Rockbox.
 
