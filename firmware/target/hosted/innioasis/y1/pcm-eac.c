@@ -650,9 +650,8 @@ static void sink_dma_stop(void)
 
     if (eac_fd >= 0)
     {
-        /* Pause DL1 and drop AFE clocks so idle-between-tracks is cheap. */
+        /* Pause DL1 but keep the AFE/AIF clocks stable between playback sessions. */
         set_afereg(eac_fd, 0x10, 0, 1 << 1);
-        y1_audio_clocks(0);
         y1_play_wake_lock(false);
     }
 }
@@ -689,4 +688,3 @@ struct pcm_sink builtin_pcm_sink = {
         .stop     = sink_dma_stop,
     },
 };
-

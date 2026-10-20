@@ -1,33 +1,42 @@
+
 #!/usr/bin/env bash
 # build.sh - Build script for Innioasis Y1 Hosted Rockbox Linux
-# Compiles Rockbox, builds a minimal initramfs rootfs, and packages boot_rockbox.img
+# Compiles Rockbox, builds a minimal initramfs rootfs, and packages boot_rockbox.img.
 
-set -e
+set -Eeuo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# ---------------------------------------------------------------------------
+# Workspace detection
+# ---------------------------------------------------------------------------
+
 WORKSPACE_ROOT="${WORKSPACE_ROOT:-}"
-if [ -z "$WORKSPACE_ROOT" ]; then
+
+if [[ -z "$WORKSPACE_ROOT" ]]; then
     search_dir="$SCRIPT_DIR"
+
     while :; do
-        if [ -d "$search_dir/!stock_rom" ]; then
+        if [[ -d "$search_dir/!stock_rom" ]]; then
             WORKSPACE_ROOT="$search_dir"
             break
         fi
+
         parent_dir="$(dirname "$search_dir")"
-        [ "$parent_dir" = "$search_dir" ] && break
+        [[ "$parent_dir" == "$search_dir" ]] && break
         search_dir="$parent_dir"
     done
 fi
 
-if [ -z "$WORKSPACE_ROOT" ]; then
-    echo "[!] Could not find workspace root containing !stock_rom. Set WORKSPACE_ROOT explicitly."
+if [[ -z "$WORKSPACE_ROOT" || ! -d "$WORKSPACE_ROOT" ]]; then
+    echo "[!] Could not find workspace root containing !stock_rom."
+    echo "    Set WORKSPACE_ROOT explicitly."
     exit 1
 fi
 
-if [ -f "$SCRIPT_DIR/../tools/configure" ]; then
+if [[ -f "$SCRIPT_DIR/../tools/configure" ]]; then
     ROCKBOX_SRC="$(cd "$SCRIPT_DIR/.." && pwd)"
-elif [ -f "$SCRIPT_DIR/tools/configure" ]; then
+elif [[ -f "$SCRIPT_DIR/tools/configure" ]]; then
     ROCKBOX_SRC="$SCRIPT_DIR"
 else
     ROCKBOX_SRC="$WORKSPACE_ROOT/!rockbox_fromsource/rockbox-master/rockbox-master"
@@ -38,155 +47,379 @@ BUILD_DIR="$ROCKBOX_SRC/build_y1"
 SPLASH_DIR="$SCRIPT_DIR/splash"
 STOCK_BOOT="${STOCK_BOOT:-$WORKSPACE_ROOT/!stock_rom/boot.img}"
 
-CROSS_COMPILE=${CROSS_COMPILE:-arm-linux-gnueabihf-}
+CROSS_COMPILE="${CROSS_COMPILE:-arm-linux-gnueabihf-}"
 CC="${CROSS_COMPILE}gcc"
 STRIP="${CROSS_COMPILE}strip"
 
-MAX_BOOT_SIZE=6291456  # 0x600000 (6MB) partition size
+MAX_BOOT_SIZE=6291456 # 6 MiB
 
-echo "=== Innioasis Y1 Hosted Rockbox Build ==="
+# ---------------------------------------------------------------------------
+# Parallel build configuration
+# ---------------------------------------------------------------------------
+
+if command -v nproc >/dev/null 2>&1; then
+    DEFAULT_JOBS="$(nproc)"
+elif command -v getconf >/dev/null 2>&1; then
+    DEFAULT_JOBS="$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)"
+else
+    DEFAULT_JOBS=2
+fi
+
+JOBS="${JOBS:-$DEFAULT_JOBS}"
+
+if [[ ! "$JOBS" =~ ^[1-9][0-9]*$ ]]; then
+    echo "[!] JOBS must be a positive integer (got: $JOBS)"
+    exit 1
+fi
+
+# Avoid exporting MAKEFLAGS that could override explicit make options.
+unset MAKEFLAGS 2>/dev/null || true
+
+# ---------------------------------------------------------------------------
+# Temporary files and cleanup
+# ---------------------------------------------------------------------------
+
+SD_STAGE=""
+
+cleanup() {
+    if [[ -n "$SD_STAGE" && -d "$SD_STAGE" ]]; then
+        rm -rf -- "$SD_STAGE"
+    fi
+}
+
+trap cleanup EXIT
+
+# ---------------------------------------------------------------------------
+# Build information
+# ---------------------------------------------------------------------------
+
+echo "=========================================================="
+echo " Innioasis Y1 Hosted Rockbox Build"
+echo "=========================================================="
 echo "Toolchain:   $CC"
 echo "Rockbox Src: $ROCKBOX_SRC"
+echo "Build Dir:   $BUILD_DIR"
 echo "Rootfs:      $ROOTFS_DIR"
+echo "Parallelism: $JOBS jobs"
+echo "=========================================================="
 
-# 1. Setup Rootfs Skeleton
-echo "[1/5] Setting up root filesystem skeleton..."
+if [[ ! -f "$ROCKBOX_SRC/tools/configure" ]]; then
+    echo "[!] Rockbox configure script not found: $ROCKBOX_SRC/tools/configure"
+    exit 1
+fi
+
+if ! command -v "$CC" >/dev/null 2>&1; then
+    echo "[!] Cross-compiler not found: $CC"
+    exit 1
+fi
+
+if ! command -v "$STRIP" >/dev/null 2>&1; then
+    echo "[!] Cross-compiler strip not found: $STRIP"
+    exit 1
+fi
+
+# ---------------------------------------------------------------------------
+# 1. Set up root filesystem and splash images
+# ---------------------------------------------------------------------------
+
+echo "[1/5] Setting up root filesystem..."
+
 python3 "$SCRIPT_DIR/tools/setup_rootfs.py"
+
 rm -rf "$ROOTFS_DIR/.rockbox"
 rm -f "$ROOTFS_DIR/rockbox"
 rm -f "$ROOTFS_DIR"/etc/*.png
 
-# Convert boot splash and status/error images to raw framebuffer format
+mkdir -p "$ROOTFS_DIR/etc" "$ROOTFS_DIR/bin"
+
+# Convert splash and status images.
 for img in boot sdcard connect errconnect error; do
     SRC_IMG=""
-    if [ -f "$SPLASH_DIR/$img.png" ]; then
+
+    if [[ -f "$SPLASH_DIR/$img.png" ]]; then
         SRC_IMG="$SPLASH_DIR/$img.png"
-    elif [ -f "$WORKSPACE_ROOT/$img.png" ]; then
+    elif [[ -f "$WORKSPACE_ROOT/$img.png" ]]; then
         SRC_IMG="$WORKSPACE_ROOT/$img.png"
-    elif [ -f "$ROCKBOX_SRC/$img.png" ]; then
+    elif [[ -f "$ROCKBOX_SRC/$img.png" ]]; then
         SRC_IMG="$ROCKBOX_SRC/$img.png"
     fi
 
-    if [ -n "$SRC_IMG" ]; then
-        echo "[*] Converting $(basename "$SRC_IMG") to raw framebuffer image /etc/$img.raw..."
-        python3 "$SCRIPT_DIR/tools/convert_splash.py" "$SRC_IMG" "$ROOTFS_DIR/etc/$img.raw"
+    if [[ -n "$SRC_IMG" ]]; then
+        echo "[*] Converting $SRC_IMG..."
+        python3 "$SCRIPT_DIR/tools/convert_splash.py" \
+            "$SRC_IMG" "$ROOTFS_DIR/etc/$img.raw"
     fi
 done
 
-# Compile ultra-fast C PID 1 init
-echo "[*] Compiling optimized PID 1 /init..."
-$CC -O2 -Wall "$SCRIPT_DIR/initramfs/init.c" -o "$ROOTFS_DIR/init"
-$STRIP "$ROOTFS_DIR/init"
-chmod +x "$ROOTFS_DIR/init"
+# ---------------------------------------------------------------------------
+# Compile independent native utilities in parallel
+# ---------------------------------------------------------------------------
 
-# 2. Compile unmute_eac utility
-echo "[2/5] Compiling hardware unmute utility..."
-$CC -O2 "$SCRIPT_DIR/audio/unmute_eac.c" -o "$ROOTFS_DIR/bin/unmute_eac"
-$STRIP "$ROOTFS_DIR/bin/unmute_eac"
-chmod +x "$ROOTFS_DIR/bin/unmute_eac"
+echo "[*] Compiling native utilities with parallel jobs..."
 
-# 3. Setup BusyBox rescue shell
-if [ ! -s "$ROOTFS_DIR/bin/busybox" ]; then
-    echo "[*] Checking for static Busybox..."
-    if [ -f "$SCRIPT_DIR/tools/busybox-armv7l" ]; then
+"$CC" -O2 -Wall \
+    "$SCRIPT_DIR/initramfs/init.c" \
+    -o "$ROOTFS_DIR/init" &
+INIT_PID=$!
+
+"$CC" -O2 \
+    "$SCRIPT_DIR/audio/unmute_eac.c" \
+    -o "$ROOTFS_DIR/bin/unmute_eac" &
+AUDIO_PID=$!
+
+BUILD_FAILED=0
+
+wait "$INIT_PID" || BUILD_FAILED=1
+wait "$AUDIO_PID" || BUILD_FAILED=1
+
+if [[ "$BUILD_FAILED" -ne 0 ]]; then
+    echo "[!] Native utility compilation failed."
+    exit 1
+fi
+
+# Strip both binaries concurrently.
+"$STRIP" "$ROOTFS_DIR/init" &
+STRIP_INIT_PID=$!
+
+"$STRIP" "$ROOTFS_DIR/bin/unmute_eac" &
+STRIP_AUDIO_PID=$!
+
+BUILD_FAILED=0
+wait "$STRIP_INIT_PID" || BUILD_FAILED=1
+wait "$STRIP_AUDIO_PID" || BUILD_FAILED=1
+
+if [[ "$BUILD_FAILED" -ne 0 ]]; then
+    echo "[!] Failed to strip native utilities."
+    exit 1
+fi
+
+chmod +x "$ROOTFS_DIR/init" "$ROOTFS_DIR/bin/unmute_eac"
+
+# ---------------------------------------------------------------------------
+# 2. BusyBox rescue shell
+# ---------------------------------------------------------------------------
+
+echo "[2/5] Setting up BusyBox..."
+
+if [[ ! -s "$ROOTFS_DIR/bin/busybox" ]]; then
+    echo "[*] Looking for static ARM BusyBox..."
+
+    if [[ -f "$SCRIPT_DIR/tools/busybox-armv7l" ]]; then
         cp "$SCRIPT_DIR/tools/busybox-armv7l" "$ROOTFS_DIR/bin/busybox"
-    elif [ -f "$WORKSPACE_ROOT/busybox-armv7l" ]; then
+    elif [[ -f "$WORKSPACE_ROOT/busybox-armv7l" ]]; then
         cp "$WORKSPACE_ROOT/busybox-armv7l" "$ROOTFS_DIR/bin/busybox"
     elif command -v busybox-armv7l >/dev/null 2>&1; then
-        cp "$(which busybox-armv7l)" "$ROOTFS_DIR/bin/busybox"
+        cp "$(command -v busybox-armv7l)" "$ROOTFS_DIR/bin/busybox"
     else
-        echo "[*] Downloading static armv7l busybox..."
-        curl -L -s https://busybox.net/downloads/binaries/1.31.0-defconfig-multiarch-musl/busybox-armv7l -o "$ROOTFS_DIR/bin/busybox" || true
+        echo "[*] Downloading static ARM BusyBox..."
+
+        if ! command -v curl >/dev/null 2>&1; then
+            echo "[!] curl is required to download BusyBox."
+            exit 1
+        fi
+
+        BUSYBOX_URL="https://busybox.net/downloads/binaries/1.31.0-defconfig-multiarch-musl/busybox-armv7l"
+        BUSYBOX_TMP="$ROOTFS_DIR/bin/busybox.download"
+
+        if curl -fL --retry 2 --connect-timeout 15 \
+            "$BUSYBOX_URL" -o "$BUSYBOX_TMP" &&
+            [[ -s "$BUSYBOX_TMP" ]]; then
+            mv "$BUSYBOX_TMP" "$ROOTFS_DIR/bin/busybox"
+        else
+            rm -f "$BUSYBOX_TMP"
+            echo "[!] BusyBox download failed."
+            echo "    Install a static ARM BusyBox at tools/busybox-armv7l."
+            exit 1
+        fi
     fi
 fi
 
-if [ -s "$ROOTFS_DIR/bin/busybox" ]; then
+if [[ -s "$ROOTFS_DIR/bin/busybox" ]]; then
     chmod +x "$ROOTFS_DIR/bin/busybox"
-    cd "$ROOTFS_DIR/bin"
-    ln -sf busybox sh
+
+    ln -sf busybox "$ROOTFS_DIR/bin/sh"
+
     mkdir -p "$ROOTFS_DIR/sbin"
     ln -sf /bin/busybox "$ROOTFS_DIR/sbin/poweroff"
     ln -sf /bin/busybox "$ROOTFS_DIR/sbin/reboot"
-    cd "$SCRIPT_DIR"
 fi
 
-# Ensure glibc libraries are copied and stripped
+# ---------------------------------------------------------------------------
+# Copy required ARM glibc libraries
+# ---------------------------------------------------------------------------
+
+echo "[*] Setting up ARM runtime libraries..."
+
 mkdir -p "$ROOTFS_DIR/lib"
-rm -f "$ROOTFS_DIR/lib/libm"* "$ROOTFS_DIR/lib/libdl"* "$ROOTFS_DIR/lib/libpthread"* "$ROOTFS_DIR/lib/librt"*
+
+rm -f \
+    "$ROOTFS_DIR"/lib/libm* \
+    "$ROOTFS_DIR"/lib/libdl* \
+    "$ROOTFS_DIR"/lib/libpthread* \
+    "$ROOTFS_DIR"/lib/librt*
+
 for lib in ld-linux-armhf.so.3 libc.so.6; do
-    if [ ! -f "$ROOTFS_DIR/lib/$lib" ]; then
-        find /usr/arm-linux-gnueabihf/lib -name "$lib" -exec cp {} "$ROOTFS_DIR/lib/" \; 2>/dev/null || true
+    if [[ ! -f "$ROOTFS_DIR/lib/$lib" ]]; then
+        if [[ -d /usr/arm-linux-gnueabihf/lib ]]; then
+            LIB_SOURCE="$(
+                find /usr/arm-linux-gnueabihf/lib \
+                    -name "$lib" -type f -print -quit 2>/dev/null || true
+            )"
+
+            if [[ -n "$LIB_SOURCE" ]]; then
+                cp -L "$LIB_SOURCE" "$ROOTFS_DIR/lib/$lib"
+            fi
+        fi
     fi
-    $STRIP --strip-unneeded "$ROOTFS_DIR/lib/$lib" 2>/dev/null || true
+
+    if [[ -f "$ROOTFS_DIR/lib/$lib" ]]; then
+        "$STRIP" --strip-unneeded "$ROOTFS_DIR/lib/$lib" 2>/dev/null || true
+    else
+        echo "[!] Warning: $lib was not found in the cross-toolchain libraries."
+    fi
 done
 
-# Bundle MT6572 Bluetooth kernel modules and CONNSYS firmware
-if [ -d "$SCRIPT_DIR/bt_blobs" ]; then
-    echo "[*] Bundling MT6572 Bluetooth kernel modules and CONNSYS firmware..."
+# ---------------------------------------------------------------------------
+# Bundle Bluetooth modules and firmware
+# ---------------------------------------------------------------------------
+
+if [[ -d "$SCRIPT_DIR/bt_blobs" ]]; then
+    echo "[*] Bundling Bluetooth modules and firmware..."
+
     mkdir -p "$ROOTFS_DIR/lib/modules" "$ROOTFS_DIR/etc/firmware"
-    cp "$SCRIPT_DIR/bt_blobs/mtk_stp_wmt.ko" "$ROOTFS_DIR/lib/modules/" 2>/dev/null || true
-    cp "$SCRIPT_DIR/bt_blobs/mtk_stp_bt.ko" "$ROOTFS_DIR/lib/modules/" 2>/dev/null || true
-    cp "$SCRIPT_DIR/bt_blobs/mt6572_82_patch_e1_0_hdr.bin" "$ROOTFS_DIR/etc/firmware/" 2>/dev/null || true
-    cp "$SCRIPT_DIR/bt_blobs/WMT_SOC.cfg" "$ROOTFS_DIR/etc/firmware/" 2>/dev/null || true
+
+    for file in mtk_stp_wmt.ko mtk_stp_bt.ko; do
+        if [[ -f "$SCRIPT_DIR/bt_blobs/$file" ]]; then
+            cp "$SCRIPT_DIR/bt_blobs/$file" "$ROOTFS_DIR/lib/modules/"
+        fi
+    done
+
+    for file in mt6572_82_patch_e1_0_hdr.bin WMT_SOC.cfg; do
+        if [[ -f "$SCRIPT_DIR/bt_blobs/$file" ]]; then
+            cp "$SCRIPT_DIR/bt_blobs/$file" "$ROOTFS_DIR/etc/firmware/"
+        fi
+    done
 fi
 
-# 4. Build Rockbox
+# ---------------------------------------------------------------------------
+# 3. Configure and build Rockbox
+# ---------------------------------------------------------------------------
+
 echo "[3/5] Configuring and compiling Rockbox..."
+
 mkdir -p "$BUILD_DIR"
 cd "$BUILD_DIR"
 
 chmod +x "$ROCKBOX_SRC/tools/configure"
-if [ ! -f "Makefile" ]; then
+
+if [[ ! -f Makefile ]]; then
     "$ROCKBOX_SRC/tools/configure" --target=310 --type=N
 fi
 
-# Clean any corrupted 0-byte object files from interrupted builds
-find "$BUILD_DIR" -name '*.o' -size 0 -delete 2>/dev/null || true
-
-make -j"$(nproc)"
-make -j"$(nproc)" zip
-
-echo "[4/5] Preparing Rockbox binaries and assets..."
-if [ ! -f "$BUILD_DIR/rockbox.zip" ]; then
-    echo "[!] Rockbox SD package was not generated by 'make zip'."
+if [[ ! -f Makefile ]]; then
+    echo "[!] Configuration did not generate a Makefile."
     exit 1
 fi
 
+# Remove broken object files left by interrupted builds.
+find "$BUILD_DIR" -type f -name '*.o' -size 0 -delete 2>/dev/null || true
+
+echo "[*] Building Rockbox with $JOBS parallel jobs..."
+make -j"$JOBS"
+
+echo "[*] Creating Rockbox SD card package..."
+make -j"$JOBS" zip
+
+if [[ ! -s "$BUILD_DIR/rockbox.zip" ]]; then
+    echo "[!] Rockbox SD package was not generated."
+    exit 1
+fi
+
+if [[ ! -s "$BUILD_DIR/rockbox" ]]; then
+    echo "[!] Rockbox executable was not generated."
+    exit 1
+fi
+
+# ---------------------------------------------------------------------------
+# 4. Prepare SD card package
+# ---------------------------------------------------------------------------
+
+echo "[4/5] Preparing Rockbox binaries and assets..."
+
 cp "$BUILD_DIR/rockbox.zip" "$SCRIPT_DIR/rockbox_sdcard.zip"
+
 SD_STAGE="$(mktemp -d "$SCRIPT_DIR/.sdcard-stage.XXXXXX")"
-trap 'rm -rf "$SD_STAGE"' EXIT
+
 mkdir -p "$SD_STAGE/.rockbox/bt"
+
 cp "$BUILD_DIR/rockbox" "$SD_STAGE/.rockbox/rockbox"
-$STRIP -s -R .comment -R .note.gnu.build-id "$SD_STAGE/.rockbox/rockbox"
+
+"$STRIP" -s \
+    -R .comment \
+    -R .note.gnu.build-id \
+    "$SD_STAGE/.rockbox/rockbox"
+
 chmod +x "$SD_STAGE/.rockbox/rockbox"
 
-# Add the Rockbox executable, RAW status screens, and Bluetooth blobs to .rockbox.
-cp "$ROOTFS_DIR"/etc/*.raw "$SD_STAGE/.rockbox/" 2>/dev/null || true
-if [ -d "$SCRIPT_DIR/bt_blobs" ]; then
-    cp "$SCRIPT_DIR/bt_blobs/"* "$SD_STAGE/.rockbox/bt/" 2>/dev/null || true
+# Add raw splash images.
+shopt -s nullglob
+RAW_ASSETS=("$ROOTFS_DIR"/etc/*.raw)
+
+if ((${#RAW_ASSETS[@]})); then
+    cp "${RAW_ASSETS[@]}" "$SD_STAGE/.rockbox/"
 fi
+
+# Add Bluetooth blobs.
+BT_ASSETS=()
+if [[ -d "$SCRIPT_DIR/bt_blobs" ]]; then
+    BT_ASSETS=("$SCRIPT_DIR"/bt_blobs/*)
+fi
+
+if ((${#BT_ASSETS[@]})); then
+    cp -a "${BT_ASSETS[@]}" "$SD_STAGE/.rockbox/bt/"
+fi
+
 cd "$SD_STAGE"
+
 zip -u -q "$SCRIPT_DIR/rockbox_sdcard.zip" .rockbox/rockbox
+
 for asset in .rockbox/*.raw .rockbox/bt/*; do
-    [ -e "$asset" ] || continue
+    [[ -e "$asset" ]] || continue
     zip -u -q "$SCRIPT_DIR/rockbox_sdcard.zip" "$asset"
 done
-rm -rf "$SD_STAGE"
-trap - EXIT
+
 cd "$SCRIPT_DIR"
-echo "[+] Created SD card system archive: $SCRIPT_DIR/rockbox_sdcard.zip"
 
-# Keep Rockbox executables and system files on the SD card, not in the initramfs.
+rm -rf -- "$SD_STAGE"
+SD_STAGE=""
 
-# 5. Pack Initramfs & Boot Image
+echo "[+] Created SD card archive: $SCRIPT_DIR/rockbox_sdcard.zip"
+
+# ---------------------------------------------------------------------------
+# 5. Build initramfs and boot image
+# ---------------------------------------------------------------------------
+
 echo "[5/5] Packaging boot image..."
-cd "$SCRIPT_DIR"
 
-python3 "$SCRIPT_DIR/tools/build_initramfs.py" "$ROOTFS_DIR" -o "$SCRIPT_DIR/ramdisk_rockbox.img"
+python3 "$SCRIPT_DIR/tools/build_initramfs.py" \
+    "$ROOTFS_DIR" \
+    -o "$SCRIPT_DIR/ramdisk_rockbox.img"
 
-# Extract stock kernel if not already extracted
-if [ ! -f "$SCRIPT_DIR/stock_unpacked/kernel_mtk.bin" ]; then
-    python3 "$SCRIPT_DIR/tools/mkbootimg_mtk.py" unpack "$STOCK_BOOT" -o "$SCRIPT_DIR/stock_unpacked"
+# Unpack the stock boot image only when the kernel is missing.
+if [[ ! -s "$SCRIPT_DIR/stock_unpacked/kernel_mtk.bin" ]]; then
+    if [[ ! -s "$STOCK_BOOT" ]]; then
+        echo "[!] Stock boot image not found: $STOCK_BOOT"
+        exit 1
+    fi
+
+    python3 "$SCRIPT_DIR/tools/mkbootimg_mtk.py" unpack \
+        "$STOCK_BOOT" \
+        -o "$SCRIPT_DIR/stock_unpacked"
+fi
+
+if [[ ! -s "$SCRIPT_DIR/stock_unpacked/kernel_mtk.bin" ]]; then
+    echo "[!] Stock kernel extraction failed."
+    exit 1
 fi
 
 python3 "$SCRIPT_DIR/tools/mkbootimg_mtk.py" pack \
@@ -194,18 +427,32 @@ python3 "$SCRIPT_DIR/tools/mkbootimg_mtk.py" pack \
     -r "$SCRIPT_DIR/ramdisk_rockbox.img" \
     -o "$SCRIPT_DIR/boot_rockbox.img"
 
-BOOT_SIZE=$(stat -c%s "$SCRIPT_DIR/boot_rockbox.img")
+if [[ ! -s "$SCRIPT_DIR/boot_rockbox.img" ]]; then
+    echo "[!] Boot image packaging failed."
+    exit 1
+fi
+
+# ---------------------------------------------------------------------------
+# Build summary
+# ---------------------------------------------------------------------------
+
+BOOT_SIZE="$(stat -c%s "$SCRIPT_DIR/boot_rockbox.img")"
+
+echo
 echo "=========================================================="
 echo " BUILD COMPLETE!"
-echo " Flashable Boot Image: $SCRIPT_DIR/boot_rockbox.img ($BOOT_SIZE bytes)"
-echo " SD Card Assets:       $SCRIPT_DIR/rockbox_sdcard.zip"
-echo " Partition Limit:      $MAX_BOOT_SIZE bytes (6.00 MB)"
+echo "=========================================================="
+echo "Flashable Boot Image: $SCRIPT_DIR/boot_rockbox.img"
+echo "Boot Image Size:      $BOOT_SIZE bytes"
+echo "SD Card Assets:       $SCRIPT_DIR/rockbox_sdcard.zip"
+echo "Partition Limit:      $MAX_BOOT_SIZE bytes (6 MiB)"
 
-if [ "$BOOT_SIZE" -le "$MAX_BOOT_SIZE" ]; then
+if ((BOOT_SIZE <= MAX_BOOT_SIZE)); then
     REMAINING=$((MAX_BOOT_SIZE - BOOT_SIZE))
-    echo "[✓] SIZE CHECK PASSED: Fits in BOOTIMG with $REMAINING bytes headroom!"
+    echo "[+] SIZE CHECK PASSED: $REMAINING bytes remaining."
 else
     OVER=$((BOOT_SIZE - MAX_BOOT_SIZE))
-    echo "[!] WARNING: Boot image exceeds partition size by $OVER bytes!"
+    echo "[!] WARNING: Boot image exceeds partition limit by $OVER bytes."
 fi
+
 echo "=========================================================="
