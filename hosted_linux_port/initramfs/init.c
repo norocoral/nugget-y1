@@ -281,6 +281,15 @@ static int is_mounted(const char *target)
     return found;
 }
 
+static int has_sdcard_rockbox(void)
+{
+    struct stat st;
+    return is_mounted("/mnt/sdcard") &&
+           stat("/mnt/sdcard/.rockbox", &st) == 0 &&
+           S_ISDIR(st.st_mode) &&
+           access("/mnt/sdcard/.rockbox/rockbox", X_OK) == 0;
+}
+
 /* Link all user folders and files from /mnt/sdcard into / so plugins and apps see / as SD root */
 static void link_sdcard_to_root(void)
 {
@@ -988,7 +997,7 @@ int main(int argc, char *argv[])
     }
 
     if (!card_found) {
-        log_line("Notice: MicroSD card not detected, displaying sdcard.png...\n");
+        log_line("Notice: MicroSD card not detected, displaying sdcard.raw...\n");
         display_screen("sdcard");
     }
 
@@ -1024,8 +1033,7 @@ int main(int argc, char *argv[])
             write_sysfs("/proc/sys/vm/drop_caches", "3\n");
             scan_and_mount_storage(0);
 
-            struct stat st;
-            if (stat("/mnt/sdcard/.rockbox", &st) == 0) {
+            if (has_sdcard_rockbox()) {
                 unlink("/.rockbox");
                 if (symlink("/mnt/sdcard/.rockbox", "/.rockbox") == 0) {
                     log_line("Linked /.rockbox -> /mnt/sdcard/.rockbox\n");
@@ -1033,19 +1041,11 @@ int main(int argc, char *argv[])
                 rockbox_found = 1;
                 break;
             }
-            if (stat("/mnt/extsd/.rockbox", &st) == 0) {
-                unlink("/.rockbox");
-                if (symlink("/mnt/extsd/.rockbox", "/.rockbox") == 0) {
-                    log_line("Linked /.rockbox -> /mnt/extsd/.rockbox\n");
-                }
-                rockbox_found = 1;
-                break;
-            }
 
-            /* If no SD card detected or .rockbox missing: strictly show sdcard.png */
+            /* Require .rockbox on the mounted primary MicroSD before launching. */
             if (strcmp(last_screen, "sdcard") != 0) {
-                log_line("WARNING: Physical MicroSD /.rockbox directory not found!\n");
-                log_line("Displaying sdcard.png. Insert card or copy .rockbox.\n");
+                log_line("WARNING: Primary MicroSD or its /.rockbox directory is missing!\n");
+                log_line("Displaying sdcard.raw. Insert card or copy .rockbox.\n");
                 display_screen("sdcard");
                 last_screen = "sdcard";
             }
@@ -1053,7 +1053,7 @@ int main(int argc, char *argv[])
         }
 
         /* Once issues are resolved, continue operation */
-        log_line("Rockbox system files present. Continuing operation...\n");
+        log_line("Rockbox SD installation present. Continuing operation...\n");
         display_screen("boot");
         last_screen = "boot";
 
@@ -1065,13 +1065,12 @@ int main(int argc, char *argv[])
         setenv("HOME", "/mnt/sdcard", 1);
         setenv("TERM", "linux", 1);
 
-        log_line("Launching Rockbox application (/rockbox)...\n");
+        log_line("Launching Rockbox application from the MicroSD card...\n");
         if (log_fd >= 0) fsync(log_fd);
 
         pid_t rb_pid = fork();
         if (rb_pid == 0) {
-            execl("/rockbox", "/rockbox", NULL);
-            execl("/bin/rockbox", "/bin/rockbox", NULL);
+            execl("/mnt/sdcard/.rockbox/rockbox", "/mnt/sdcard/.rockbox/rockbox", NULL);
             _exit(127);
         }
 
@@ -1106,7 +1105,7 @@ int main(int argc, char *argv[])
          * - If critical error & USB connected to PC: errconnect.png
          * - If plugged into PC outside Rockbox: connect.png
          * - If general error without PC: error.png
-         * - If .rockbox missing: sdcard.png
+         * - If .rockbox missing: sdcard.raw
          * - When issues are resolved, seamlessly continue operation! */
         while (1) {
             write_sysfs("/proc/sys/vm/drop_caches", "3\n");
@@ -1126,9 +1125,7 @@ int main(int argc, char *argv[])
                 }
             }
 
-            struct stat st;
-            int rb_avail = (stat("/mnt/sdcard/.rockbox", &st) == 0 ||
-                            stat("/mnt/extsd/.rockbox", &st) == 0);
+            int rb_avail = has_sdcard_rockbox();
 
             if (crashed) {
                 if (usb_to_pc) {

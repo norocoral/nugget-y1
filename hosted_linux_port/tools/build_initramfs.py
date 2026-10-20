@@ -70,7 +70,7 @@ def build_cpio(root_dir: str) -> bytes:
                 target = os.readlink(full_path).encode('utf-8')
                 buf.extend(cpio_entry(rel_path, target, mode=0o120777))
             else:
-                is_exec = os.access(full_path, os.X_OK) or rel_path in ["init", "init_audio.sh", "rockbox"] or rel_path.startswith("bin/") or rel_path.startswith("sbin/")
+                is_exec = os.access(full_path, os.X_OK) or rel_path in ["init", "init_audio.sh"] or rel_path.startswith("bin/") or rel_path.startswith("sbin/")
                 mode = 0o100755 if is_exec else 0o100644
 
                 with open(full_path, 'rb') as fp:

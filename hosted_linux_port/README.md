@@ -1,17 +1,24 @@
 # Hosted Rockbox on Minimal Linux (Innioasis Y1)
 
-This folder contains the complete build environment, PID 1 initramfs, hardware audio/display drivers, and packaging tools for the **Innioasis Y1** Hosted Rockbox Linux port.
+This folder contains the build environment, minimal Linux initramfs, hardware audio/display support, and packaging tools for the **Innioasis Y1** Rockbox port. The boot image contains Linux startup and hardware support; the Rockbox executable and its system files live on the physical MicroSD card.
 
 ## Directory Structure
-- `initramfs/`: Production PID 1 `/init` in C. Handles early boot, storage discovery, USB Mass Storage gadget, hardware unmute, and graphical framebuffer splash screens.
+- `initramfs/`: PID 1 `/init` in C. Handles early boot, physical MicroSD discovery, USB Mass Storage, hardware unmute, and framebuffer status screens using RAW images.
 - `audio/`: `unmute_eac.c` hardware audio initialization and PMIC register control.
-- `rootfs/`: Skeleton for the minimal initramfs ramdisk.
+- `rootfs/`: Skeleton for the minimal initramfs ramdisk. It does not contain the Rockbox executable or `.rockbox` system directory.
 - `stock_unpacked/`: Extracted stock kernel (`kernel_mtk.bin`).
 - `tools/`: Build scripts, splash image converter (`convert_splash.py`), MTK boot image packer (`mkbootimg_mtk.py`), and CPIO ramdisk generator.
-- `release/`: Flashable `boot_rockbox.img`, `rockbox_sdcard.zip`, SHA256 checksums, and release notes.
+- `rockbox_sdcard.zip`: SD-card payload containing `.rockbox/rockbox`, Rockbox system files, RAW status screens, and bundled Bluetooth assets.
+- `release/`: Flashable `boot_rockbox.img`, SD-card payload, SHA256 checksums, and release notes.
 
 ## Building
 ```bash
 ./build.sh
 ```
+
+Run the full build in WSL or Linux with the ARM hard-float cross toolchain, Python 3, and `zip` installed. It builds the Rockbox executable, places it at `.rockbox/rockbox` inside `rockbox_sdcard.zip`, and converts source status PNGs to RAW. PNG entries remain in the SD archive; startup displays the RAW files.
+
+Flash `boot_rockbox.img` to the boot partition, then extract `rockbox_sdcard.zip` to the root of the physical MicroSD card. The card must contain `.rockbox/rockbox` and the rest of `.rockbox`; internal eMMC is never used for Rockbox files. Startup waits on the RAW SD-card status screen if the card or executable is missing.
+
+`build.py` assembles the boot image from an existing `rockbox_sdcard.zip` and requires the same ARM cross toolchain to compile PID 1. It refuses to build if the archive does not contain `.rockbox/rockbox`.
 
