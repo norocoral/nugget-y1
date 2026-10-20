@@ -70,11 +70,15 @@ static int pending_vol_l = 0;
 static int pending_vol_r = 0;
 
 /* MT6323 AUDTOP_CON5 (0x70a): HPL bits [14:12], HPR bits [10:8], 0..7.
- * 2 dB/step, index 7 = +14 dB. Low bits 0x0014 keep the HP path powered. */
-#define MT6323_AUDTOP_CON5      0x70a
-#define MT6323_HP_PGA_MUX       0x0014
-#define MT6323_HP_PGA_MAX_IDX   7
-#define MT6323_HP_PGA_STEP_CB   20
+ * 2 dB/step, index 7 = +14 dB. Low bits 0x0014 keep the HP path powered.
+ * Rockbox still uses 1 dB UI steps (-74..+6). Hardware is shifted up by
+ * +14 dB so analog max is used at 0 dB UI and the floor is not silent. */
+#define MT6323_AUDTOP_CON5       0x70a
+#define MT6323_HP_PGA_MUX        0x0014
+#define MT6323_HP_PGA_MAX_IDX    7
+#define MT6323_HP_PGA_STEP_CB    20
+#define MT6323_HP_PGA_MAX_CB     (MT6323_HP_PGA_MAX_IDX * MT6323_HP_PGA_STEP_CB)
+#define MT6323_HP_PGA_OFFSET_CB  MT6323_HP_PGA_MAX_CB
 
 static inline void set_afereg(int fd, uint32_t offset, uint32_t val, uint32_t mask)
 {
@@ -147,34 +151,36 @@ void audiohw_set_frequency(int fsel) { (void)fsel; }
 
 static int vol_cb_to_hp_idx(int vol_cb)
 {
-    int idx;
+    int target_cb;
+    int analog_cb;
 
     if (vol_cb <= -740)
         return 0;
 
-    /* Prefer analog gain so the DAC stays at 0 dBFS and hiss scales down. */
-    idx = (vol_cb + MT6323_HP_PGA_STEP_CB / 2) / MT6323_HP_PGA_STEP_CB;
-    if (idx < 0)
-        idx = 0;
-    if (idx > MT6323_HP_PGA_MAX_IDX)
-        idx = MT6323_HP_PGA_MAX_IDX;
-    return idx;
+    target_cb = vol_cb + MT6323_HP_PGA_OFFSET_CB;
+    if (target_cb <= 0)
+        return 0;
+
+    /* Analog at or above target so the 1 dB remainder is 0 or -1 dB, not a
+     * large digital cut that buries the DAC in its noise floor. */
+    analog_cb = ((target_cb + MT6323_HP_PGA_STEP_CB - 1) / MT6323_HP_PGA_STEP_CB)
+                * MT6323_HP_PGA_STEP_CB;
+    if (analog_cb > MT6323_HP_PGA_MAX_CB)
+        analog_cb = MT6323_HP_PGA_MAX_CB;
+    return analog_cb / MT6323_HP_PGA_STEP_CB;
 }
 
 static int vol_cb_to_sw_remainder(int vol_cb, int hp_idx)
 {
+    int target_cb;
     int analog_cb;
-    int sw_cb;
 
     if (vol_cb <= -740)
         return PCM_MUTE_LEVEL;
 
+    target_cb = vol_cb + MT6323_HP_PGA_OFFSET_CB;
     analog_cb = hp_idx * MT6323_HP_PGA_STEP_CB;
-    sw_cb = vol_cb - analog_cb;
-    /* Never digitally boost; extra loudness is analog-only. */
-    if (sw_cb > 0)
-        sw_cb = 0;
-    return sw_cb;
+    return target_cb - analog_cb;
 }
 
 static void apply_hp_analog_gain(int idx_l, int idx_r)
@@ -192,8 +198,8 @@ static void apply_hp_analog_gain(int idx_l, int idx_r)
 
 void audiohw_set_volume(int vol_l, int vol_r)
 {
-    /* vol_l / vol_r are centibels (-740 to +60). Analog HP PGA is the
-     * volume control; PCM software volume is only the leftover below 0 dB. */
+    /* vol_l / vol_r are centibels (-740 to +60), 1 dB UI steps. Analog HP
+     * PGA is the coarse control; PCM only supplies the 1 dB remainder. */
     int idx_l = vol_cb_to_hp_idx(vol_l);
     int idx_r = vol_cb_to_hp_idx(vol_r);
     int sw_l = vol_cb_to_sw_remainder(vol_l, idx_l);
