@@ -36,6 +36,8 @@ echo "Rootfs:      $ROOTFS_DIR"
 # 1. Setup Rootfs Skeleton
 echo "[1/5] Setting up root filesystem skeleton..."
 python3 "$SCRIPT_DIR/tools/setup_rootfs.py"
+rm -rf "$ROOTFS_DIR/.rockbox"
+rm -f "$ROOTFS_DIR/rockbox"
 rm -f "$ROOTFS_DIR"/etc/*.png
 
 # Convert boot splash and status/error images to raw framebuffer format
@@ -135,21 +137,26 @@ if [ ! -f "$BUILD_DIR/rockbox.zip" ]; then
 fi
 
 cp "$BUILD_DIR/rockbox.zip" "$SCRIPT_DIR/rockbox_sdcard.zip"
-rm -rf "$ROOTFS_DIR/.rockbox"
-mkdir -p "$ROOTFS_DIR/.rockbox/bt"
-cp "$BUILD_DIR/rockbox" "$ROOTFS_DIR/.rockbox/rockbox"
-$STRIP -s -R .comment -R .note.gnu.build-id "$ROOTFS_DIR/.rockbox/rockbox"
-chmod +x "$ROOTFS_DIR/.rockbox/rockbox"
+SD_STAGE="$(mktemp -d "$SCRIPT_DIR/.sdcard-stage.XXXXXX")"
+trap 'rm -rf "$SD_STAGE"' EXIT
+mkdir -p "$SD_STAGE/.rockbox/bt"
+cp "$BUILD_DIR/rockbox" "$SD_STAGE/.rockbox/rockbox"
+$STRIP -s -R .comment -R .note.gnu.build-id "$SD_STAGE/.rockbox/rockbox"
+chmod +x "$SD_STAGE/.rockbox/rockbox"
 
 # Add the Rockbox executable, RAW status screens, and Bluetooth blobs to .rockbox.
-cp "$ROOTFS_DIR"/etc/*.raw "$ROOTFS_DIR/.rockbox/" 2>/dev/null || true
+cp "$ROOTFS_DIR"/etc/*.raw "$SD_STAGE/.rockbox/" 2>/dev/null || true
 if [ -d "$SCRIPT_DIR/bt_blobs" ]; then
-    cp "$SCRIPT_DIR/bt_blobs/"* "$ROOTFS_DIR/.rockbox/bt/" 2>/dev/null || true
+    cp "$SCRIPT_DIR/bt_blobs/"* "$SD_STAGE/.rockbox/bt/" 2>/dev/null || true
 fi
-cd "$ROOTFS_DIR"
-zip -u -q "$SCRIPT_DIR/rockbox_sdcard.zip" .rockbox/rockbox .rockbox/*.raw .rockbox/bt/* 2>/dev/null || true
-rm -rf .rockbox
-rm -f "$ROOTFS_DIR/rockbox"
+cd "$SD_STAGE"
+zip -u -q "$SCRIPT_DIR/rockbox_sdcard.zip" .rockbox/rockbox
+for asset in .rockbox/*.raw .rockbox/bt/*; do
+    [ -e "$asset" ] || continue
+    zip -u -q "$SCRIPT_DIR/rockbox_sdcard.zip" "$asset"
+done
+rm -rf "$SD_STAGE"
+trap - EXIT
 cd "$SCRIPT_DIR"
 echo "[+] Created SD card system archive: $SCRIPT_DIR/rockbox_sdcard.zip"
 

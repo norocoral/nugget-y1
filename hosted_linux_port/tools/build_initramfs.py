@@ -44,6 +44,13 @@ def cpio_entry(name: str, content: bytes, mode: int = 0o100755, mtime: int = 0) 
 
 def build_cpio(root_dir: str) -> bytes:
     """Recursively packs root_dir into CPIO format."""
+    for current_root, dirs, files in os.walk(root_dir):
+        rel_root = os.path.relpath(current_root, root_dir).replace('\\', '/')
+        if rel_root == '.rockbox' or rel_root.startswith('.rockbox/') or 'rockbox' in files:
+            raise SystemExit(f"Refusing to put Rockbox application files in initramfs: {current_root}")
+        if '.rockbox' in dirs or '.rockbox' in files:
+            raise SystemExit(f"Refusing to put .rockbox in initramfs: {current_root}")
+
     buf = bytearray()
 
     # Sort files for deterministic output
