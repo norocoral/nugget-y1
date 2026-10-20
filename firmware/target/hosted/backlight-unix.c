@@ -225,11 +225,12 @@ void lcd_awake(void)
 
 void lcd_sleep(void)
 {
+    if (y1_should_always_on() || y1_playback_active())
+        return;
+
 #ifdef HAVE_LCD_ENABLE
     lcd_enable(false);
 #endif
-    if (y1_should_always_on() || y1_playback_active())
-        return;
 
     /* Suspend to RAM until a key wakes the kernel. Playback never reaches here. */
     sysfs_set_string("/sys/power/state", "mem");
