@@ -66,6 +66,15 @@ struct Register_Control {
 
 static int eac_fd = -1;
 static unsigned long current_sampr = 44100;
+static int pending_vol_l = 0;
+static int pending_vol_r = 0;
+
+/* MT6323 AUDTOP_CON5 (0x70a): HPL bits [14:12], HPR bits [10:8], 0..7.
+ * 2 dB/step, index 7 = +14 dB. Low bits 0x0014 keep the HP path powered. */
+#define MT6323_AUDTOP_CON5      0x70a
+#define MT6323_HP_PGA_MUX       0x0014
+#define MT6323_HP_PGA_MAX_IDX   7
+#define MT6323_HP_PGA_STEP_CB   20
 
 static inline void set_afereg(int fd, uint32_t offset, uint32_t val, uint32_t mask)
 {
@@ -135,29 +144,72 @@ static void log_audio_debug(const char *msg)
 void audiohw_preinit(void) { }
 void audiohw_postinit(void) { }
 void audiohw_set_frequency(int fsel) { (void)fsel; }
+
+static int vol_cb_to_hp_idx(int vol_cb)
+{
+    int idx;
+
+    if (vol_cb <= -740)
+        return 0;
+
+    /* Prefer analog gain so the DAC stays at 0 dBFS and hiss scales down. */
+    idx = (vol_cb + MT6323_HP_PGA_STEP_CB / 2) / MT6323_HP_PGA_STEP_CB;
+    if (idx < 0)
+        idx = 0;
+    if (idx > MT6323_HP_PGA_MAX_IDX)
+        idx = MT6323_HP_PGA_MAX_IDX;
+    return idx;
+}
+
+static int vol_cb_to_sw_remainder(int vol_cb, int hp_idx)
+{
+    int analog_cb;
+    int sw_cb;
+
+    if (vol_cb <= -740)
+        return PCM_MUTE_LEVEL;
+
+    analog_cb = hp_idx * MT6323_HP_PGA_STEP_CB;
+    sw_cb = vol_cb - analog_cb;
+    /* Never digitally boost; extra loudness is analog-only. */
+    if (sw_cb > 0)
+        sw_cb = 0;
+    return sw_cb;
+}
+
+static void apply_hp_analog_gain(int idx_l, int idx_r)
+{
+    uint32_t con5;
+
+    if (eac_fd < 0)
+        return;
+
+    con5 = MT6323_HP_PGA_MUX |
+           ((uint32_t)idx_l << 12) |
+           ((uint32_t)idx_r << 8);
+    set_anareg(eac_fd, MT6323_AUDTOP_CON5, con5, 0xffff);
+}
+
 void audiohw_set_volume(int vol_l, int vol_r)
 {
-    /* vol_l and vol_r are passed in centibels (tenths of a dB, -740 to +60).
-     * pcm_set_master_volume expects centibels directly.
-     * At <= -740 (-74 dB), mute completely via PCM_MUTE_LEVEL.
-     * Support full volume scale without artificial software attenuation cap. */
-    int sw_volume_l = (vol_l <= -740) ? PCM_MUTE_LEVEL : vol_l;
-    int sw_volume_r = (vol_r <= -740) ? PCM_MUTE_LEVEL : vol_r;
+    /* vol_l / vol_r are centibels (-740 to +60). Analog HP PGA is the
+     * volume control; PCM software volume is only the leftover below 0 dB. */
+    int idx_l = vol_cb_to_hp_idx(vol_l);
+    int idx_r = vol_cb_to_hp_idx(vol_r);
+    int sw_l = vol_cb_to_sw_remainder(vol_l, idx_l);
+    int sw_r = vol_cb_to_sw_remainder(vol_r, idx_r);
+
+    pending_vol_l = vol_l;
+    pending_vol_r = vol_r;
 
     if (y1_bt_a2dp_is_streaming())
     {
-        /* Clamp to 0 dBFS (0 centibels) when Bluetooth audio is streaming to prevent digital peaking/distortion */
-        if (sw_volume_l > 0) sw_volume_l = 0;
-        if (sw_volume_r > 0) sw_volume_r = 0;
+        if (sw_l > 0) sw_l = 0;
+        if (sw_r > 0) sw_r = 0;
     }
 
-    pcm_set_master_volume(sw_volume_l, sw_volume_r);
-
-    if (eac_fd >= 0)
-    {
-        /* Keep headphone amplifier firmly powered and set to maximum analog gain (0x7714, +14dB Left & Right). */
-        set_anareg(eac_fd, 0x70a, 0x7714, 0xffff);
-    }
+    pcm_set_master_volume(sw_l, sw_r);
+    apply_hp_analog_gain(idx_l, idx_r);
 }
 static pthread_t pcm_thread;
 static pthread_mutex_t pcm_mtx = PTHREAD_MUTEX_INITIALIZER;
@@ -386,7 +438,8 @@ static void sink_dma_init(void)
             set_anareg(eac_fd, 0x708, 0x007c, 0xffff);
             usleep(10000); /* 10ms settling time */
             set_anareg(eac_fd, 0x70c, 0xf5ba, 0xffff);
-            set_anareg(eac_fd, 0x70a, 0x7714, 0xffff); /* Max +14dB analog gain Left & Right, Headphone powered */
+            apply_hp_analog_gain(vol_cb_to_hp_idx(pending_vol_l),
+                                 vol_cb_to_hp_idx(pending_vol_r));
             ioctl(eac_fd, SET_HEADPHONE_ON, 3);
 
             /* 12. Configure MT6323 PMIC Digital Audio Downlink (NewIF & Codec) */
