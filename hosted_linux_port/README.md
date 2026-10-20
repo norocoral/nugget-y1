@@ -18,6 +18,8 @@ This folder contains the build environment, minimal Linux initramfs, hardware au
 
 Run the full build in WSL or Linux with the ARM hard-float cross toolchain, Python 3, and `zip` installed. It builds the Rockbox executable, places it at `.rockbox/rockbox` inside `rockbox_sdcard.zip`, and converts source status PNGs to RAW. PNG entries remain in the SD archive; startup displays the RAW files.
 
+From this directory, `build.sh` and `build.py` search parent directories for the workspace containing `!stock_rom`. Set `WORKSPACE_ROOT` if the workspace cannot be discovered automatically, or set `STOCK_BOOT` to use a different stock `boot.img` path.
+
 Flash `boot_rockbox.img` to the boot partition, then extract `rockbox_sdcard.zip` to the root of the physical MicroSD card. The card must contain `.rockbox/rockbox` and the rest of `.rockbox`; internal eMMC is never used for Rockbox files. Startup waits on the RAW SD-card status screen if the card or executable is missing.
 
 `build.py` assembles the boot image from an existing `rockbox_sdcard.zip` and requires the same ARM cross toolchain to compile PID 1. It refuses to build if the archive does not contain `.rockbox/rockbox`.

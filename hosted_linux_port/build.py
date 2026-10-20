@@ -11,8 +11,20 @@ import subprocess
 import zipfile
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-WORKSPACE_ROOT = os.path.abspath(os.path.join(SCRIPT_DIR, ".."))
-STOCK_BOOT = os.path.join(WORKSPACE_ROOT, "!stock_rom", "boot.img")
+WORKSPACE_ROOT = os.environ.get("WORKSPACE_ROOT")
+if WORKSPACE_ROOT:
+    WORKSPACE_ROOT = os.path.abspath(WORKSPACE_ROOT)
+else:
+    search_dir = SCRIPT_DIR
+    while True:
+        if os.path.isdir(os.path.join(search_dir, "!stock_rom")):
+            WORKSPACE_ROOT = search_dir
+            break
+        parent_dir = os.path.dirname(search_dir)
+        if parent_dir == search_dir:
+            raise SystemExit("[!] Could not find workspace root containing !stock_rom. Set WORKSPACE_ROOT explicitly.")
+        search_dir = parent_dir
+STOCK_BOOT = os.environ.get("STOCK_BOOT", os.path.join(WORKSPACE_ROOT, "!stock_rom", "boot.img"))
 UNPACKED_DIR = os.path.join(SCRIPT_DIR, "stock_unpacked")
 ROOTFS_DIR = os.path.join(SCRIPT_DIR, "rootfs")
 SDCARD_ZIP = os.path.join(SCRIPT_DIR, "rockbox_sdcard.zip")

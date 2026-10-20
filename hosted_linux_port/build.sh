@@ -6,21 +6,37 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Auto-detect Rockbox source directory
+WORKSPACE_ROOT="${WORKSPACE_ROOT:-}"
+if [ -z "$WORKSPACE_ROOT" ]; then
+    search_dir="$SCRIPT_DIR"
+    while :; do
+        if [ -d "$search_dir/!stock_rom" ]; then
+            WORKSPACE_ROOT="$search_dir"
+            break
+        fi
+        parent_dir="$(dirname "$search_dir")"
+        [ "$parent_dir" = "$search_dir" ] && break
+        search_dir="$parent_dir"
+    done
+fi
+
+if [ -z "$WORKSPACE_ROOT" ]; then
+    echo "[!] Could not find workspace root containing !stock_rom. Set WORKSPACE_ROOT explicitly."
+    exit 1
+fi
+
 if [ -f "$SCRIPT_DIR/../tools/configure" ]; then
     ROCKBOX_SRC="$(cd "$SCRIPT_DIR/.." && pwd)"
-    WORKSPACE_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 elif [ -f "$SCRIPT_DIR/tools/configure" ]; then
     ROCKBOX_SRC="$SCRIPT_DIR"
-    WORKSPACE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 else
-    WORKSPACE_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
     ROCKBOX_SRC="$WORKSPACE_ROOT/!rockbox_fromsource/rockbox-master/rockbox-master"
 fi
 
 ROOTFS_DIR="$SCRIPT_DIR/rootfs"
 BUILD_DIR="$ROCKBOX_SRC/build_y1"
 SPLASH_DIR="$SCRIPT_DIR/splash"
+STOCK_BOOT="${STOCK_BOOT:-$WORKSPACE_ROOT/!stock_rom/boot.img}"
 
 CROSS_COMPILE=${CROSS_COMPILE:-arm-linux-gnueabihf-}
 CC="${CROSS_COMPILE}gcc"
@@ -170,7 +186,7 @@ python3 "$SCRIPT_DIR/tools/build_initramfs.py" "$ROOTFS_DIR" -o "$SCRIPT_DIR/ram
 
 # Extract stock kernel if not already extracted
 if [ ! -f "$SCRIPT_DIR/stock_unpacked/kernel_mtk.bin" ]; then
-    python3 "$SCRIPT_DIR/tools/mkbootimg_mtk.py" unpack "$WORKSPACE_ROOT/!stock_rom/boot.img" -o "$SCRIPT_DIR/stock_unpacked"
+    python3 "$SCRIPT_DIR/tools/mkbootimg_mtk.py" unpack "$STOCK_BOOT" -o "$SCRIPT_DIR/stock_unpacked"
 fi
 
 python3 "$SCRIPT_DIR/tools/mkbootimg_mtk.py" pack \
