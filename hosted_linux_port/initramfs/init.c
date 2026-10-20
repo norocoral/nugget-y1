@@ -27,8 +27,10 @@
 #include <sys/types.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
+#include <sys/reboot.h>
 #include <sys/sysmacros.h>
 #include <linux/fb.h>
+#include <linux/input.h>
 #include <dirent.h>
 #include <sys/wait.h>
 
@@ -740,6 +742,71 @@ static void unmute_audio(void)
 #include <sys/syscall.h>
 #include <poll.h>
 
+static int error_screen_center_pressed(void)
+{
+    static int event_fds[16];
+    static int initialized = 0;
+    struct pollfd poll_fds[16];
+    int event_indices[16];
+    nfds_t count = 0;
+
+    if (!initialized) {
+        for (int i = 0; i < 16; i++)
+            event_fds[i] = -1;
+        initialized = 1;
+    }
+
+    for (int i = 0; i < 16; i++) {
+        if (event_fds[i] < 0) {
+            char path[32];
+            snprintf(path, sizeof(path), "/dev/input/event%d", i);
+            event_fds[i] = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+        }
+        if (event_fds[i] >= 0) {
+            poll_fds[count].fd = event_fds[i];
+            poll_fds[count].events = POLLIN;
+            poll_fds[count].revents = 0;
+            event_indices[count] = i;
+            count++;
+        }
+    }
+
+    if (poll(poll_fds, count, 0) <= 0)
+        return 0;
+
+    for (nfds_t i = 0; i < count; i++) {
+        if (!(poll_fds[i].revents & POLLIN))
+            continue;
+
+        struct input_event event;
+        while (read(event_fds[event_indices[i]], &event, sizeof(event)) == sizeof(event)) {
+            if (event.type == EV_KEY && event.value == 1 &&
+                (event.code == 232 || event.code == KEY_ENTER ||
+                 event.code == KEY_KPENTER || event.code == 352 ||
+                 event.code == 353 || event.code == 314 ||
+                 event.code == 315 || event.code == 304))
+                return 1;
+        }
+    }
+
+    return 0;
+}
+
+static int is_error_status_screen(const char *screen)
+{
+    return strcmp(screen, "sdcard") == 0 ||
+           strcmp(screen, "error") == 0 ||
+           strcmp(screen, "errconnect") == 0;
+}
+
+static void power_off_from_error_screen(void)
+{
+    log_line("Center button pressed on error screen; powering off.\n");
+    sync();
+    reboot(RB_POWER_OFF);
+    log_line("ERROR: Device power-off failed.\n");
+}
+
 static int load_kernel_module(const char *path, const char *params)
 {
     int fd = open(path, O_RDONLY | O_CLOEXEC);
@@ -1016,6 +1083,7 @@ int main(int argc, char *argv[])
 
     /* 8. Setup /.rockbox directory: strictly require .rockbox on MicroSD */
     int rockbox_found = 0;
+    int waited_for_rockbox = 0;
     const char *last_screen = card_found ? "boot" : "sdcard";
 
     /* Start background automounter daemon for hotplugging */
@@ -1038,10 +1106,18 @@ int main(int argc, char *argv[])
                 if (symlink("/mnt/sdcard/.rockbox", "/.rockbox") == 0) {
                     log_line("Linked /.rockbox -> /mnt/sdcard/.rockbox\n");
                 }
+                if (waited_for_rockbox) {
+                    log_line("Rockbox installation detected. Rebooting device...\n");
+                    sync();
+                    reboot(RB_AUTOBOOT);
+                    log_line("ERROR: Device reboot failed; remaining in recovery wait.\n");
+                    while (1) sleep(1);
+                }
                 rockbox_found = 1;
                 break;
             }
 
+            waited_for_rockbox = 1;
             /* Require .rockbox on the mounted primary MicroSD before launching. */
             if (strcmp(last_screen, "sdcard") != 0) {
                 log_line("WARNING: Primary MicroSD or its /.rockbox directory is missing!\n");
@@ -1049,6 +1125,8 @@ int main(int argc, char *argv[])
                 display_screen("sdcard");
                 last_screen = "sdcard";
             }
+            if (is_error_status_screen(last_screen) && error_screen_center_pressed())
+                power_off_from_error_screen();
             sleep(1);
         }
 
@@ -1159,6 +1237,9 @@ int main(int argc, char *argv[])
                 sleep(1);
                 break;
             }
+
+            if (is_error_status_screen(last_screen) && error_screen_center_pressed())
+                power_off_from_error_screen();
 
             sleep(2);
         }
