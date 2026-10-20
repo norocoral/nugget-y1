@@ -565,8 +565,12 @@ static void sink_set_freq(uint16_t freq)
         /* 4. PMIC New IF DAC output config (0x108) */
         set_afereg(eac_fd, 0x108, dac_con1, ~0U);
 
-        /* 5. I2S Out format & sample rate (0x34) */
-        set_afereg(eac_fd, 0x34, (rate_code << 8) | rate_code, ~0U);
+        /* 5. I2S Out format & sample rate (AFE_I2S_CON1 / 0x34).
+         * Init uses 0x00000909: bits[11:8] = rate, bits[3:0] = 0x9
+         * (bit 0 I2S enable, bit 3 16-bit). Putting rate_code in the low
+         * nibble clears enable for even rates (48 kHz is 10), which muted
+         * AUTO 48 kHz tracks. */
+        set_afereg(eac_fd, 0x34, (rate_code << 8) | 0x09, ~0U);
 
         /* 6. PMIC NewIF Downlink Frequency (0x4024) */
         set_anareg(eac_fd, 0x4024, (pmic_newif_rate << 12) | 0x330, 0xffff);
