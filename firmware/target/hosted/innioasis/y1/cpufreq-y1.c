@@ -17,20 +17,43 @@
 #include "config.h"
 #include "cpufreq-y1.h"
 #include "sysfs.h"
+#include "settings.h"
 
 static int _current_cpu_mode = -1;
 static int _saved_cpu_mode = -1;
+static int _saved_cpu1_online = -1;
+
+static int cpu1_is_online(void)
+{
+    int online = 1;
+    int fd = open("/sys/devices/system/cpu/cpu1/online", O_RDONLY | O_CLOEXEC);
+    if (fd >= 0) {
+        char buf[4] = { 0 };
+        if (read(fd, buf, sizeof(buf) - 1) > 0)
+            online = (buf[0] != '0');
+        close(fd);
+    }
+    return online;
+}
 
 void y1_set_screen_off_power_mode(bool screen_off)
 {
     if (screen_off) {
+        if (!global_settings.y1_screen_off_cpu_save)
+            return;
         if (_saved_cpu_mode == -1) {
             _saved_cpu_mode = _current_cpu_mode >= 0 ? _current_cpu_mode : Y1_CPU_DYNAMIC;
         }
-        /* Throttle CPU to fixed 598 MHz powersave underclock during screen-off */
+        if (_saved_cpu1_online == -1)
+            _saved_cpu1_online = cpu1_is_online();
+        /* 598 MHz + single core while the panel is off (play or idle). */
         y1_set_cpu_mode(Y1_CPU_POWERSAVE);
+        y1_set_cpu_cores_setting(1);
     } else {
-        /* Restore previous CPU governor mode on screen wake */
+        if (_saved_cpu1_online != -1) {
+            y1_set_cpu_cores_setting(_saved_cpu1_online ? 0 : 1);
+            _saved_cpu1_online = -1;
+        }
         if (_saved_cpu_mode != -1) {
             int restore = _saved_cpu_mode;
             _saved_cpu_mode = -1;

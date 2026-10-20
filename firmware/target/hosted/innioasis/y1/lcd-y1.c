@@ -200,9 +200,13 @@ void lcd_enable(bool on)
 
     lcd_set_active(on);
     if (on) {
+        ioctl(fb_fd, MTKFB_POWERON);
         ioctl(fb_fd, FBIOBLANK, VESA_NO_BLANKING);
         send_event(LCD_EVENT_ACTIVATION, NULL);
         lcd_update();
+    } else {
+        ioctl(fb_fd, FBIOBLANK, VESA_POWERDOWN);
+        ioctl(fb_fd, MTKFB_POWEROFF);
     }
 }
 
@@ -218,6 +222,12 @@ void y1_set_always_on_screen(bool on)
 bool y1_is_always_on_screen(void)
 {
     return y1_always_on_enabled;
+}
+
+bool y1_playback_active(void)
+{
+    int stat = audio_status();
+    return (stat & AUDIO_STATUS_PLAY) && !(stat & AUDIO_STATUS_PAUSE);
 }
 
 bool y1_should_always_on(void)

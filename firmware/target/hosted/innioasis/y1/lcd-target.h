@@ -30,6 +30,7 @@ extern bool y1_is_always_on_screen(void);
 extern bool y1_should_always_on(void);
 extern void y1_set_display_power_saving(bool enable);
 extern bool y1_is_display_power_saving(void);
+extern bool y1_playback_active(void);
 extern void y1_backlight_idle_check(void);
 
 #endif /* __LCD_TARGET_H__ */

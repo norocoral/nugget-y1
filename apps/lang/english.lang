@@ -17373,6 +17373,20 @@
   </voice>
 </phrase>
 <phrase>
+  id: LANG_Y1_SCREEN_OFF_CPU_SAVE
+  desc: in Settings -> Nugget -> Device
+  user: core
+  <source>
+    *: "Screen-Off CPU Save"
+  </source>
+  <dest>
+    *: "Screen-Off CPU Save"
+  </dest>
+  <voice>
+    *: "Screen-Off CPU Save"
+  </voice>
+</phrase>
+<phrase>
   id: LANG_Y1_HEADPHONE_REMOTE
   desc: in Settings -> Nugget -> Device
   user: core

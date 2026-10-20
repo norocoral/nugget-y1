@@ -435,6 +435,7 @@ MENUITEM_SETTING(y1_aod_wps_item, &global_settings.aod_wps_only, NULL);
 MENUITEM_SETTING(y1_aod_playback_item, &global_settings.aod_playback_only, NULL);
 MENUITEM_SETTING(y1_cpu_mode_setting, &global_settings.y1_cpu_mode, NULL);
 MENUITEM_SETTING(y1_cpu_cores_setting, &global_settings.y1_cpu_cores, NULL);
+MENUITEM_SETTING(y1_screen_off_cpu_save_item, &global_settings.y1_screen_off_cpu_save, NULL);
 MENUITEM_SETTING(y1_bt_enable_item, &global_settings.bt_enabled, NULL);
 
 static struct y1_bt_device ui_bt_devs[Y1_BT_MAX_DEVICES];
@@ -717,6 +718,7 @@ MAKE_MENU(nugget_device_menu, ID2P(LANG_DEVICE), 0, Icon_NOICON,
           &y1_double_click_unhold_item,
           &y1_cpu_mode_setting,
           &y1_cpu_cores_setting,
+          &y1_screen_off_cpu_save_item,
           &nugget_headphone_menu);
 
 MAKE_MENU(nugget_menu, ID2P(LANG_NUGGET), 0, Icon_NOICON,

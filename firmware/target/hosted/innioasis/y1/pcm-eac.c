@@ -66,6 +66,32 @@ struct Register_Control {
 
 static int eac_fd = -1;
 static unsigned long current_sampr = 44100;
+static int wakelock_fd = -1;
+
+static void y1_play_wake_lock(bool hold)
+{
+    if (wakelock_fd < 0)
+        wakelock_fd = open("/sys/power/wake_lock", O_WRONLY | O_CLOEXEC);
+    if (wakelock_fd < 0)
+        return;
+    if (hold)
+        (void)!write(wakelock_fd, "y1play\n", 7);
+    else {
+        int ufd = open("/sys/power/wake_unlock", O_WRONLY | O_CLOEXEC);
+        if (ufd >= 0) {
+            (void)!write(ufd, "y1play\n", 7);
+            close(ufd);
+        }
+    }
+}
+
+static void y1_audio_clocks(int on)
+{
+    if (eac_fd < 0)
+        return;
+    ioctl(eac_fd, AUD_DRV_AFE_CLK, on);
+    ioctl(eac_fd, AUD_DRV_AIF_CLK, on);
+}
 static int pending_vol_l = 0;
 static int pending_vol_r = 0;
 
@@ -231,7 +257,6 @@ static size_t pcm_size = 0;
 static void *pcm_worker(void *arg)
 {
     (void)arg;
-    static const char zero_buf[4096] = { 0 };
 
     while (!pcm_thread_exit)
     {
@@ -269,8 +294,17 @@ static void *pcm_worker(void *arg)
                     break;
 
                 bool bt_active = y1_bt_a2dp_is_streaming();
-                ssize_t written = write(eac_fd, bt_active ? zero_buf : buf, chunk);
-                if (written < 0 && errno != EAGAIN && errno != EINTR) {
+                ssize_t written;
+                if (bt_active) {
+                    /* Keep A2DP paced without driving the analog DAC. */
+                    y1_bt_a2dp_write_pcm(buf, chunk, current_sampr);
+                    if (current_sampr)
+                        usleep((useconds_t)((chunk / 4) * 1000000UL / current_sampr));
+                    written = (ssize_t)chunk;
+                } else {
+                    written = write(eac_fd, buf, chunk);
+                }
+                if (!bt_active && written < 0 && errno != EAGAIN && errno != EINTR) {
                     char wmsg[128];
                     snprintf(wmsg, sizeof(wmsg), "[pcm-eac] write error: %zd (errno=%d %s)\n",
                              written, errno, strerror(errno));
@@ -284,9 +318,6 @@ static void *pcm_worker(void *arg)
                     if (written == 0) {
                         usleep(1000);
                         continue;
-                    }
-                    if (bt_active) {
-                        y1_bt_a2dp_write_pcm(buf, (size_t)written, current_sampr);
                     }
                     remaining -= written;
                     buf += written;
@@ -597,6 +628,8 @@ static void sink_dma_start(const void *addr, size_t size)
 
     if (eac_fd >= 0)
     {
+        y1_audio_clocks(1);
+        y1_play_wake_lock(true);
         /* Ensure AFE Master Switch and DL1 DMA are active */
         set_afereg(eac_fd, 0x10, (1 << 0) | (1 << 1), (1 << 0) | (1 << 1));
     }
@@ -617,8 +650,10 @@ static void sink_dma_stop(void)
 
     if (eac_fd >= 0)
     {
-        /* Pause DL1 DMA transfer (clear bit 1 of 0x10) while keeping AFE on */
+        /* Pause DL1 and drop AFE clocks so idle-between-tracks is cheap. */
         set_afereg(eac_fd, 0x10, 0, 1 << 1);
+        y1_audio_clocks(0);
+        y1_play_wake_lock(false);
     }
 }
 

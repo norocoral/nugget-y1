@@ -214,6 +214,28 @@ void backlight_hw_brightness(int brightness)
 }
 
 #ifdef HAVE_LCD_SLEEP
+#if defined(BACKLIGHT_INNIOASIS)
+void lcd_awake(void)
+{
+    sysfs_set_string("/sys/power/state", "on");
+#ifdef HAVE_LCD_ENABLE
+    lcd_enable(true);
+#endif
+}
+
+void lcd_sleep(void)
+{
+#ifdef HAVE_LCD_ENABLE
+    lcd_enable(false);
+#endif
+    if (y1_should_always_on() || y1_playback_active())
+        return;
+
+    /* Suspend to RAM until a key wakes the kernel. Playback never reaches here. */
+    sysfs_set_string("/sys/power/state", "mem");
+    sysfs_set_string("/sys/power/state", "on");
+}
+#else
 void lcd_awake(void)
 {
     /* Nothing to do */
@@ -229,4 +251,5 @@ void lcd_sleep(void)
 #endif
     }
 }
+#endif
 #endif

@@ -12,6 +12,8 @@
 /* Display */
 #define HAVE_LCD_COLOR
 #define HAVE_LCD_ENABLE
+#define HAVE_LCD_SLEEP
+#define HAVE_LCD_SLEEP_SETTING
 #define HAVE_LCD_SHUTDOWN
 #define HAVE_ALBUMART
 #define HAVE_BMP_SCALING

@@ -931,6 +931,7 @@ struct user_settings
 #if defined(INNIOASIS_Y1)
     int y1_cpu_mode;
     int y1_cpu_cores;
+    bool y1_screen_off_cpu_save;
     int y1_screen_resolution;
     bool always_on_screen;
     bool aod_wps_only;
