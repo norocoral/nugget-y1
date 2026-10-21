@@ -441,17 +441,8 @@ static void init(void)
     settings_reset();
     settings_load();
 #if defined(INNIOASIS_Y1)
-    if (global_settings.y1_screen_resolution == 1) {
-        screens[SCREEN_MAIN].lcdwidth = 320;
-        screens[SCREEN_MAIN].lcdheight = 240;
-        extern void y1_set_resolution_setting(int mode);
-        y1_set_resolution_setting(1);
-    } else {
-        screens[SCREEN_MAIN].lcdwidth = 480;
-        screens[SCREEN_MAIN].lcdheight = 360;
-        extern void y1_set_resolution_setting(int mode);
-        y1_set_resolution_setting(0);
-    }
+    extern void y1_apply_resolution_setting(int mode);
+    y1_apply_resolution_setting(global_settings.y1_screen_resolution);
 #endif
 
     /* Keep the order of this 3 (viewportmanager handles statusbars)
