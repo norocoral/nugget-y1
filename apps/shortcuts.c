@@ -47,6 +47,7 @@
 #include "screens.h"
 #include "talk.h"
 #include "yesno.h"
+#include "root_menu.h"
 
 #define MAX_SHORTCUT_NAME 64
 #define SHORTCUTS_HDR "[shortcut]"
@@ -61,6 +62,7 @@ static const char * const type_strings[SHORTCUT_TYPE_COUNT] = {
     [SHORTCUT_SHUTDOWN] = "shutdown",
     [SHORTCUT_REBOOT] = "reboot",
     [SHORTCUT_TIME] = "time",
+    [SHORTCUT_ROOTMENU] = "rootmenu",
     [SHORTCUT_FILE] = "file",
 };
 
@@ -199,6 +201,7 @@ static bool verify_shortcut(struct shortcut* sc)
             return false;
         case SHORTCUT_BROWSER:
         case SHORTCUT_FILE:
+        case SHORTCUT_ROOTMENU:
         case SHORTCUT_PLAYLISTMENU:
             return sc->u.path[0] != '\0';
         case SHORTCUT_SETTING_APPLY:
@@ -315,6 +318,14 @@ void shortcuts_add(enum shortcut_type type, const char* value)
     register_storage_idle_func(shortcuts_ata_idle_callback);
 }
 
+void shortcuts_add_rootmenu(const char *value, const char *name)
+{
+    shortcuts_add(SHORTCUT_ROOTMENU, value);
+    struct shortcut *sc = get_shortcut(shortcut_count - 1, NULL);
+    if (sc && name)
+        strmemccpy(sc->name, name, sizeof(sc->name));
+}
+
 static int readline_cb(int n, char *buf, void *parameters)
 {
     (void)n;
@@ -374,6 +385,7 @@ static int readline_cb(int n, char *buf, void *parameters)
             }
             case SHORTCUT_FILE:
             case SHORTCUT_DEBUGITEM:
+            case SHORTCUT_ROOTMENU:
             case SHORTCUT_PLAYLISTMENU:
             {
                 strmemccpy(sc->u.path, value, MAX_PATH);
@@ -473,6 +485,8 @@ static const char * shortcut_menu_get_name(int selected_item, void * data,
         return "";
     const char *ret = sc->u.path;
 
+    if (sc->type == SHORTCUT_ROOTMENU && sc->name[0])
+        return sc->name;
     if (sc->type == SHORTCUT_SETTING && sc->name[0] == '\0')
         return P2STR(ID2P(sc->setting->lang_id));
     else if (sc->type == SHORTCUT_SETTING_APPLY && sc->name[0] == '\0')
@@ -805,6 +819,9 @@ int do_shortcut_menu(void *ignored)
                 break;
             case SHORTCUT_DEBUGITEM:
                 run_debug_screen(sc->u.path);
+                break;
+            case SHORTCUT_ROOTMENU:
+                done = root_menu_load_shortcut(sc->u.path);
                 break;
             case SHORTCUT_SHUTDOWN:
 #if CONFIG_CHARGING && !defined(HAVE_POWEROFF_WHILE_CHARGING)

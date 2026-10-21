@@ -265,6 +265,7 @@ struct mp3entry {
 
     int lead_trim;          /* Number of samples to skip at the beginning */
     int tail_trim;          /* Number of samples to remove from the end */
+    bool favorite;          /* Track marked as favorite in source metadata */
 
     /* Added for Vorbis, used by mp4 parser as well. */
     uint64_t samples;  /* number of samples in track */

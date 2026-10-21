@@ -37,6 +37,8 @@ enum onplay_return_code {
     ONPLAY_PLAYLIST,
     ONPLAY_PLUGIN,
     ONPLAY_FUNC_RETURN, /* for use in hotkey_assignment only */
+    ONPLAY_BROWSE_DB_ARTIST,
+    ONPLAY_BROWSE_DB_ALBUM,
 };
 
 enum hotkey_action {

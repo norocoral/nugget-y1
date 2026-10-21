@@ -55,7 +55,7 @@ static struct gui_synclist *abc_name_owner;
 static list_get_name *abc_name_callback;
 
 #if defined(INNIOASIS_Y1) && defined(HAVE_LCD_COLOR)
-#define SCROLL_ABC_OVERLAY_TICKS HZ
+#define SCROLL_ABC_OVERLAY_TICKS (2 * HZ)
 #define SCROLL_ABC_RADIUS 26
 
 static char scroll_abc_overlay[5];
@@ -152,7 +152,28 @@ static bool scroll_abc_move(struct gui_synclist *lists, int direction,
                                    candidate_initial) &&
             candidate != current)
         {
-            gui_synclist_select_item(lists, item);
+            int first_item = item;
+            for (int group_offset = 1; group_offset < count; group_offset++)
+            {
+                int previous = first_item - 1;
+                ucschar_t previous_initial;
+                char previous_text[5];
+
+                if (allow_wrap)
+                    previous = (previous % count + count) % count;
+                else if (previous < 0)
+                    break;
+
+                if (!scroll_abc_get_initial(lists, previous,
+                                            &previous_initial,
+                                            previous_text) ||
+                    previous_initial != candidate)
+                    break;
+
+                first_item = previous;
+            }
+
+            gui_synclist_select_item(lists, first_item);
             size_t len = strlen(candidate_initial);
             memcpy(scroll_abc_overlay, candidate_initial, len + 1);
             scroll_abc_overlay_tick = current_tick;
@@ -188,10 +209,10 @@ static void scroll_abc_draw_overlay(struct gui_synclist *lists)
     int radius = MIN(SCROLL_ABC_RADIUS, MIN(width, height) / 2);
     int cx = width - radius - 8;
     int cy = height / 2;
-    unsigned old_fg = display->get_foreground();
-    unsigned old_bg = display->get_background();
+    int old_drawmode = vp->drawmode;
     int old_font = old_vp->font;
     int list_font = vp->font;
+    unsigned old_fg, old_bg;
     int text_width, text_height;
 
     if (!scroll_abc_overlay_active())
@@ -201,6 +222,8 @@ static void scroll_abc_draw_overlay(struct gui_synclist *lists)
     }
 
     display->set_viewport(vp);
+    old_fg = display->get_foreground();
+    old_bg = display->get_background();
     display->setfont(list_font);
     display->set_drawmode(DRMODE_SOLID);
     display->set_foreground(global_settings.fg_color);
@@ -213,12 +236,14 @@ static void scroll_abc_draw_overlay(struct gui_synclist *lists)
     }
 
     display->set_foreground(global_settings.bg_color);
+    display->set_drawmode(DRMODE_FG);
     display->getstringsize((const unsigned char *)scroll_abc_overlay,
                            &text_width, &text_height);
     display->putsxy(cx - text_width / 2, cy - text_height / 2,
                     (const unsigned char *)scroll_abc_overlay);
     display->update_viewport_rect(cx - radius, cy - radius,
                                   radius * 2 + 1, radius * 2 + 1);
+    display->set_drawmode(old_drawmode);
     display->set_foreground(old_fg);
     display->set_background(old_bg);
     display->set_viewport(old_vp);

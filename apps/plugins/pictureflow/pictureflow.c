@@ -36,6 +36,7 @@
 
 /******************************* Globals ***********************************/
 static fb_data *lcd_fb;
+static bool statusbar_theme_enabled;
 
 /*
  *  Targets which use plugin_get_audio_buffer() can't have playback from
@@ -231,6 +232,30 @@ typedef unsigned char pix_t;
 #define BUFFER_HEIGHT LCD_HEIGHT
 typedef fb_data pix_t;
 #endif  /* LCD_DEPTH >= 8 */
+
+#ifdef HAVE_LCD_COLOR
+static inline pix_t theme_brightness(int level)
+{
+    int bg = rb->global_settings->bg_color;
+    int fg = rb->global_settings->fg_color;
+
+    level = MAX(0, MIN(level, 255));
+    return LCD_RGBPACK(
+        (RGB_UNPACK_RED(bg) * (255 - level) +
+         RGB_UNPACK_RED(fg) * level) / 255,
+        (RGB_UNPACK_GREEN(bg) * (255 - level) +
+         RGB_UNPACK_GREEN(fg) * level) / 255,
+        (RGB_UNPACK_BLUE(bg) * (255 - level) +
+         RGB_UNPACK_BLUE(fg) * level) / 255);
+}
+#define PF_THEME_BG rb->global_settings->bg_color
+#define PF_THEME_FG rb->global_settings->fg_color
+#undef G_BRIGHT
+#define G_BRIGHT(y) theme_brightness(y)
+#else
+#define PF_THEME_BG G_BRIGHT(0)
+#define PF_THEME_FG G_BRIGHT(255)
+#endif
 
 /* for fixed-point arithmetic, we need minimum 32-bit long
    long long (64-bit) might be useful for multiplication and division */
@@ -2112,8 +2137,8 @@ static void draw_splashscreen(unsigned char * buf_tmp, size_t buf_tmp_size)
     int ret = rb->read_bmp_file(SPLASH_BMP, &logo, buf_tmp_size,
                                 FORMAT_NATIVE, NULL);
 #if LCD_DEPTH > 1
-    rb->lcd_set_background(N_BRIGHT(0));
-    rb->lcd_set_foreground(N_BRIGHT(255));
+    rb->lcd_set_background(PF_THEME_BG);
+    rb->lcd_set_foreground(PF_THEME_FG);
 #else
     rb->lcd_set_drawmode(PICTUREFLOW_DRMODE);
 #endif
@@ -2148,8 +2173,8 @@ static void draw_progressbar(int step, int count, char *msg)
     if (msg != NULL)
     {
 #if LCD_DEPTH > 1
-        rb->lcd_set_background(N_BRIGHT(0));
-        rb->lcd_set_foreground(N_BRIGHT(255));
+        rb->lcd_set_background(PF_THEME_BG);
+        rb->lcd_set_foreground(PF_THEME_FG);
 #else
         rb->lcd_set_drawmode(PICTUREFLOW_DRMODE);
 #endif
@@ -2161,16 +2186,16 @@ static void draw_progressbar(int step, int count, char *msg)
         y += (txt_h + 5);
     }
 #if LCD_DEPTH > 1
-    rb->lcd_set_foreground(N_BRIGHT(100));
+    rb->lcd_set_foreground(G_BRIGHT(100));
 #endif
     rb->lcd_drawrect(x, y, w+2, bar_height);
 #if LCD_DEPTH > 1
-    rb->lcd_set_foreground(N_PIX(165, 231, 82));
+    rb->lcd_set_foreground(PF_THEME_FG);
 #endif
 
     rb->lcd_fillrect(x+1, y+1, step * w / count, bar_height-2);
 #if LCD_DEPTH > 1
-    rb->lcd_set_foreground(N_BRIGHT(255));
+    rb->lcd_set_foreground(PF_THEME_FG);
 #endif
     rb->lcd_update();
     rb->yield();
@@ -3240,8 +3265,8 @@ static bool sort_albums(int new_sorting, bool from_settings)
 #ifdef USEGSLIB
         grey_show(false);
 #if LCD_DEPTH > 1
-        rb->lcd_set_background(N_BRIGHT(0));
-        rb->lcd_set_foreground(N_BRIGHT(255));
+        rb->lcd_set_background(PF_THEME_BG);
+        rb->lcd_set_foreground(PF_THEME_FG);
 #endif
         rb->lcd_clear_display();
         rb->lcd_update();
@@ -3331,7 +3356,7 @@ static void show_next_slide(void)
 */
 static void render_all_slides(void)
 {
-    mylcd_set_background(G_BRIGHT(0));
+    mylcd_set_background(PF_THEME_BG);
     /* TODO: Optimizes this by e.g. invalidating rects */
     mylcd_clear_display();
 
@@ -3503,6 +3528,12 @@ static void cleanup(void)
 #ifdef USEGSLIB
     grey_release();
 #endif
+
+    if (statusbar_theme_enabled)
+    {
+        rb->viewportmanager_theme_undo(SCREEN_MAIN, true);
+        statusbar_theme_enabled = false;
+    }
 }
 
 static void skip_animation_to_show_tracks(void);
@@ -3696,7 +3727,7 @@ static int main_menu(void)
     int result, curr_album, old_val;
 
 #if LCD_DEPTH > 1
-    rb->lcd_set_foreground(N_BRIGHT(255));
+    rb->lcd_set_foreground(PF_THEME_FG);
 #endif
 
     MENUITEM_STRINGLIST(main_menu, "PictureFlow", NULL,
@@ -4228,11 +4259,11 @@ static bool context_menu_ready(void)
     }
 #if LCD_DEPTH > 1
 #ifdef USEGSLIB
-    rb->lcd_set_foreground(N_BRIGHT(0));
-    rb->lcd_set_background(N_BRIGHT(255));
+    rb->lcd_set_foreground(PF_THEME_BG);
+    rb->lcd_set_background(PF_THEME_FG);
 #elif defined (HAVE_LCD_COLOR)
-    rb->lcd_set_background(rb->global_settings->bg_color);
-    rb->lcd_set_foreground(rb->global_settings->fg_color);
+    rb->lcd_set_background(PF_THEME_BG);
+    rb->lcd_set_foreground(PF_THEME_FG);
 #endif
 #endif
     insert_whole_album = (pf_state != pf_show_tracks) || show_tracks_while_browsing;
@@ -4251,8 +4282,8 @@ static void context_menu_cleanup(void)
 #ifdef USEGSLIB
     grey_show(true);
 #elif LCD_DEPTH > 1 && defined(HAVE_LCD_COLOR)
-    rb->lcd_set_background(N_BRIGHT(0));
-    rb->lcd_set_foreground(N_BRIGHT(255));
+    rb->lcd_set_background(PF_THEME_BG);
+    rb->lcd_set_foreground(PF_THEME_FG);
 #endif
     mylcd_set_drawmode(DRMODE_FG);
 }
@@ -4320,8 +4351,8 @@ static bool start_playback(bool return_to_WPS)
 #ifdef USEGSLIB
     grey_show(false);
 #if LCD_DEPTH > 1
-    rb->lcd_set_background(N_BRIGHT(0));
-    rb->lcd_set_foreground(N_BRIGHT(255));
+    rb->lcd_set_background(PF_THEME_BG);
+    rb->lcd_set_foreground(PF_THEME_FG);
 #endif
     rb->lcd_clear_display();
     rb->lcd_update();
@@ -4971,9 +5002,7 @@ static int pictureflow_main(void)
 
 enum plugin_status plugin_start(const void *parameter)
 {
-    struct viewport *vp_main = rb->lcd_set_viewport(NULL);
-    lcd_fb = vp_main->buffer->fb_ptr;
-
+    struct viewport *vp_main;
     int ret;
     const char *file = parameter;
     bool file_id3 = (parameter && (((char *) parameter)[0] == '/'));
@@ -4984,6 +5013,11 @@ enum plugin_status plugin_start(const void *parameter)
         return PLUGIN_OK;
     }
     atexit(cleanup);
+
+    rb->viewportmanager_theme_enable(SCREEN_MAIN, true, NULL);
+    statusbar_theme_enabled = true;
+    vp_main = rb->lcd_set_viewport(NULL);
+    lcd_fb = vp_main->buffer->fb_ptr;
 
     if (init())
     {

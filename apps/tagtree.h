@@ -30,10 +30,17 @@
 #define TAGMENU_MAX_MENUS  32
 #define TAGMENU_MAX_FMTS   32
 
+enum tagtree_wps_browse_target {
+    TAGTREE_WPS_BROWSE_NONE,
+    TAGTREE_WPS_BROWSE_ARTIST,
+    TAGTREE_WPS_BROWSE_ALBUM,
+};
+
 int tagtree_export(void);
 int tagtree_import(void);
 void tagtree_init(void) INIT_ATTR;
 bool tagtree_ready(void);
+void tagtree_set_wps_browse_target(enum tagtree_wps_browse_target target);
 int tagtree_enter(struct tree_context* c, bool is_visible);
 void tagtree_exit(struct tree_context* c, bool is_visible);
 int tagtree_load(struct tree_context* c);

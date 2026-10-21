@@ -112,7 +112,7 @@
 #define IDX_BUF_DEPTH 64
 
 /* Tag Cache Header version 'TCHxx'. Increment when changing internal structures. */
-#define TAGCACHE_MAGIC  0x54434810
+#define TAGCACHE_MAGIC  0x54434811
 
 /* Dump store/restore header version 'TCSxx'. */
 #define TAGCACHE_STATEFILE_MAGIC 0x54435301
@@ -217,7 +217,7 @@ static const char * const tags_str[] = { "artist", "album", "genre", "title",
     "filename", "composer", "comment", "albumartist", "grouping", "year",
     "discnumber", "tracknumber", "canonicalartist", "bitrate", "length",
     "playcount", "rating", "playtime", "lastplayed", "commitid", "mtime",
-    "lastelapsed", "lastoffset"
+    "lastelapsed", "lastoffset", "favorite"
 #if !defined(LOGF_ENABLE) || !defined(LOGF_CLAUSES)
 };
 #define logf_clauses(...) do { } while(0)
@@ -2183,6 +2183,7 @@ bool tagcache_fill_tags(struct mp3entry *id3, const char *filename)
     id3->length     = get_tag_numeric(entry, tag_length, idx_id);
     id3->playcount  = get_tag_numeric(entry, tag_playcount, idx_id);
     id3->rating     = get_tag_numeric(entry, tag_rating, idx_id);
+    id3->favorite   = get_tag_numeric(entry, tag_favorite, idx_id);
     id3->lastplayed = get_tag_numeric(entry, tag_lastplayed, idx_id);
     id3->score      = get_tag_numeric(entry, tag_virt_autoscore, idx_id) / 10;
     id3->year       = get_tag_numeric(entry, tag_year, idx_id);
@@ -2362,6 +2363,7 @@ static void NO_INLINE add_tagcache(char *path, unsigned long mtime)
     entry.tag_offset[tag_length] = id3.length;
     entry.tag_offset[tag_bitrate] = id3.bitrate;
     entry.tag_offset[tag_mtime] = mtime;
+    entry.tag_offset[tag_favorite] = id3.favorite;
 
     /* String tags. */
     has_artist = id3.artist != NULL

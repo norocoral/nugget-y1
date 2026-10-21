@@ -458,6 +458,22 @@ static int load_bmarks(void* param)
     return GO_TO_PREVIOUS;
 }
 
+#ifdef HAVE_TAGCACHE
+static int pictureflow_screen(void *param)
+{
+    (void)param;
+    int ret = plugin_load(PLUGIN_APPS_DIR "/pictureflow.rock", NULL);
+
+    if (ret == PLUGIN_USB_CONNECTED || ret == PLUGIN_ERROR)
+        return GO_TO_ROOT;
+    if (ret == PLUGIN_GOTO_WPS)
+        return GO_TO_WPS;
+    if (ret == PLUGIN_GOTO_ROOT)
+        return GO_TO_ROOT;
+    return GO_TO_PREVIOUS;
+}
+#endif
+
 /* These are all static const'd from apps/menus/ *.c
    so little hack so we can use them */
 extern struct menu_item_ex
@@ -495,6 +511,9 @@ static const struct root_items items[] = {
     [GO_TO_PLAYLIST_VIEWER] = { playlist_view, NULL, &playlist_options },
     [GO_TO_SYSTEM_SCREEN] = { miscscrn, &info_menu, &system_menu },
     [GO_TO_SHORTCUTMENU] = { do_shortcut_menu, NULL, NULL },
+#ifdef HAVE_TAGCACHE
+    [GO_TO_PICTUREFLOW] = { pictureflow_screen, NULL, NULL },
+#endif
 
 };
 #define NUM_ITEMS (int)(sizeof(items)/sizeof(*items))
@@ -502,6 +521,9 @@ static const struct root_items items[] = {
 static int item_callback(int action,
                          const struct menu_item_ex *this_item,
                          struct gui_synclist *this_list);
+
+static int load_screen(int screen);
+static const struct menu_item_ex *context_shortcut_item;
 
 MENUITEM_RETURNVALUE(shortcut_menu, ID2P(LANG_SHORTCUTS), GO_TO_SHORTCUTMENU,
                         NULL, Icon_Bookmark);
@@ -542,6 +564,10 @@ MENUITEM_RETURNVALUE(playlists, ID2P(LANG_PLAYLISTS), GO_TO_PLAYLISTS_SCREEN,
                      NULL, Icon_Playlist);
 MENUITEM_RETURNVALUE(system_menu_, ID2P(LANG_SYSTEM), GO_TO_SYSTEM_SCREEN,
                      NULL, Icon_System_menu);
+#ifdef HAVE_TAGCACHE
+MENUITEM_RETURNVALUE(pictureflow_menu_item, ID2P(LANG_PICTUREFLOW),
+                     GO_TO_PICTUREFLOW, NULL, Icon_Plugin);
+#endif
 
 struct menu_item_ex root_menu_;
 static struct menu_callback_with_desc root_menu_desc = {
@@ -566,9 +592,49 @@ static struct menu_table menu_table[] = {
     { "plugins", &rocks_browser },
     { "system_menu", &system_menu_ },
     { "shortcuts", &shortcut_menu },
+#ifdef HAVE_TAGCACHE
+    { "pictureflow", &pictureflow_menu_item },
+#endif
 };
 #define MAX_MENU_ITEMS (sizeof(menu_table) / sizeof(struct menu_table))
 static struct menu_item_ex *root_menu__[MAX_MENU_ITEMS];
+
+static int add_root_menu_shortcut(void)
+{
+    unsigned int i;
+
+    for (i = 0; i < MAX_MENU_ITEMS; i++)
+    {
+        if (menu_table[i].item == context_shortcut_item)
+        {
+            const struct menu_callback_with_desc *desc =
+                context_shortcut_item->callback_and_desc;
+            const char *name = menu_table[i].string;
+            if (!(context_shortcut_item->flags & MENU_DYNAMIC_DESC) && desc)
+                name = P2STR(desc->desc);
+            shortcuts_add_rootmenu(menu_table[i].string, name);
+            splash(HZ, ID2P(LANG_ADD_TO_FAVES));
+            return 0;
+        }
+    }
+    return 0;
+}
+
+MENUITEM_FUNCTION(add_root_menu_shortcut_item, 0,
+                  ID2P(LANG_ADD_TO_FAVES), add_root_menu_shortcut,
+                  NULL, Icon_Bookmark);
+
+int root_menu_load_shortcut(const char *key)
+{
+    unsigned int i;
+    for (i = 0; i < MAX_MENU_ITEMS; i++)
+    {
+        if (!strcmp(menu_table[i].string, key) &&
+            (menu_table[i].item->flags & MENU_TYPE_MASK) == MT_RETURN_VALUE)
+            return load_screen(menu_table[i].item->value);
+    }
+    return GO_TO_PREVIOUS;
+}
 
 struct menu_table *root_menu_get_options(int *nb_options)
 {
@@ -769,8 +835,24 @@ static int load_context_screen(int selection)
         context_menu = &system_menu;
     }
 
-    if (context_menu)
-        retval = do_menu(context_menu, NULL, NULL, false);
+    if (root_menu__[selection] != &shortcut_menu)
+    {
+        const struct menu_item_ex *submenus[2];
+        struct menu_callback_with_desc wrapper_desc =
+            { NULL, ID2P(LANG_SHORTCUTS), Icon_Bookmark };
+        struct menu_item_ex wrapper;
+        int count = 1;
+
+        context_shortcut_item = root_menu__[selection];
+        submenus[0] = &add_root_menu_shortcut_item;
+        if (context_menu)
+            submenus[count++] = context_menu;
+
+        wrapper.flags = MT_MENU | MENU_HAS_DESC | MENU_ITEM_COUNT(count);
+        wrapper.submenus = submenus;
+        wrapper.callback_and_desc = &wrapper_desc;
+        retval = do_menu(&wrapper, NULL, NULL, false);
+    }
     pop_current_activity();
     return retval;
 }

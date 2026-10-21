@@ -515,13 +515,37 @@ static bool read_mp4_tags(int fd, struct mp3entry* id3,
 
         case MP4_extra:
             {
+                char mean_name[32];
                 char tag_name[TAG_NAME_LENGTH];
                 uint32_t sub_size;
                 ssize_t rd_ret;
+                bool itunes_namespace = false;
                 /* "mean" atom */
                 read_uint32be(fd, &sub_size);
                 size -= sub_size;
-                lseek(fd, sub_size - 4, SEEK_CUR);
+                if (sub_size >= 12)
+                {
+                    lseek(fd, 8, SEEK_CUR);
+                    sub_size -= 12;
+                    if (sub_size > sizeof(mean_name) - 1)
+                    {
+                        rd_ret = read(fd, mean_name, sizeof(mean_name) - 1);
+                        lseek(fd, sub_size - (sizeof(mean_name) - 1), SEEK_CUR);
+                    }
+                    else
+                    {
+                        rd_ret = read(fd, mean_name, sub_size);
+                    }
+                    if (rd_ret !=
+                        (ssize_t)MIN(sub_size, sizeof(mean_name) - 1))
+                        rd_ret = 0;
+                    mean_name[rd_ret] = 0;
+                    itunes_namespace = !strcmp(mean_name, "com.apple.iTunes");
+                }
+                else
+                {
+                    lseek(fd, sub_size > 4 ? sub_size - 4 : 0, SEEK_CUR);
+                }
                 /* "name" atom */
                 read_uint32be(fd, &sub_size);
                 size -= sub_size;
@@ -543,7 +567,8 @@ static bool read_mp4_tags(int fd, struct mp3entry* id3,
                 tag_name[rd_ret] = 0;
 
                 static const char *tn_options[] = {"composer", "iTunSMPB",
-                                   "musicbrainz track id", "album artist", NULL};
+                                   "musicbrainz track id", "album artist",
+                                   "FAVORITE", NULL};
 
                 int tn_op = string_option(tag_name, tn_options, true);
 
@@ -575,6 +600,20 @@ static bool read_mp4_tags(int fd, struct mp3entry* id3,
                 {
                     read_mp4_tag_string(fd, size, &buffer, &buffer_left,
                         &id3->albumartist);
+                }
+                else if (tn_op == 4 && itunes_namespace)
+                    /* ----:com.apple.iTunes:FAVORITE (1, true, or yes) */
+                {
+                    char value[TAG_VALUE_LENGTH];
+                    char* value_p = value;
+                    char* any = NULL;
+                    unsigned int length = sizeof(value);
+
+                    read_mp4_tag_string(fd, size, &value_p, &length, &any);
+                    id3->favorite = any &&
+                        (!strcasecmp(value, "1") ||
+                         !strcasecmp(value, "true") ||
+                         !strcasecmp(value, "yes"));
                 }
                 else
                 {
@@ -821,6 +860,7 @@ bool get_mp4_metadata(int fd, struct mp3entry* id3)
 {
     id3->codectype = AFMT_UNKNOWN;
     id3->filesize = 0;
+    id3->favorite = false;
     errno = 0;
 
     if (read_mp4_container(fd, id3, ffilesize(fd)) && (errno == 0)

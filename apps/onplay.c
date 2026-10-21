@@ -220,6 +220,47 @@ MENUITEM_FUNCTION(reshuffle_item, 0, ID2P(LANG_SHUFFLE_PLAYLIST),
                   shuffle_playlist, NULL, Icon_Playlist);
 MENUITEM_FUNCTION(playing_time_item, 0, ID2P(LANG_PLAYING_TIME),
                   playing_time, NULL, Icon_Playlist);
+
+#ifdef HAVE_TAGCACHE
+static bool wps_goto_db_artist(void)
+{
+    onplay_result = ONPLAY_BROWSE_DB_ARTIST;
+    return false;
+}
+
+static bool wps_goto_db_album(void)
+{
+    onplay_result = ONPLAY_BROWSE_DB_ALBUM;
+    return false;
+}
+
+const struct menu_item_ex wps_goto_db_artist_item;
+const struct menu_item_ex wps_goto_db_album_item;
+
+static int wps_db_browse_callback(int action,
+                                  const struct menu_item_ex *this_item,
+                                  struct gui_synclist *this_list)
+{
+    (void)this_list;
+    if (action == ACTION_REQUEST_MENUITEM)
+    {
+        struct mp3entry *id3 = audio_current_track();
+        if (!id3 || (this_item == &wps_goto_db_artist_item &&
+                     !((id3->artist && id3->artist[0]) ||
+                       (id3->albumartist && id3->albumartist[0]))) ||
+                    (this_item == &wps_goto_db_album_item &&
+                     (!id3->album || !id3->album[0])))
+            return ACTION_EXIT_MENUITEM;
+    }
+    return action;
+}
+
+MENUITEM_FUNCTION(wps_goto_db_artist_item, 0, ID2P(LANG_GOTO_ARTIST),
+                  wps_goto_db_artist, wps_db_browse_callback, Icon_Audio);
+MENUITEM_FUNCTION(wps_goto_db_album_item, 0, ID2P(LANG_GOTO_ALBUM),
+                  wps_goto_db_album, wps_db_browse_callback, Icon_Audio);
+#endif
+
 MAKE_ONPLAYMENU( wps_playlist_menu, ID2P(LANG_CURRENT_PLAYLIST),
                  NULL, Icon_Playlist,
                  &wps_view_cur_playlist_item, &playlist_save_item,
@@ -1250,6 +1291,7 @@ MAKE_ONPLAYMENU( wps_onplay_menu, ID2P(LANG_ONPLAY_MENU_TITLE),
            &wps_playlist_menu, &cat_playlist_menu,
            &sound_settings, &playback_settings,
 #ifdef HAVE_TAGCACHE
+           &wps_goto_db_artist_item, &wps_goto_db_album_item,
            &rating_item,
 #endif
            &bookmark_menu,

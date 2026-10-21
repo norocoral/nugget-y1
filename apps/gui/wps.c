@@ -44,6 +44,9 @@
 #include "misc.h"
 #include "sound.h"
 #include "onplay.h"
+#ifdef HAVE_TAGCACHE
+#include "tagtree.h"
+#endif
 #include "abrepeat.h"
 #include "playback.h"
 #include "splash.h"
@@ -890,6 +893,16 @@ long gui_wps_show(void)
                 if (retval == ONPLAY_MAINMENU
                     || !audio_status())
                     return GO_TO_ROOT;
+#ifdef HAVE_TAGCACHE
+                else if (retval == ONPLAY_BROWSE_DB_ARTIST ||
+                         retval == ONPLAY_BROWSE_DB_ALBUM)
+                {
+                    tagtree_set_wps_browse_target(
+                        retval == ONPLAY_BROWSE_DB_ARTIST ?
+                        TAGTREE_WPS_BROWSE_ARTIST : TAGTREE_WPS_BROWSE_ALBUM);
+                    return GO_TO_DBBROWSER;
+                }
+#endif
                 else if (retval == ONPLAY_REVEAL_FILE)
                     return GO_TO_FILEBROWSER;
                 else if (retval == ONPLAY_PLAYLIST)

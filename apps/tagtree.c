@@ -214,6 +214,7 @@ static int rootmenu;
 
 static int current_offset;
 static int current_entry_count;
+static enum tagtree_wps_browse_target wps_browse_target;
 
 static struct tree_context *tc;
 
@@ -377,6 +378,7 @@ static int get_tag(int *tag)
         TAG_MATCH("artist", tag_artist) \
         TAG_MATCH("length", tag_length) \
         TAG_MATCH("rating", tag_rating) \
+        TAG_MATCH("favorite", tag_favorite) \
         TAG_MATCH("%limit", var_limit) \
         TAG_MATCH("%strip", var_strip) \
         TAG_MATCH("bitrate", tag_bitrate) \
@@ -2045,11 +2047,59 @@ static int load_root(struct tree_context *c)
     return i;
 }
 
+static bool tagtree_select_named_entry(struct tree_context *c,
+                                       const char *name)
+{
+    for (int i = 0; i < c->filesindir; i++)
+    {
+        struct tagentry *entry = tagtree_get_entry(c, i);
+        if (!strcmp(P2STR(entry->name), name))
+        {
+            c->selected_item = i;
+            return true;
+        }
+    }
+    return false;
+}
+
+static int tagtree_load_wps_target(struct tree_context *c, int count)
+{
+    enum tagtree_wps_browse_target target = wps_browse_target;
+    wps_browse_target = TAGTREE_WPS_BROWSE_NONE;
+
+    if (target == TAGTREE_WPS_BROWSE_NONE ||
+        !tagtree_select_named_entry(c, "Same as currently played track"))
+        return count;
+
+    tagtree_enter(c, false);
+    count = tagtree_load(c);
+    const char *name = target == TAGTREE_WPS_BROWSE_ARTIST ?
+                       "Artist" : "Album";
+    if (count < 0 || !tagtree_select_named_entry(c, name))
+        return count;
+
+    tagtree_enter(c, false);
+    return tagtree_load(c);
+}
+
+void tagtree_set_wps_browse_target(enum tagtree_wps_browse_target target)
+{
+    wps_browse_target = target;
+}
+
 int tagtree_load(struct tree_context* c)
 {
     logf( "%s", __func__);
 
     int count;
+    bool wps_navigation = wps_browse_target != TAGTREE_WPS_BROWSE_NONE;
+    if (wps_navigation)
+    {
+        c->currtable = 0;
+        c->currextra = 0;
+        c->dirlevel = 0;
+        c->selected_item = 0;
+    }
     int table = c->currtable;
 
     c->dirsindir = 0;
@@ -2114,6 +2164,12 @@ int tagtree_load(struct tree_context* c)
 
     /* The _total_ numer of entries available. */
     c->dirlength = c->filesindir = count;
+
+    if (wps_navigation && table == TABLE_ROOT && count > 0)
+    {
+        count = tagtree_load_wps_target(c, count);
+        c->dirlength = c->filesindir = count;
+    }
 
     return count;
 }

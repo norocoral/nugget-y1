@@ -562,7 +562,25 @@ static const char *y1_bt_paired_list_get_name(int selected_item, void *data,
     return buffer;
 }
 
-static int menu_y1_bt_paired_action(void)
+static void y1_bt_forget_selected_device(struct gui_synclist *bt_list, int sel)
+{
+    if (sel < 0 || sel >= ui_bt_dev_count)
+        return;
+
+    struct y1_bt_device target = ui_bt_devs[sel];
+    const char *lines[] = { str(LANG_Y1_BT_REMOVE_CONFIRM), target.name };
+    const struct text_message message = { lines, 2 };
+    if (gui_syncyesno_run(&message, NULL, NULL) == YESNO_YES) {
+        y1_bt_forget_device(target.bdaddr);
+        ui_bt_dev_count = y1_bt_get_paired_devices(ui_bt_devs, Y1_BT_MAX_DEVICES);
+        int disp_items = ui_bt_dev_count > 0 ? ui_bt_dev_count : 1;
+        gui_synclist_set_nb_items(bt_list, disp_items);
+        gui_synclist_select_item(bt_list, 0);
+    }
+    gui_synclist_draw(bt_list);
+}
+
+static int menu_y1_bt_device_list(bool remove_only)
 {
     if (!global_settings.bt_enabled) {
         global_settings.bt_enabled = true;
@@ -574,7 +592,10 @@ static int menu_y1_bt_paired_action(void)
 
     struct gui_synclist bt_list;
     gui_synclist_init(&bt_list, y1_bt_paired_list_get_name, NULL, false, 1, NULL);
-    gui_synclist_set_title(&bt_list, str(LANG_Y1_BT_PAIRED_DEVICES), Icon_NOICON);
+    gui_synclist_set_title(&bt_list,
+                           str(remove_only ? LANG_Y1_BT_REMOVE_PAIRED :
+                                             LANG_Y1_BT_PAIRED_DEVICES),
+                           Icon_NOICON);
     gui_synclist_set_nb_items(&bt_list, ui_bt_dev_count > 0 ? ui_bt_dev_count : 1);
     gui_synclist_select_item(&bt_list, 0);
     gui_synclist_draw(&bt_list);
@@ -605,7 +626,9 @@ static int menu_y1_bt_paired_action(void)
         if (action == ACTION_STD_OK && ui_bt_dev_count > 0)
         {
             int sel = gui_synclist_get_sel_pos(&bt_list);
-            if (sel >= 0 && sel < ui_bt_dev_count) {
+            if (remove_only) {
+                y1_bt_forget_selected_device(&bt_list, sel);
+            } else if (sel >= 0 && sel < ui_bt_dev_count) {
                 struct y1_bt_device target = ui_bt_devs[sel];
                 y1_bt_connect_device(target.bdaddr);
                 splashf(HZ, "Connecting to %s...", target.name);
@@ -626,21 +649,20 @@ static int menu_y1_bt_paired_action(void)
         else if (action == ACTION_STD_CONTEXT && ui_bt_dev_count > 0)
         {
             int sel = gui_synclist_get_sel_pos(&bt_list);
-            if (sel >= 0 && sel < ui_bt_dev_count) {
-                struct y1_bt_device target = ui_bt_devs[sel];
-                const char *lines[] = { "Forget Paired Device?", target.name };
-                const struct text_message message = { lines, 2 };
-                if (gui_syncyesno_run(&message, NULL, NULL) == YESNO_YES) {
-                    y1_bt_forget_device(target.bdaddr);
-                    ui_bt_dev_count = y1_bt_get_paired_devices(ui_bt_devs, Y1_BT_MAX_DEVICES);
-                    gui_synclist_set_nb_items(&bt_list, ui_bt_dev_count > 0 ? ui_bt_dev_count : 1);
-                    gui_synclist_select_item(&bt_list, 0);
-                }
-                gui_synclist_draw(&bt_list);
-            }
+            y1_bt_forget_selected_device(&bt_list, sel);
         }
     }
     return 0;
+}
+
+static int menu_y1_bt_paired_action(void)
+{
+    return menu_y1_bt_device_list(false);
+}
+
+static int menu_y1_bt_remove_action(void)
+{
+    return menu_y1_bt_device_list(true);
 }
 
 static const char *y1_bt_new_list_get_name(int selected_item, void *data,
@@ -764,6 +786,8 @@ static int menu_y1_bt_disconnect_action(void)
 
 MENUITEM_FUNCTION(y1_bt_paired_item, 0, ID2P(LANG_Y1_BT_PAIRED_DEVICES),
                   menu_y1_bt_paired_action, NULL, Icon_NOICON);
+MENUITEM_FUNCTION(y1_bt_remove_item, 0, ID2P(LANG_Y1_BT_REMOVE_PAIRED),
+                  menu_y1_bt_remove_action, NULL, Icon_NOICON);
 MENUITEM_FUNCTION(y1_bt_new_item, 0, ID2P(LANG_Y1_BT_SEARCH_DEVICES),
                   menu_y1_bt_new_action, NULL, Icon_NOICON);
 MENUITEM_FUNCTION(y1_bt_disconnect_item, 0, ID2P(LANG_Y1_BT_DISCONNECT),
@@ -773,6 +797,7 @@ MAKE_MENU(nugget_bluetooth_menu, ID2P(LANG_Y1_BLUETOOTH), 0, Icon_NOICON,
           &y1_bt_enable_item,
           &y1_bt_status_item,
           &y1_bt_paired_item,
+          &y1_bt_remove_item,
           &y1_bt_new_item,
           &y1_bt_disconnect_item);
 

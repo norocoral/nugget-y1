@@ -35,11 +35,13 @@ enum shortcut_type {
     SHORTCUT_SHUTDOWN,
     SHORTCUT_REBOOT,
     SHORTCUT_TIME,
+    SHORTCUT_ROOTMENU,
 
     SHORTCUT_TYPE_COUNT
 };
 
 void shortcuts_add(enum shortcut_type type, const char* value);
+void shortcuts_add_rootmenu(const char *value, const char *name);
 void shortcuts_init(void);
 int do_shortcut_menu(void*ignored);
 

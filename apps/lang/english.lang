@@ -510,6 +510,20 @@
   </voice>
 </phrase>
 <phrase>
+  id: LANG_PICTUREFLOW
+  desc: Main menu item and context menu title
+  user: core
+  <source>
+    *: "PictureFlow"
+  </source>
+  <dest>
+    *: "PictureFlow"
+  </dest>
+  <voice>
+    *: "PictureFlow"
+  </voice>
+</phrase>
+<phrase>
   id: LANG_SYSTEM
   desc: in the main menu and settings menu
   user: core
@@ -17555,6 +17569,34 @@
   </voice>
 </phrase>
 <phrase>
+  id: LANG_Y1_BT_REMOVE_PAIRED
+  desc: in Settings -> Bluetooth
+  user: core
+  <source>
+    *: "Remove Paired Device..."
+  </source>
+  <dest>
+    *: "Remove Paired Device..."
+  </dest>
+  <voice>
+    *: "Remove paired device"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_BT_REMOVE_CONFIRM
+  desc: confirmation prompt when removing a paired Bluetooth device
+  user: core
+  <source>
+    *: "Remove this paired device?"
+  </source>
+  <dest>
+    *: "Remove this paired device?"
+  </dest>
+  <voice>
+    *: "Remove this paired device?"
+  </voice>
+</phrase>
+<phrase>
   id: LANG_Y1_BT_SEARCH_DEVICES
   desc: in Settings -> Bluetooth
   user: core
@@ -17664,5 +17706,33 @@
   </dest>
   <voice>
     *: "Clear Custom Keyclick Sound"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_GOTO_ARTIST
+  desc: WPS context menu action to browse the current track's artist in the database
+  user: core
+  <source>
+    *: "Go to Artist"
+  </source>
+  <dest>
+    *: "Go to Artist"
+  </dest>
+  <voice>
+    *: "Go to Artist"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_GOTO_ALBUM
+  desc: WPS context menu action to browse the current track's album in the database
+  user: core
+  <source>
+    *: "Go to Album"
+  </source>
+  <dest>
+    *: "Go to Album"
+  </dest>
+  <voice>
+    *: "Go to Album"
   </voice>
 </phrase>
