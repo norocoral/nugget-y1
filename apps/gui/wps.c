@@ -64,6 +64,10 @@
 #include "skin_engine/wps_internals.h"
 #include "open_plugin.h"
 
+#if defined(INNIOASIS_Y1)
+#include "bt-y1.h"
+#endif
+
 #ifdef USB_ENABLE_AUDIO
 #include "usbstack/usb_audio.h"
 #endif
@@ -73,6 +77,22 @@
 #define MIN_FF_REWIND_STEP 500
 
 static struct wps_state wps_state;
+
+#if defined(INNIOASIS_Y1)
+static void update_bluetooth_player_info(void)
+{
+    struct mp3entry *id3 = wps_state.id3;
+    int status = audio_status();
+    uint8_t play_status = (status & AUDIO_STATUS_PLAY) ?
+                          ((status & AUDIO_STATUS_PAUSE) ? 2 : 1) : 0;
+    y1_bt_update_metadata(id3 ? id3->title : NULL,
+                          id3 ? id3->artist : NULL,
+                          id3 ? id3->album : NULL,
+                          id3 ? (uint32_t)id3->length : 0,
+                          id3 ? (uint32_t)id3->elapsed : 0,
+                          play_status);
+}
+#endif
 
 /* initial setup of wps_data  */
 static void wps_state_init(void);
@@ -115,6 +135,9 @@ char* wps_default_skin(enum screen_type screen)
 
 static void update_non_static(void)
 {
+#if defined(INNIOASIS_Y1)
+    update_bluetooth_player_info();
+#endif
     FOR_NB_SCREENS(i)
         skin_update(WPS, i, SKIN_REFRESH_NON_STATIC);
 }
@@ -153,6 +176,10 @@ void wps_do_action(enum wps_do_action_type action, bool updatewps)
     #endif
         }
     }
+
+#if defined(INNIOASIS_Y1)
+    update_bluetooth_player_info();
+#endif
 
     /* Bugfix only do a skin refresh if in one of the below screens */
     enum current_activity act = get_current_activity();
@@ -1156,6 +1183,9 @@ static void track_info_callback(unsigned short id, void *param)
         state->id3 = audio_current_track();
     }
 #endif
+#if defined(INNIOASIS_Y1)
+    update_bluetooth_player_info();
+#endif
     if (id == PLAYBACK_EVENT_NEXTTRACKID3_AVAILABLE)
         state->nid3 = audio_next_track();
     skin_request_full_update(WPS);
@@ -1175,6 +1205,9 @@ static void wps_state_init(void)
         state->id3 = NULL;
         state->nid3 = NULL;
     }
+#if defined(INNIOASIS_Y1)
+    update_bluetooth_player_info();
+#endif
     /* We'll be updating due to restore initialized with true */
     skin_request_full_update(WPS);
     /* add the WPS track event callbacks */

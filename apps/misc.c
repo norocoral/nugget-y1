@@ -664,9 +664,6 @@ void y1_bt_audio_connect_hook(void)
     }
 
     int dev_vol = y1_bt_get_active_device_volume();
-    if (dev_vol == 0)
-        dev_vol = -15;
-
     if (dev_vol > 0)
         dev_vol = 0;
     if (dev_vol < sound_min(SOUND_VOLUME))
@@ -711,21 +708,6 @@ void y1_bt_audio_disconnect_hook(void)
     }
 }
 
-int y1_bt_on_set_absolute_volume(int abs_vol)
-{
-    int min_vol = sound_min(SOUND_VOLUME);
-    int new_vol = min_vol + (abs_vol * (0 - min_vol)) / 127;
-    if (new_vol > 0)
-        new_vol = 0;
-    if (new_vol < min_vol)
-        new_vol = min_vol;
-
-    global_status.volume = new_vol;
-    sound_set_volume(new_vol);
-    status_save(false);
-    y1_bt_sync_volume_changed(new_vol);
-    return new_vol;
-}
 #endif
 
 long default_event_handler_ex(long event, void (*callback)(void *), void *parameter)
@@ -1021,7 +1003,7 @@ void setvol(void)
         /* Enforce 0 dB max digital volume cap on Bluetooth to prevent distortion */
         if (global_status.volume > 0)
             global_status.volume = 0;
-        y1_bt_sync_volume_changed(global_status.volume);
+        y1_bt_store_active_volume(global_status.volume);
     }
 #endif
     sound_set_volume(global_status.volume);

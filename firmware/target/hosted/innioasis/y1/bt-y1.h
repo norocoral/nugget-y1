@@ -65,9 +65,10 @@ void y1_bt_a2dp_write_pcm(const void *buf, size_t bytes, unsigned long sampr);
 
 void y1_bt_audio_disconnect_hook(void);
 void y1_bt_audio_connect_hook(void);
-void y1_bt_sync_volume_changed(int vol);
+void y1_bt_store_active_volume(int vol);
 int  y1_bt_get_active_device_volume(void);
-int  y1_bt_on_set_absolute_volume(int abs_vol);
+void y1_bt_update_metadata(const char *title, const char *artist,
+                           const char *album, uint32_t duration_ms,
+                           uint32_t position_ms, uint8_t play_status);
 
 #endif /* _BT_Y1_H_ */
-

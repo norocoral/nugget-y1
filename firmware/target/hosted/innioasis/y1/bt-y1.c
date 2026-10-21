@@ -7,7 +7,7 @@
  *                     \/            \/     \/    \/            \/
  *
  * Copyright (C) 2026 Rockbox Innioasis Y1 Port
- * Native MediaTek MT6572 Bluetooth HCI + L2CAP + SDP + A2DP SBC + AVRCP Driver
+ * Native MediaTek MT6572 Bluetooth HCI + L2CAP + SDP + A2DP SBC + AVRCP Metadata
  * Reverse-engineered from MT6572 Android 4.2.2 CONNSYS (/dev/stpwmt & /dev/stpbt)
  ****************************************************************************/
 
@@ -97,6 +97,8 @@ static int stpbt_fd = -1;
 
 static struct y1_bt_device bt_devices[Y1_BT_MAX_DEVICES];
 static int bt_num_devices = 0;
+static bool bt_paired_devices_loaded = false;
+static bool bt_autoconnect_attempted = false;
 
 /* Pending command requests from UI thread */
 static volatile bool req_scan = false;
@@ -126,13 +128,27 @@ static bool avdtp_opening_media = false;
 static volatile bool a2dp_streaming = false;
 static volatile bool in_sniff_mode = false;
 static uint32_t last_pcm_time_ms = 0;
-static bool avrcp_vol_notify_pending = false;
-static uint8_t avrcp_vol_notify_label = 0;
+static bool avrcp_play_notify_pending = false;
+static uint8_t avrcp_play_notify_label = 0;
+static uint8_t avrcp_play_notify_subunit = 0x48;
+static bool avrcp_track_notify_pending = false;
+static uint8_t avrcp_track_notify_label = 0;
+static uint8_t avrcp_track_notify_subunit = 0x48;
+static uint64_t avrcp_track_uid;
+static uint8_t avrcp_tx_label = 1;
+static char avrcp_title[128];
+static char avrcp_artist[128];
+static char avrcp_album[128];
+static uint32_t avrcp_duration_ms;
+static uint32_t avrcp_position_ms;
+static uint8_t avrcp_play_status;
 
 static uint8_t remote_seid = 1;
 static uint8_t sbc_cfg_octet0 = 0x21; /* 44.1kHz, Joint Stereo */
 static uint8_t sbc_cfg_octet1 = 0x15; /* 16 blocks, 8 subbands, Loudness */
 static uint8_t sbc_bitpool    = 53;
+static uint8_t sbc_remote_min_bitpool = 2;
+static uint8_t sbc_remote_max_bitpool = 53;
 static bool    sbc_is_xq      = false;
 
 /* Remote Name Resolution queue after Inquiry */
@@ -148,6 +164,7 @@ static void bt_log(const char *msg)
         (void)!write(kfd, msg, strlen(msg));
         close(kfd);
     }
+
     int dfd = open("/mnt/sdcard/bt_debug.txt", O_WRONLY | O_CREAT | O_APPEND, 0666);
     if (dfd >= 0) {
         (void)!write(dfd, msg, strlen(msg));
@@ -272,6 +289,7 @@ static struct y1_bt_device *find_or_create_device(const uint8_t bd[6])
                 memset(&bt_devices[i], 0, sizeof(bt_devices[i]));
                 memcpy(bt_devices[i].bdaddr, bd, 6);
                 format_bdaddr(bd, bt_devices[i].name, sizeof(bt_devices[i].name));
+                bt_devices[i].volume = -15;
                 return &bt_devices[i];
             }
         }
@@ -281,7 +299,22 @@ static struct y1_bt_device *find_or_create_device(const uint8_t bd[6])
     memset(d, 0, sizeof(*d));
     memcpy(d->bdaddr, bd, 6);
     format_bdaddr(bd, d->name, sizeof(d->name));
+    d->volume = -15;
     return d;
+}
+
+static void move_paired_device_to_end(struct y1_bt_device *device)
+{
+    int index = (int)(device - bt_devices);
+    if (index < 0 || index >= bt_num_devices || !device->paired ||
+        index == bt_num_devices - 1)
+        return;
+
+    struct y1_bt_device last_used = *device;
+    for (int i = index; i + 1 < bt_num_devices; i++)
+        bt_devices[i] = bt_devices[i + 1];
+    bt_devices[bt_num_devices - 1] = last_used;
+    save_paired_devices();
 }
 
 static bool is_placeholder_name(const char *name)
@@ -303,6 +336,46 @@ static volatile size_t pcm_ring_r = 0;
 static volatile size_t pcm_ring_w = 0;
 static uint16_t rtp_seq_num = 1;
 static uint32_t rtp_timestamp = 0;
+static uint64_t pcm_resample_phase_fp;
+static unsigned long pcm_resample_source_rate;
+static unsigned long pcm_resample_target_rate;
+
+static void reset_bt_session(void)
+{
+    acl_handle = 0xFFFF;
+    memset(active_bdaddr, 0, sizeof(active_bdaddr));
+    connected_name[0] = '\0';
+    cid_sdp_remote = 0;
+    cid_avdtp_sig_remote = 0;
+    cid_avdtp_med_remote = 0;
+    cid_avctp_remote = 0;
+    avdtp_sig_local_conf_done = false;
+    avdtp_sig_remote_conf_done = false;
+    avdtp_med_local_conf_done = false;
+    avdtp_med_remote_conf_done = false;
+    avdtp_initiator = false;
+    avdtp_discover_sent = false;
+    avdtp_opening_media = false;
+    remote_seid = 1;
+    sbc_cfg_octet0 = 0x21;
+    sbc_cfg_octet1 = 0x15;
+    sbc_bitpool = 53;
+    sbc_remote_min_bitpool = 2;
+    sbc_remote_max_bitpool = 53;
+    sbc_is_xq = false;
+    a2dp_streaming = false;
+    in_sniff_mode = false;
+    avrcp_play_notify_pending = false;
+    avrcp_track_notify_pending = false;
+    avrcp_tx_label = 1;
+    pcm_ring_r = 0;
+    pcm_ring_w = 0;
+    rtp_seq_num = 1;
+    rtp_timestamp = 0;
+    pcm_resample_phase_fp = 0;
+    pcm_resample_source_rate = 0;
+    pcm_resample_target_rate = 0;
+}
 
 static sbc_t a2dp_sbc;
 static bool  a2dp_sbc_ready = false;
@@ -318,6 +391,17 @@ static void reinit_a2dp_sbc(void)
     }
     if (a2dp_sbc_ready) {
         a2dp_sbc.bitpool = sbc_bitpool;
+    }
+}
+
+static unsigned long a2dp_sample_rate(void)
+{
+    switch (sbc_cfg_octet0 & 0xF0) {
+        case 0x10: return 48000;
+        case 0x20: return 44100;
+        case 0x40: return 32000;
+        case 0x80: return 16000;
+        default:   return 44100;
     }
 }
 
@@ -414,7 +498,7 @@ static void l2cap_send_conf_req(uint16_t dcid, uint16_t mtu)
  * ============================================================================ */
 /* Pre-encoded SDP attribute list for A2DP Audio Source (Record 0x00010001) */
 static const uint8_t sdp_attr_a2dp_source[] = {
-    0x35, 0x36, /* Sequence (54 bytes) */
+    0x35, 0x46, /* Sequence (70 bytes) */
     /* Attr 0x0000: ServiceRecordHandle = 0x00010001 */
     0x09, 0x00, 0x00, 0x0A, 0x00, 0x01, 0x00, 0x01,
     /* Attr 0x0001: ServiceClassIDList = { 0x110A (AudioSource) } */
@@ -430,6 +514,28 @@ static const uint8_t sdp_attr_a2dp_source[] = {
     0x09, 0x03, 0x11, 0x09, 0x00, 0x01
 };
 
+static const uint8_t sdp_attr_avrcp_target[] = {
+    0x35, 0x38,
+    0x09, 0x00, 0x00, 0x0A, 0x00, 0x01, 0x00, 0x02,
+    0x09, 0x00, 0x01, 0x35, 0x03, 0x19, 0x11, 0x0C,
+    0x09, 0x00, 0x04, 0x35, 0x10,
+        0x35, 0x06, 0x19, 0x01, 0x00, 0x09, 0x00, 0x17,
+        0x35, 0x06, 0x19, 0x00, 0x17, 0x09, 0x01, 0x04,
+    0x09, 0x00, 0x09, 0x35, 0x08,
+        0x35, 0x06, 0x19, 0x11, 0x0E, 0x09, 0x01, 0x06,
+    0x09, 0x03, 0x11, 0x09, 0x00, 0x01
+};
+
+static bool sdp_request_is_avrcp(const uint8_t *pdu, uint16_t len)
+{
+    for (uint16_t i = 5; i + 2 < len; i++) {
+        if (pdu[i] == 0x19 && pdu[i + 1] == 0x11 &&
+            (pdu[i + 2] == 0x0C || pdu[i + 2] == 0x0E))
+            return true;
+    }
+    return false;
+}
+
 static void handle_sdp_pdu(const uint8_t *pdu, uint16_t len)
 {
     if (len < 5 || cid_sdp_remote == 0)
@@ -438,10 +544,15 @@ static void handle_sdp_pdu(const uint8_t *pdu, uint16_t len)
     uint8_t pdu_id = pdu[0];
     uint16_t tid = ((uint16_t)pdu[1] << 8) | pdu[2];
     uint8_t rsp[128];
+    bool avrcp = sdp_request_is_avrcp(pdu, len);
+    const uint8_t *record = avrcp ? sdp_attr_avrcp_target :
+                                    sdp_attr_a2dp_source;
+    uint16_t record_len = avrcp ? sizeof(sdp_attr_avrcp_target) :
+                                  sizeof(sdp_attr_a2dp_source);
 
     if (pdu_id == 0x02) /* SDP_ServiceSearchRequest */
     {
-        /* Return 1 matching handle: 0x00010001 */
+        uint32_t handle = avrcp ? 0x00010002 : 0x00010001;
         rsp[0] = 0x03; /* SDP_ServiceSearchResponse */
         rsp[1] = (uint8_t)(tid >> 8);
         rsp[2] = (uint8_t)(tid & 0xFF);
@@ -451,16 +562,25 @@ static void handle_sdp_pdu(const uint8_t *pdu, uint16_t len)
         rsp[6] = 0x01; /* TotalServiceRecordCount = 1 */
         rsp[7] = 0x00;
         rsp[8] = 0x01; /* CurrentServiceRecordCount = 1 */
-        rsp[9] = 0x00;
-        rsp[10] = 0x01;
-        rsp[11] = 0x00;
-        rsp[12] = 0x01; /* Handle 0x00010001 */
+        rsp[9] = (uint8_t)(handle >> 24);
+        rsp[10] = (uint8_t)(handle >> 16);
+        rsp[11] = (uint8_t)(handle >> 8);
+        rsp[12] = (uint8_t)handle;
         rsp[13] = 0x00; /* ContinuationState = 0 */
         l2cap_send_pdu(cid_sdp_remote, rsp, 14);
     }
     else if (pdu_id == 0x04) /* SDP_ServiceAttributeRequest */
     {
-        uint16_t attr_len = sizeof(sdp_attr_a2dp_source);
+        if (len >= 9) {
+            uint32_t handle = ((uint32_t)pdu[5] << 24) |
+                              ((uint32_t)pdu[6] << 16) |
+                              ((uint32_t)pdu[7] << 8) | pdu[8];
+            avrcp = handle == 0x00010002;
+            record = avrcp ? sdp_attr_avrcp_target : sdp_attr_a2dp_source;
+            record_len = avrcp ? sizeof(sdp_attr_avrcp_target) :
+                                 sizeof(sdp_attr_a2dp_source);
+        }
+        uint16_t attr_len = record_len;
         uint16_t param_len = 2 + attr_len + 1;
         rsp[0] = 0x05; /* SDP_ServiceAttributeResponse */
         rsp[1] = (uint8_t)(tid >> 8);
@@ -469,14 +589,13 @@ static void handle_sdp_pdu(const uint8_t *pdu, uint16_t len)
         rsp[4] = (uint8_t)(param_len & 0xFF);
         rsp[5] = (uint8_t)(attr_len >> 8);
         rsp[6] = (uint8_t)(attr_len & 0xFF);
-        memcpy(&rsp[7], sdp_attr_a2dp_source, attr_len);
+        memcpy(&rsp[7], record, attr_len);
         rsp[7 + attr_len] = 0x00; /* ContinuationState = 0 */
         l2cap_send_pdu(cid_sdp_remote, rsp, 5 + param_len);
     }
     else if (pdu_id == 0x06) /* SDP_ServiceSearchAttributeRequest */
     {
-        /* Check if client is searching for A2DP (0x110A / 0x110B / 0x110D / 0x0019 / 0x0100) */
-        uint16_t seq_len = 2 + sizeof(sdp_attr_a2dp_source);
+        uint16_t seq_len = 2 + record_len;
         uint16_t param_len = 2 + seq_len + 1;
         rsp[0] = 0x07; /* SDP_ServiceSearchAttributeResponse */
         rsp[1] = (uint8_t)(tid >> 8);
@@ -486,9 +605,9 @@ static void handle_sdp_pdu(const uint8_t *pdu, uint16_t len)
         rsp[5] = (uint8_t)(seq_len >> 8);
         rsp[6] = (uint8_t)(seq_len & 0xFF);
         rsp[7] = 0x35; /* Data Element Sequence */
-        rsp[8] = sizeof(sdp_attr_a2dp_source);
-        memcpy(&rsp[9], sdp_attr_a2dp_source, sizeof(sdp_attr_a2dp_source));
-        rsp[9 + sizeof(sdp_attr_a2dp_source)] = 0x00; /* ContinuationState = 0 */
+        rsp[8] = (uint8_t)record_len;
+        memcpy(&rsp[9], record, record_len);
+        rsp[9 + record_len] = 0x00; /* ContinuationState = 0 */
         l2cap_send_pdu(cid_sdp_remote, rsp, 5 + param_len);
     }
 }
@@ -555,7 +674,9 @@ static void handle_avdtp_sig_pdu(const uint8_t *pdu, uint16_t len)
                     if (pdu[i] == 0x07 && pdu[i + 1] == 0x06 && pdu[i + 2] == 0x00 && pdu[i + 3] == 0x00) {
                         sbc_cfg_octet0 = pdu[i + 4];
                         sbc_cfg_octet1 = pdu[i + 5];
+                        sbc_remote_min_bitpool = pdu[i + 6];
                         uint8_t max_bp = pdu[i + 7];
+                        sbc_remote_max_bitpool = max_bp;
                         sbc_bitpool = max_bp;
                         sbc_is_xq = ((sbc_cfg_octet0 & 0x04) != 0 && sbc_bitpool >= 38);
                     }
@@ -635,13 +756,18 @@ static void handle_avdtp_sig_pdu(const uint8_t *pdu, uint16_t len)
                         break;
                     }
                 }
-                /* Choose 44.1kHz (0x20), else 48kHz (0x10) */
-                uint8_t freq = (sup_o0 & 0x20) ? 0x20 : 0x10;
+                sbc_remote_min_bitpool = min_bp;
+                sbc_remote_max_bitpool = max_bp;
+                /* Prefer the highest commonly supported SBC sample rate. */
+                uint8_t freq = (sup_o0 & 0x10) ? 0x10 :
+                               (sup_o0 & 0x20) ? 0x20 :
+                               (sup_o0 & 0x40) ? 0x40 : 0x80;
                 /* Try SBC XQ first: Dual Channel (0x04) at bitpool 38 (452 kbps) */
                 if ((sup_o0 & 0x04) && max_bp >= 38) {
                     sbc_is_xq = true;
                     sbc_cfg_octet0 = freq | 0x04; /* Dual Channel */
-                    sbc_bitpool = (freq == 0x20) ? 38 : ((max_bp >= 45) ? 45 : 38);
+                    sbc_bitpool = (max_bp >= 38) ?
+                                  (min_bp > 38 ? min_bp : 38) : max_bp;
                     bt_log("Negotiating SBC XQ (Dual Channel, high-bitpool)\n");
                 } else {
                     /* Fallback to standard SBC Joint Stereo (0x01) or Stereo (0x02) */
@@ -707,7 +833,10 @@ static void handle_avdtp_sig_pdu(const uint8_t *pdu, uint16_t len)
                 sbc_is_xq = false;
                 uint8_t freq = (sbc_cfg_octet0 & 0x20) ? 0x20 : 0x10;
                 sbc_cfg_octet0 = freq | 0x01; /* Joint Stereo */
-                sbc_bitpool = 53;
+                sbc_bitpool = sbc_remote_max_bitpool > 53 ?
+                              53 : sbc_remote_max_bitpool;
+                if (sbc_bitpool < sbc_remote_min_bitpool)
+                    sbc_bitpool = sbc_remote_min_bitpool;
                 reinit_a2dp_sbc();
 
                 uint8_t set_cfg[12] = {
@@ -724,6 +853,62 @@ static void handle_avdtp_sig_pdu(const uint8_t *pdu, uint16_t len)
             }
         }
     }
+}
+
+static void send_avrcp_vendor_response(const uint8_t *request, uint8_t ctype,
+                                      uint8_t pdu_id, const uint8_t *params,
+                                      uint16_t params_len)
+{
+    uint8_t rsp[512];
+    if (cid_avctp_remote == 0 || params_len > sizeof(rsp) - 13)
+        return;
+
+    rsp[0] = (uint8_t)((request[0] & 0xF0) | 0x02);
+    rsp[1] = 0x11;
+    rsp[2] = 0x0E;
+    rsp[3] = ctype;
+    rsp[4] = request[4];
+    rsp[5] = 0x00;
+    rsp[6] = 0x00;
+    rsp[7] = 0x19;
+    rsp[8] = 0x58;
+    rsp[9] = pdu_id;
+    rsp[10] = 0x00;
+    rsp[11] = (uint8_t)(params_len >> 8);
+    rsp[12] = (uint8_t)params_len;
+    if (params_len > 0 && params)
+        memcpy(&rsp[13], params, params_len);
+    l2cap_send_pdu(cid_avctp_remote, rsp, (uint16_t)(13 + params_len));
+}
+
+int y1_bt_get_active_device_volume(void)
+{
+    pthread_mutex_lock(&bt_mtx);
+    int vol = -15;
+    for (int i = 0; i < bt_num_devices; i++) {
+        if (memcmp(bt_devices[i].bdaddr, active_bdaddr, 6) == 0) {
+            if (bt_devices[i].volume != 0)
+                vol = bt_devices[i].volume;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&bt_mtx);
+    return vol;
+}
+
+void y1_bt_store_active_volume(int vol)
+{
+    if (vol > 0)
+        vol = 0;
+    pthread_mutex_lock(&bt_mtx);
+    for (int i = 0; i < bt_num_devices; i++) {
+        if (memcmp(bt_devices[i].bdaddr, active_bdaddr, 6) == 0) {
+            bt_devices[i].volume = vol;
+            save_paired_devices();
+            break;
+        }
+    }
+    pthread_mutex_unlock(&bt_mtx);
 }
 
 /* ============================================================================
@@ -780,57 +965,136 @@ static void handle_avctp_pdu(const uint8_t *pdu, uint16_t len)
             }
         }
     }
-    else if (opcode == 0x00 && len >= 10) /* VENDOR DEPENDENT (Metadata & Absolute Volume) */
+    else if (opcode == 0x00 && len >= 10) /* AVRCP vendor-dependent metadata */
     {
         uint8_t pdu_id = pdu[9];
-        if (pdu_id == 0x50 && len >= 14) /* SetAbsoluteVolume */
+        if (pdu_id == 0x10 && len >= 14) /* GetCapabilities */
         {
-            uint8_t abs_vol = pdu[13] & 0x7F;
-            y1_bt_on_set_absolute_volume((int)abs_vol);
-
-            /* Send AVRCP Accepted Response */
-            uint8_t rsp[14];
-            rsp[0] = (uint8_t)(avctp_hdr | 0x02); /* Response bit */
-            rsp[1] = 0x11; rsp[2] = 0x0E;
-            rsp[3] = 0x09; /* ACCEPTED */
-            rsp[4] = pdu[4];
-            rsp[5] = 0x00; /* VENDOR DEPENDENT */
-            rsp[6] = 0x00; rsp[7] = 0x19; rsp[8] = 0x58; /* BT SIG */
-            rsp[9] = 0x50; /* SetAbsoluteVolume */
-            rsp[10] = 0x00;
-            rsp[11] = 0x00; rsp[12] = 0x01; /* Param len = 1 */
-            rsp[13] = abs_vol;
-            l2cap_send_pdu(cid_avctp_remote, rsp, 14);
+            uint8_t params[5];
+            uint16_t params_len;
+            if (pdu[13] == 0x03) {
+                params[0] = 0x02;
+                params[1] = 0x03;
+                params[2] = 0x01; /* Playback status changed */
+                params[3] = 0x02; /* Track changed */
+                params_len = 3;
+            } else {
+                params[0] = 0x03;
+                params[1] = 0x00;
+                params[2] = 0x19;
+                params[3] = 0x58;
+                params_len = 4;
+            }
+            send_avrcp_vendor_response(pdu, 0x0C, pdu_id, params,
+                                       params_len);
         }
         else if (pdu_id == 0x31 && len >= 14) /* RegisterNotification */
         {
             uint8_t event_id = pdu[13];
-            if (event_id == 0x0D) /* EVENT_VOLUME_CHANGED */
+            if (event_id == 0x01) /* EVENT_PLAYBACK_STATUS_CHANGED */
             {
-                avrcp_vol_notify_label = avctp_hdr >> 4;
-                avrcp_vol_notify_pending = true;
+                avrcp_play_notify_label = avctp_hdr >> 4;
+                avrcp_play_notify_subunit = pdu[4];
+                avrcp_play_notify_pending = true;
 
-                int cur_vol = y1_bt_get_active_device_volume();
-                int min_vol = -74;
-                int abs_vol = 0;
-                if (cur_vol >= 0) abs_vol = 127;
-                else if (cur_vol > min_vol) abs_vol = ((cur_vol - min_vol) * 127) / (0 - min_vol);
-
-                /* Send INTERIM Response */
-                uint8_t rsp[15];
-                rsp[0] = (uint8_t)(avctp_hdr | 0x02);
-                rsp[1] = 0x11; rsp[2] = 0x0E;
-                rsp[3] = 0x0F; /* INTERIM */
-                rsp[4] = pdu[4];
-                rsp[5] = 0x00;
-                rsp[6] = 0x00; rsp[7] = 0x19; rsp[8] = 0x58;
-                rsp[9] = 0x31;
-                rsp[10] = 0x00;
-                rsp[11] = 0x00; rsp[12] = 0x02;
-                rsp[13] = 0x0D;
-                rsp[14] = (uint8_t)(abs_vol & 0x7F);
-                l2cap_send_pdu(cid_avctp_remote, rsp, 15);
+                uint8_t rsp[15] = {
+                    (uint8_t)(avctp_hdr | 0x02),
+                    0x11, 0x0E, 0x0F, pdu[4], 0x00,
+                    0x00, 0x19, 0x58, 0x31, 0x00,
+                    0x00, 0x02, 0x01, avrcp_play_status
+                };
+                l2cap_send_pdu(cid_avctp_remote, rsp, sizeof(rsp));
             }
+            else if (event_id == 0x02) /* EVENT_TRACK_CHANGED */
+            {
+                avrcp_track_notify_label = avctp_hdr >> 4;
+                avrcp_track_notify_subunit = pdu[4];
+                avrcp_track_notify_pending = true;
+
+                uint8_t params[9] = { 0x02 };
+                uint8_t request[5] = { 0 };
+                request[0] = avctp_hdr;
+                request[4] = pdu[4];
+                pthread_mutex_lock(&bt_mtx);
+                uint64_t uid = avrcp_track_uid;
+                pthread_mutex_unlock(&bt_mtx);
+                for (int i = 0; i < 8; i++)
+                    params[1 + i] = (uint8_t)(uid >> (56 - i * 8));
+                send_avrcp_vendor_response(request, 0x0F, 0x31, params,
+                                           sizeof(params));
+            }
+        }
+        else if (pdu_id == 0x20 && len >= 22) /* GetElementAttributes */
+        {
+            char title[sizeof(avrcp_title)];
+            char artist[sizeof(avrcp_artist)];
+            char album[sizeof(avrcp_album)];
+            pthread_mutex_lock(&bt_mtx);
+            memcpy(title, avrcp_title, sizeof(title));
+            memcpy(artist, avrcp_artist, sizeof(artist));
+            memcpy(album, avrcp_album, sizeof(album));
+            pthread_mutex_unlock(&bt_mtx);
+
+            static const uint32_t all_attrs[] = { 1, 2, 3 };
+            const uint8_t requested = pdu[21];
+            size_t attr_count = requested ? requested :
+                                sizeof(all_attrs) / sizeof(all_attrs[0]);
+            size_t available = (len - 22) / 4;
+            if (requested && attr_count > available)
+                attr_count = available;
+
+            uint8_t params[480];
+            size_t params_len = 1;
+            uint8_t returned = 0;
+            for (size_t i = 0; i < attr_count; i++)
+            {
+                uint32_t attr = requested ?
+                    ((uint32_t)pdu[22 + i * 4] << 24) |
+                    ((uint32_t)pdu[23 + i * 4] << 16) |
+                    ((uint32_t)pdu[24 + i * 4] << 8) |
+                    pdu[25 + i * 4] : all_attrs[i];
+                const char *text = attr == 1 ? title :
+                                   attr == 2 ? artist :
+                                   attr == 3 ? album : NULL;
+                if (!text || params_len + 8 + strlen(text) > sizeof(params))
+                    continue;
+
+                size_t text_len = strlen(text);
+                params[params_len++] = (uint8_t)(attr >> 24);
+                params[params_len++] = (uint8_t)(attr >> 16);
+                params[params_len++] = (uint8_t)(attr >> 8);
+                params[params_len++] = (uint8_t)attr;
+                params[params_len++] = 0x00;
+                params[params_len++] = 0x6A; /* UTF-8 */
+                params[params_len++] = (uint8_t)(text_len >> 8);
+                params[params_len++] = (uint8_t)text_len;
+                memcpy(&params[params_len], text, text_len);
+                params_len += text_len;
+                returned++;
+            }
+            params[0] = returned;
+            send_avrcp_vendor_response(pdu, 0x0C, pdu_id, params,
+                                       (uint16_t)params_len);
+        }
+        else if (pdu_id == 0x30 && len >= 13) /* GetPlayStatus */
+        {
+            uint8_t params[9];
+            pthread_mutex_lock(&bt_mtx);
+            uint32_t duration = avrcp_duration_ms;
+            uint32_t position = avrcp_position_ms;
+            uint8_t status = avrcp_play_status;
+            pthread_mutex_unlock(&bt_mtx);
+            params[0] = (uint8_t)(duration >> 24);
+            params[1] = (uint8_t)(duration >> 16);
+            params[2] = (uint8_t)(duration >> 8);
+            params[3] = (uint8_t)duration;
+            params[4] = (uint8_t)(position >> 24);
+            params[5] = (uint8_t)(position >> 16);
+            params[6] = (uint8_t)(position >> 8);
+            params[7] = (uint8_t)position;
+            params[8] = status;
+            send_avrcp_vendor_response(pdu, 0x0C, pdu_id, params,
+                                       sizeof(params));
         }
     }
 }
@@ -1177,19 +1441,12 @@ static void handle_hci_event(const uint8_t *pkt, size_t len)
                 uint16_t handle = (uint16_t)p[1] | ((uint16_t)p[2] << 8);
                 const uint8_t *bd = &p[3];
                 if (status == 0x00) {
+                    bool initiated = avdtp_initiator;
+                    reset_bt_session();
+                    avdtp_initiator = initiated;
                     acl_handle = handle & 0x0FFF;
                     sbc_is_xq = false;
                     memcpy(active_bdaddr, bd, 6);
-                    cid_sdp_remote = 0;
-                    cid_avdtp_sig_remote = 0;
-                    cid_avdtp_med_remote = 0;
-                    cid_avctp_remote = 0;
-                    avdtp_sig_local_conf_done = false;
-                    avdtp_sig_remote_conf_done = false;
-                    avdtp_med_local_conf_done = false;
-                    avdtp_med_remote_conf_done = false;
-                    avdtp_discover_sent = false;
-                    avdtp_opening_media = false;
 
                     pthread_mutex_lock(&bt_mtx);
                     for (int i = 0; i < bt_num_devices; i++)
@@ -1198,6 +1455,7 @@ static void handle_hci_event(const uint8_t *pkt, size_t len)
                     if (d) {
                         d->connected = true;
                         strncpy(connected_name, d->name, sizeof(connected_name) - 1);
+                        move_paired_device_to_end(d);
                     }
                     bt_state = Y1_BT_STATE_CONNECTED;
                     pthread_mutex_unlock(&bt_mtx);
@@ -1229,20 +1487,11 @@ static void handle_hci_event(const uint8_t *pkt, size_t len)
         }
 
         case 0x05: /* Disconnection Complete */ {
-            acl_handle = 0xFFFF;
-            a2dp_streaming = false;
+            reset_bt_session();
             sbc_is_xq = false;
-            in_sniff_mode = false;
-            avrcp_vol_notify_pending = false;
-            memset(active_bdaddr, 0, 6);
-            cid_sdp_remote = 0;
-            cid_avdtp_sig_remote = 0;
-            cid_avdtp_med_remote = 0;
-            cid_avctp_remote = 0;
             pthread_mutex_lock(&bt_mtx);
             for (int i = 0; i < bt_num_devices; i++)
                 bt_devices[i].connected = false;
-            connected_name[0] = '\0';
             if (bt_target_enabled)
                 bt_state = Y1_BT_STATE_IDLE;
             pthread_mutex_unlock(&bt_mtx);
@@ -1392,6 +1641,7 @@ static int run_cmd_sync(uint16_t opcode, const void *param, uint8_t plen)
 
 static bool mt6572_bt_hw_open_and_init(void)
 {
+    reset_bt_session();
     mknod("/dev/stpwmt", S_IFCHR | 0666, makedev(190, 0));
     mknod("/dev/stpbt",  S_IFCHR | 0666, makedev(192, 0));
 
@@ -1532,6 +1782,7 @@ static void *bt_worker_thread(void *arg)
 
     pthread_mutex_lock(&bt_mtx);
     load_paired_devices();
+    bt_paired_devices_loaded = true;
     pthread_mutex_unlock(&bt_mtx);
 
     uint8_t rx_buf[2048];
@@ -1549,11 +1800,16 @@ static void *bt_worker_thread(void *arg)
                 }
                 close(stpbt_fd);
                 stpbt_fd = -1;
-                acl_handle = 0xFFFF;
-                a2dp_streaming = false;
+                reset_bt_session();
+                pthread_mutex_lock(&bt_mtx);
+                for (int i = 0; i < bt_num_devices; i++)
+                    bt_devices[i].connected = false;
+                pthread_mutex_unlock(&bt_mtx);
+                y1_bt_audio_disconnect_hook();
                 bt_state = Y1_BT_STATE_OFF;
                 bt_log("Closed /dev/stpbt (MT6572 BT Radio powered down)\n");
             }
+            bt_autoconnect_attempted = false;
             usleep(100000);
             continue;
         }
@@ -1568,6 +1824,29 @@ static void *bt_worker_thread(void *arg)
                 continue;
             }
             bt_state = Y1_BT_STATE_IDLE;
+        }
+
+        if (bt_paired_devices_loaded && !bt_autoconnect_attempted &&
+            !req_connect)
+        {
+            uint8_t last_used[6];
+            bool have_last_used = false;
+            pthread_mutex_lock(&bt_mtx);
+            for (int i = bt_num_devices - 1; i >= 0; i--) {
+                if (bt_devices[i].paired) {
+                    memcpy(last_used, bt_devices[i].bdaddr, sizeof(last_used));
+                    have_last_used = true;
+                    break;
+                }
+            }
+            pthread_mutex_unlock(&bt_mtx);
+
+            bt_autoconnect_attempted = true;
+            if (have_last_used) {
+                memcpy(req_connect_bdaddr, last_used, sizeof(last_used));
+                req_connect = true;
+                bt_log("Trying to reconnect the last-used paired device\n");
+            }
         }
 
         /* Handle UI thread requests */
@@ -1685,6 +1964,7 @@ void y1_bt_init(void)
 {
     pthread_mutex_lock(&bt_mtx);
     if (!bt_thread_started) {
+        bt_target_enabled = global_settings.bt_enabled;
         bt_thread_started = true;
         pthread_create(&bt_thread, NULL, bt_worker_thread, NULL);
     }
@@ -1841,54 +2121,55 @@ void y1_bt_forget_device(const uint8_t bdaddr[6])
     pthread_mutex_unlock(&bt_mtx);
 }
 
-int y1_bt_get_active_device_volume(void)
+void y1_bt_update_metadata(const char *title, const char *artist,
+                       const char *album, uint32_t duration_ms,
+                       uint32_t position_ms, uint8_t play_status)
 {
+    bool playback_changed;
+    bool track_changed;
     pthread_mutex_lock(&bt_mtx);
-    int vol = -15;
-    for (int i = 0; i < bt_num_devices; i++) {
-        if (memcmp(bt_devices[i].bdaddr, active_bdaddr, 6) == 0) {
-            if (bt_devices[i].volume != 0)
-                vol = bt_devices[i].volume;
-            break;
-        }
-    }
-    pthread_mutex_unlock(&bt_mtx);
-    return vol;
-}
-
-void y1_bt_sync_volume_changed(int vol)
-{
-    if (vol > 0) vol = 0;
-    pthread_mutex_lock(&bt_mtx);
-    for (int i = 0; i < bt_num_devices; i++) {
-        if (memcmp(bt_devices[i].bdaddr, active_bdaddr, 6) == 0) {
-            bt_devices[i].volume = vol;
-            save_paired_devices();
-            break;
-        }
-    }
+    track_changed = strcmp(avrcp_title, title ? title : "") != 0 ||
+                    strcmp(avrcp_artist, artist ? artist : "") != 0 ||
+                    strcmp(avrcp_album, album ? album : "") != 0;
+    strncpy(avrcp_title, title ? title : "", sizeof(avrcp_title) - 1);
+    avrcp_title[sizeof(avrcp_title) - 1] = '\0';
+    strncpy(avrcp_artist, artist ? artist : "", sizeof(avrcp_artist) - 1);
+    avrcp_artist[sizeof(avrcp_artist) - 1] = '\0';
+    strncpy(avrcp_album, album ? album : "", sizeof(avrcp_album) - 1);
+    avrcp_album[sizeof(avrcp_album) - 1] = '\0';
+    avrcp_duration_ms = duration_ms;
+    avrcp_position_ms = position_ms;
+    playback_changed = avrcp_play_status != play_status;
+    avrcp_play_status = play_status;
+    if (track_changed)
+        avrcp_track_uid++;
+    uint64_t track_uid = avrcp_track_uid;
     pthread_mutex_unlock(&bt_mtx);
 
-    if (avrcp_vol_notify_pending && cid_avctp_remote != 0) {
-        avrcp_vol_notify_pending = false;
-        int min_vol = -74;
-        int abs_vol = 0;
-        if (vol >= 0) abs_vol = 127;
-        else if (vol > min_vol) abs_vol = ((vol - min_vol) * 127) / (0 - min_vol);
+    if (track_changed && avrcp_track_notify_pending &&
+        cid_avctp_remote != 0)
+    {
+        uint8_t request[5] = { 0 };
+        uint8_t params[9] = { 0x02 };
+        request[0] = (uint8_t)((avrcp_track_notify_label & 0x0F) << 4);
+        request[4] = avrcp_track_notify_subunit;
+        for (int i = 0; i < 8; i++)
+            params[1 + i] = (uint8_t)(track_uid >> (56 - i * 8));
+        avrcp_track_notify_pending = false;
+        send_avrcp_vendor_response(request, 0x0D, 0x31, params,
+                                   sizeof(params));
+    }
 
-        uint8_t rsp[15];
-        rsp[0] = (uint8_t)((avrcp_vol_notify_label << 4) | 0x02);
-        rsp[1] = 0x11; rsp[2] = 0x0E;
-        rsp[3] = 0x09; /* CHANGED */
-        rsp[4] = 0x48;
-        rsp[5] = 0x00;
-        rsp[6] = 0x00; rsp[7] = 0x19; rsp[8] = 0x58;
-        rsp[9] = 0x31;
-        rsp[10] = 0x00;
-        rsp[11] = 0x00; rsp[12] = 0x02;
-        rsp[13] = 0x0D;
-        rsp[14] = (uint8_t)(abs_vol & 0x7F);
-        l2cap_send_pdu(cid_avctp_remote, rsp, 15);
+    if (playback_changed && avrcp_play_notify_pending &&
+        cid_avctp_remote != 0)
+    {
+        uint8_t request[5] = { 0 };
+        uint8_t params[2] = { 0x01, play_status };
+        request[0] = (uint8_t)((avrcp_play_notify_label & 0x0F) << 4);
+        request[4] = avrcp_play_notify_subunit;
+        avrcp_play_notify_pending = false;
+        send_avrcp_vendor_response(request, 0x0D, 0x31, params,
+                                   sizeof(params));
     }
 }
 
@@ -1927,10 +2208,12 @@ void y1_bt_a2dp_write_pcm(const void *buf, size_t bytes, unsigned long sampr)
     size_t w = pcm_ring_w;
     size_t r = pcm_ring_r;
 
-    /* Negotiated SBC rate is 44100 Hz (or 48000 Hz if 0x10 bit set) */
-    unsigned long target_rate = (sbc_cfg_octet0 & 0x10) ? 48000 : 44100;
+    unsigned long target_rate = a2dp_sample_rate();
 
     if (sampr == target_rate || sampr == 0) {
+        pcm_resample_phase_fp = 0;
+        pcm_resample_source_rate = sampr;
+        pcm_resample_target_rate = target_rate;
         for (size_t i = 0; i < in_frames; i++) {
             if (((w - r) & (PCM_RING_SAMPLES - 1)) >= PCM_RING_SAMPLES - 2)
                 break;
@@ -1940,10 +2223,17 @@ void y1_bt_a2dp_write_pcm(const void *buf, size_t bytes, unsigned long sampr)
             w = (w + 1) & (PCM_RING_SAMPLES - 1);
         }
     } else {
-        /* Nearest/linear rate conversion from sampr -> target_rate */
+        /* Preserve fractional phase across PCM blocks to avoid sample-rate drift. */
+        if (pcm_resample_source_rate != sampr ||
+            pcm_resample_target_rate != target_rate) {
+            pcm_resample_phase_fp = 0;
+            pcm_resample_source_rate = sampr;
+            pcm_resample_target_rate = target_rate;
+        }
         uint32_t step_fp = (uint32_t)(((uint64_t)sampr << 16) / target_rate);
-        uint32_t pos_fp = 0;
-        while ((pos_fp >> 16) < in_frames) {
+        uint64_t pos_fp = pcm_resample_phase_fp;
+        uint64_t block_end_fp = (uint64_t)in_frames << 16;
+        while (pos_fp < block_end_fp) {
             if (((w - r) & (PCM_RING_SAMPLES - 1)) >= PCM_RING_SAMPLES - 2)
                 break;
             size_t s_idx = (pos_fp >> 16) * 2;
@@ -1953,7 +2243,8 @@ void y1_bt_a2dp_write_pcm(const void *buf, size_t bytes, unsigned long sampr)
             w = (w + 1) & (PCM_RING_SAMPLES - 1);
             pos_fp += step_fp;
         }
+        pcm_resample_phase_fp = pos_fp >= block_end_fp ?
+                                pos_fp - block_end_fp : 0;
     }
     pcm_ring_w = w;
 }
-
