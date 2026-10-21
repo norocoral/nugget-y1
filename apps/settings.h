@@ -936,6 +936,7 @@ struct user_settings
     bool always_on_screen;
     bool aod_wps_only;
     bool aod_playback_only;
+    bool aod_important_events;
     int mfb_single_click;
     int mfb_double_click;
     int mfb_triple_click;

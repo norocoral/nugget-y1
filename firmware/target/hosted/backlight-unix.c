@@ -32,6 +32,9 @@
 #include "sysfs.h"
 #include "panic.h"
 #include "lcd.h"
+#include "kernel.h"
+#include "misc.h"
+#include "settings.h"
 
 #if defined(BACKLIGHT_RG_NANO)
 static const char * const sysfs_bl_brightness =
@@ -88,6 +91,36 @@ static int last_bl = -1;
 #include "lcd-target.h"
 extern void y1_enter_hold_mode(void);
 static int bl_fd = -1;
+
+enum y1_aod_pause_state {
+    Y1_AOD_PAUSE_IDLE,
+    Y1_AOD_PAUSE_HOLD,
+    Y1_AOD_PAUSE_FADE_OUT,
+    Y1_AOD_PAUSE_OFF,
+    Y1_AOD_PAUSE_FADE_IN
+};
+
+static enum y1_aod_pause_state y1_aod_pause_state;
+static int y1_aod_level;
+static int y1_aod_fade_start_level;
+static int y1_aod_fade_target_level;
+static long y1_aod_pause_tick;
+static long y1_aod_fade_start_tick;
+static long y1_aod_last_fade_tick;
+static volatile bool y1_aod_event_pending;
+static bool y1_aod_event_active;
+static bool y1_aod_event_fading;
+static long y1_aod_event_deadline;
+
+#define Y1_AOD_PAUSE_DELAY (HZ * 5)
+#define Y1_AOD_EVENT_DURATION (HZ * 15)
+#define Y1_AOD_FADE_DURATION (HZ * 3 / 4)
+#if HZ < 20
+#define Y1_AOD_FADE_INTERVAL 1
+#else
+#define Y1_AOD_FADE_INTERVAL (HZ / 20)
+#endif
+
 static void write_bl_hw(int val)
 {
     if (bl_fd < 0) {
@@ -99,6 +132,192 @@ static void write_bl_hw(int val)
         lseek(bl_fd, 0, SEEK_SET);
         (void)!write(bl_fd, buf, len);
     }
+}
+
+static int y1_aod_brightness_level(void)
+{
+    int dimmed = current_brightness / 2;
+    if (dimmed < 5)
+        dimmed = 5;
+    return (dimmed * 255) / 100;
+}
+
+static void y1_aod_set_level(int level)
+{
+    if (level < 0)
+        level = 0;
+    if (level > 255)
+        level = 255;
+    y1_aod_level = level;
+    write_bl_hw(level);
+}
+
+static void y1_aod_begin_fade(int target)
+{
+    y1_aod_fade_start_level = y1_aod_level;
+    y1_aod_fade_target_level = target;
+    y1_aod_fade_start_tick = current_tick;
+    y1_aod_last_fade_tick = current_tick - Y1_AOD_FADE_INTERVAL;
+}
+
+static void y1_aod_start_fade(int target)
+{
+    y1_aod_begin_fade(target);
+    y1_aod_pause_state = target ? Y1_AOD_PAUSE_FADE_IN :
+                                  Y1_AOD_PAUSE_FADE_OUT;
+}
+
+static bool y1_aod_update_fade(void)
+{
+    if (TIME_BEFORE(current_tick,
+                    y1_aod_last_fade_tick + Y1_AOD_FADE_INTERVAL))
+        return false;
+
+    y1_aod_last_fade_tick = current_tick;
+    long elapsed = current_tick - y1_aod_fade_start_tick;
+    if (elapsed >= Y1_AOD_FADE_DURATION) {
+        y1_aod_set_level(y1_aod_fade_target_level);
+        return true;
+    }
+
+    int delta = y1_aod_fade_target_level - y1_aod_fade_start_level;
+    int level = y1_aod_fade_start_level +
+                (int)((long long)delta * elapsed / Y1_AOD_FADE_DURATION);
+    y1_aod_set_level(level);
+    return false;
+}
+
+static void y1_aod_resume_from_off(void)
+{
+    last_bl = BACKLIGHT_POWER_REDUCED;
+    y1_enter_hold_mode();
+    y1_set_screen_off_power_mode(true);
+    y1_aod_set_level(0);
+    lcd_enable(true);
+    sysfs_set_int("/sys/class/leds/button-backlight/brightness", 0);
+    y1_set_display_power_saving(true);
+    y1_aod_start_fade(y1_aod_brightness_level());
+}
+
+static bool y1_aod_pause_update(void)
+{
+    if (!global_settings.always_on_screen ||
+        !global_settings.aod_playback_only ||
+        (global_settings.aod_wps_only &&
+         get_current_activity() != ACTIVITY_WPS)) {
+        y1_aod_pause_state = Y1_AOD_PAUSE_IDLE;
+        return false;
+    }
+
+    bool playing = y1_playback_active();
+    if (playing) {
+        if (y1_aod_pause_state == Y1_AOD_PAUSE_HOLD) {
+            y1_aod_pause_state = Y1_AOD_PAUSE_IDLE;
+            y1_set_display_power_saving(true);
+            return true;
+        }
+        if (y1_aod_pause_state == Y1_AOD_PAUSE_FADE_OUT ||
+            y1_aod_pause_state == Y1_AOD_PAUSE_OFF) {
+            if (last_bl == BACKLIGHT_POWER_OFF)
+                y1_aod_resume_from_off();
+            else {
+                y1_set_display_power_saving(true);
+                y1_aod_start_fade(y1_aod_brightness_level());
+            }
+            return true;
+        }
+        if (y1_aod_pause_state == Y1_AOD_PAUSE_FADE_IN) {
+            if (y1_aod_update_fade())
+                y1_aod_pause_state = Y1_AOD_PAUSE_IDLE;
+            return true;
+        }
+        return false;
+    }
+
+    if (y1_aod_pause_state == Y1_AOD_PAUSE_IDLE &&
+        last_bl == BACKLIGHT_POWER_REDUCED &&
+        y1_is_display_power_saving()) {
+        y1_set_display_power_saving(false);
+        y1_aod_pause_tick = current_tick;
+        y1_aod_pause_state = Y1_AOD_PAUSE_HOLD;
+        return true;
+    }
+
+    if (y1_aod_pause_state == Y1_AOD_PAUSE_HOLD) {
+        if (TIME_AFTER(current_tick,
+                       y1_aod_pause_tick + Y1_AOD_PAUSE_DELAY))
+            y1_aod_start_fade(0);
+        return true;
+    }
+
+    if (y1_aod_pause_state == Y1_AOD_PAUSE_FADE_OUT) {
+        if (y1_aod_update_fade()) {
+            y1_aod_pause_state = Y1_AOD_PAUSE_OFF;
+            backlight_hw_off();
+        }
+        return true;
+    }
+
+    return y1_aod_pause_state == Y1_AOD_PAUSE_OFF;
+}
+
+void y1_aod_notify_event(void)
+{
+    y1_aod_event_pending = true;
+}
+
+static bool y1_aod_event_update(void)
+{
+    if (y1_aod_event_pending) {
+        y1_aod_event_pending = false;
+        if (global_settings.aod_important_events &&
+            y1_should_always_on() &&
+            (last_bl == BACKLIGHT_POWER_REDUCED ||
+             last_bl == BACKLIGHT_POWER_OFF)) {
+            if (last_bl == BACKLIGHT_POWER_OFF)
+                backlight_hw_off();
+
+            if (last_bl == BACKLIGHT_POWER_REDUCED) {
+                if (y1_aod_level == 0)
+                    y1_aod_set_level(y1_aod_brightness_level());
+                y1_set_display_power_saving(false);
+                y1_aod_event_deadline = current_tick + Y1_AOD_EVENT_DURATION;
+                y1_aod_event_active = true;
+                y1_aod_event_fading = false;
+            }
+        }
+    }
+
+    if (!y1_aod_event_active)
+        return false;
+
+    if (!global_settings.aod_important_events) {
+        y1_aod_event_active = false;
+        y1_aod_event_fading = false;
+        if (last_bl == BACKLIGHT_POWER_REDUCED && y1_should_always_on())
+            y1_set_display_power_saving(true);
+        return false;
+    }
+
+    if (!y1_should_always_on() || last_bl != BACKLIGHT_POWER_REDUCED) {
+        y1_aod_event_active = false;
+        y1_aod_event_fading = false;
+        return false;
+    }
+
+    if (!y1_aod_event_fading &&
+        TIME_AFTER(current_tick, y1_aod_event_deadline)) {
+        y1_aod_begin_fade(0);
+        y1_aod_event_fading = true;
+    }
+
+    if (y1_aod_event_fading && y1_aod_update_fade()) {
+        y1_aod_event_active = false;
+        y1_aod_event_fading = false;
+        y1_set_display_power_saving(true);
+        y1_set_screen_off_power_mode(true);
+    }
+    return true;
 }
 #endif
 
@@ -151,6 +370,7 @@ void backlight_hw_off(void)
             int dimmed = current_brightness / 2;
             if (dimmed < 5) dimmed = 5;
             int hw_val = (dimmed * 255) / 100;
+            y1_aod_level = hw_val;
             write_bl_hw(hw_val);
             sysfs_set_int("/sys/class/leds/button-backlight/brightness", 0);
             y1_set_display_power_saving(true);
@@ -182,9 +402,17 @@ void backlight_hw_off(void)
 #if defined(BACKLIGHT_INNIOASIS)
 void y1_backlight_idle_check(void)
 {
-    if (last_bl == BACKLIGHT_POWER_REDUCED || last_bl == BACKLIGHT_POWER_OFF) {
+    if (y1_aod_event_update())
+        return;
+
+    if (y1_aod_pause_update())
+        return;
+
+    int target_bl = y1_should_always_on() ? BACKLIGHT_POWER_REDUCED :
+                                            BACKLIGHT_POWER_OFF;
+    if ((last_bl == BACKLIGHT_POWER_REDUCED ||
+         last_bl == BACKLIGHT_POWER_OFF) && last_bl != target_bl)
         backlight_hw_off();
-    }
 }
 #endif
 
@@ -206,7 +434,8 @@ void backlight_hw_brightness(int brightness)
     } else if (last_bl == BACKLIGHT_POWER_REDUCED && y1_should_always_on()) {
         int dimmed = brightness / 2;
         if (dimmed < 5) dimmed = 5;
-        write_bl_hw((dimmed * 255) / 100);
+        y1_aod_level = (dimmed * 255) / 100;
+        write_bl_hw(y1_aod_level);
     }
 #else
     sysfs_set_int(sysfs_bl_brightness, brightness);
@@ -225,7 +454,9 @@ void lcd_awake(void)
 
 void lcd_sleep(void)
 {
-    if (y1_should_always_on() || y1_playback_active())
+    if (y1_should_always_on() || y1_playback_active() ||
+        y1_aod_pause_state == Y1_AOD_PAUSE_HOLD ||
+        y1_aod_pause_state == Y1_AOD_PAUSE_FADE_OUT)
         return;
 
 #ifdef HAVE_LCD_ENABLE

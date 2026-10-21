@@ -433,6 +433,7 @@ MENUITEM_SETTING(y1_screen_res_setting, &global_settings.y1_screen_resolution, N
 MENUITEM_SETTING(y1_always_on_screen_item, &global_settings.always_on_screen, NULL);
 MENUITEM_SETTING(y1_aod_wps_item, &global_settings.aod_wps_only, NULL);
 MENUITEM_SETTING(y1_aod_playback_item, &global_settings.aod_playback_only, NULL);
+MENUITEM_SETTING(y1_aod_important_events_item, &global_settings.aod_important_events, NULL);
 MENUITEM_SETTING(y1_cpu_mode_setting, &global_settings.y1_cpu_mode, NULL);
 MENUITEM_SETTING(y1_cpu_cores_setting, &global_settings.y1_cpu_cores, NULL);
 MENUITEM_SETTING(y1_screen_off_cpu_save_item, &global_settings.y1_screen_off_cpu_save, NULL);
@@ -715,6 +716,7 @@ MAKE_MENU(nugget_device_menu, ID2P(LANG_DEVICE), 0, Icon_NOICON,
           &y1_always_on_screen_item,
           &y1_aod_wps_item,
           &y1_aod_playback_item,
+          &y1_aod_important_events_item,
           &y1_double_click_unhold_item,
           &y1_cpu_mode_setting,
           &y1_cpu_cores_setting,

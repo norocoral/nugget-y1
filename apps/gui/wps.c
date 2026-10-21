@@ -730,12 +730,23 @@ long gui_wps_show(void)
     bool theme_enabled = true;
     long last_left = 0, last_right = 0;
     struct wps_state *state = get_wps_state();
+#if defined(INNIOASIS_Y1)
+    int last_y1_audio_status = audio_status();
+#endif
 
     ab_reset_markers();
 
     wps_state_init();
     while ( 1 )
     {
+#if defined(INNIOASIS_Y1)
+        int y1_audio_status = audio_status();
+        if (y1_audio_status != last_y1_audio_status) {
+            extern void y1_aod_notify_event(void);
+            y1_aod_notify_event();
+            last_y1_audio_status = y1_audio_status;
+        }
+#endif
         bool hotkey = false;
         bool audio_paused = (audio_status() & AUDIO_STATUS_PAUSE)?true:false;
         /* did someone else (i.e power thread) change audio pause mode? */
@@ -1123,6 +1134,13 @@ struct wps_state *get_wps_state(void)
 static void track_info_callback(unsigned short id, void *param)
 {
     struct wps_state *state = get_wps_state();
+
+#if defined(INNIOASIS_Y1)
+    if (id == PLAYBACK_EVENT_TRACK_CHANGE || id == PLAYBACK_EVENT_TRACK_SKIP) {
+        extern void y1_aod_notify_event(void);
+        y1_aod_notify_event();
+    }
+#endif
 
     if (id == PLAYBACK_EVENT_TRACK_CHANGE || id == PLAYBACK_EVENT_CUR_TRACK_READY)
     {

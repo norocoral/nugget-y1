@@ -1234,6 +1234,7 @@ static int get_action_worker(action_last_t *last, action_cur_t *cur)
 
 #if defined(INNIOASIS_Y1)
     extern void y1_backlight_idle_check(void);
+    extern void y1_aod_notify_event(void);
     y1_backlight_idle_check();
 #endif
 
@@ -1242,6 +1243,11 @@ static int get_action_worker(action_last_t *last, action_cur_t *cur)
     /*if button = none/special; returns immediately*/
     if (action_poll_button(last, cur))
     {
+#if defined(INNIOASIS_Y1) && !defined(BOOTLOADER)
+        if (cur->button != BUTTON_NONE &&
+            !(cur->button & (BUTTON_REL | BUTTON_REPEAT)))
+            y1_aod_notify_event();
+#endif
         return cur->button;
     }
 

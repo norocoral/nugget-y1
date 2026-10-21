@@ -17582,4 +17582,17 @@
     *: "Disconnect audio"
   </voice>
 </phrase>
-
+<phrase>
+  id: LANG_Y1_AOD_IMPORTANT_EVENTS
+  desc: in Settings -> Nugget -> Device
+  user: core
+  <source>
+    *: "AOD: Show on Important Events"
+  </source>
+  <dest>
+    *: "AOD: Show on Important Events"
+  </dest>
+  <voice>
+    *: "AOD show on important events"
+  </voice>
+</phrase>

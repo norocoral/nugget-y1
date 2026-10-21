@@ -2628,6 +2628,12 @@ const struct settings_list settings[] = {
                   false,
                   "aod playback only",
                   NULL),
+    OFFON_SETTING(0,
+                  aod_important_events,
+                  LANG_Y1_AOD_IMPORTANT_EVENTS,
+                  false,
+                  "aod important events",
+                  NULL),
 #define MFB_ACTION_STR_CFG "playpause,next,prev,volup,voldown,ffwd,rew,lock,mute,none"
 #define MFB_ACTION_CHOICES \
     (const unsigned char*)"Play / Pause", \

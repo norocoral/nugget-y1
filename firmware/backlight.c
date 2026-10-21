@@ -70,7 +70,11 @@
                                 |BACKLIGHT_FADING_SW_HW_REG \
                                 |BACKLIGHT_FADING_PWM) )
 
+#if defined(INNIOASIS_Y1)
+#define BACKLIGHT_THREAD_TIMEOUT (HZ / 20)
+#else
 #define BACKLIGHT_THREAD_TIMEOUT HZ
+#endif
 
 enum {
     BACKLIGHT_ON,
@@ -721,11 +725,8 @@ static void backlight_timeout_handler(void)
     }
 #endif /* HAVE_LCD_SLEEP */
 #if defined(INNIOASIS_Y1)
-    if (backlight_timer <= 0)
-    {
-        extern void y1_backlight_idle_check(void);
-        y1_backlight_idle_check();
-    }
+    extern void y1_backlight_idle_check(void);
+    y1_backlight_idle_check();
 #endif
 #ifdef HAVE_REMOTE_LCD
     if(remote_backlight_timer > 0)

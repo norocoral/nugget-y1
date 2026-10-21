@@ -66,6 +66,7 @@ static int blue_shift = 0;
 static uint32_t rgb565_lut[65536] __attribute__((aligned(64)));
 static bool lut_inited = false;
 static uint32_t sw_backbuf[480 * 360] __attribute__((aligned(64)));
+static bool y1_lowpower_refresh;
 
 fb_data *framebuffer = NULL; /* global variable referenced by lcd-memframe / lcd-target.h */
 
@@ -278,10 +279,12 @@ void y1_set_resolution_setting(int mode)
 
 void lcd_update(void)
 {
+    y1_lowpower_refresh = y1_display_powersave;
     if (y1_resolution_mode == 1)
         lcd_update_rect(0, 0, 320, 240);
     else
         lcd_update_rect(0, 0, LCD_WIDTH, LCD_HEIGHT);
+    y1_lowpower_refresh = false;
 }
 
 void lcd_update_rect(int x, int y, int width, int height)
@@ -294,6 +297,27 @@ void lcd_update_rect(int x, int y, int width, int height)
 
     if (!lut_inited) {
         init_rgb565_lut();
+    }
+
+    if (!y1_lowpower_refresh) {
+        int screen_width = y1_resolution_mode == 1 ? 320 : LCD_WIDTH;
+        int screen_height = y1_resolution_mode == 1 ? 240 : LCD_HEIGHT;
+        if (x < 0) {
+            width += x;
+            x = 0;
+        }
+        if (y < 0) {
+            height += y;
+            y = 0;
+        }
+        if (x + width > screen_width)
+            width = screen_width - x;
+        if (y + height > screen_height)
+            height = screen_height - y;
+        if (width > 0 && height > 0 &&
+            (long long)width * height >=
+                (long long)screen_width * screen_height / 3)
+            y1_aod_notify_event();
     }
 
     if (y1_display_powersave) {
@@ -561,5 +585,4 @@ void y1_display_raw_screen(const char *name)
     close(img_fd);
     redraw_hw();
 }
-
 
