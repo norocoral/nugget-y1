@@ -17455,3 +17455,87 @@
     *: "오디오 연결 해제"
   </voice>
 </phrase>
+<phrase>
+  id: LANG_Y1_SCROLL_ABC
+  desc: in Settings -> Nugget -> Device
+  user: core
+  <source>
+    *: "Scroll ABC"
+  </source>
+  <dest>
+    *: "알파벳 빠른 스크롤"
+  </dest>
+  <voice>
+    *: "알파벳 빠른 스크롤"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_KEYCLICK_WHEEL_ONLY
+  desc: in keyclick settings menu
+  user: core
+  <source>
+    *: "Keyclick Wheel Only"
+  </source>
+  <dest>
+    *: "휠 입력만 키클릭"
+  </dest>
+  <voice>
+    *: "휠 입력만 키클릭"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_KEYCLICK_LIST_EDGE
+  desc: in keyclick settings menu
+  user: core
+  <source>
+    *: "Keyclick Start/End of List"
+  </source>
+  <dest>
+    *: "목록 처음/끝 키클릭"
+  </dest>
+  <voice>
+    *: "목록 처음/끝 키클릭"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_KEYCLICK_CUSTOM_SOUND
+  desc: in keyclick settings menu
+  user: core
+  <source>
+    *: "Keyclick Custom Sound"
+  </source>
+  <dest>
+    *: "사용자 지정 키클릭 소리"
+  </dest>
+  <voice>
+    *: "사용자 지정 키클릭 소리"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_KEYCLICK_SOUND_CLEARED
+  desc: in keyclick settings menu
+  user: core
+  <source>
+    *: "Clear Custom Keyclick Sound"
+  </source>
+  <dest>
+    *: "사용자 지정 키클릭 소리 지우기"
+  </dest>
+  <voice>
+    *: "사용자 지정 키클릭 소리 지우기"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_AOD_IMPORTANT_EVENTS
+  desc: in Settings -> Nugget -> Device
+  user: core
+  <source>
+    *: "AOD: Show on Important Events"
+  </source>
+  <dest>
+    *: "중요한 이벤트에서 AOD 표시"
+  </dest>
+  <voice>
+    *: "중요한 이벤트에서 AOD 표시"
+  </voice>
+</phrase>

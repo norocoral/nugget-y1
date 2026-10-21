@@ -17596,3 +17596,73 @@
     *: "AOD show on important events"
   </voice>
 </phrase>
+<phrase>
+  id: LANG_Y1_SCROLL_ABC
+  desc: in Settings -> Nugget -> Device
+  user: core
+  <source>
+    *: "Scroll ABC"
+  </source>
+  <dest>
+    *: "Scroll ABC"
+  </dest>
+  <voice>
+    *: "Scroll ABC"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_KEYCLICK_WHEEL_ONLY
+  desc: in keyclick settings menu
+  user: core
+  <source>
+    *: "Keyclick Wheel Only"
+  </source>
+  <dest>
+    *: "Keyclick Wheel Only"
+  </dest>
+  <voice>
+    *: "Keyclick Wheel Only"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_KEYCLICK_LIST_EDGE
+  desc: in keyclick settings menu
+  user: core
+  <source>
+    *: "Keyclick Start/End of List"
+  </source>
+  <dest>
+    *: "Keyclick Start/End of List"
+  </dest>
+  <voice>
+    *: "Keyclick Start/End of List"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_KEYCLICK_CUSTOM_SOUND
+  desc: in keyclick settings menu
+  user: core
+  <source>
+    *: "Keyclick Custom Sound"
+  </source>
+  <dest>
+    *: "Keyclick Custom Sound"
+  </dest>
+  <voice>
+    *: "Keyclick Custom Sound"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_KEYCLICK_SOUND_CLEARED
+  desc: in keyclick settings menu
+  user: core
+  <source>
+    *: "Clear Custom Keyclick Sound"
+  </source>
+  <dest>
+    *: "Clear Custom Keyclick Sound"
+  </dest>
+  <voice>
+    *: "Clear Custom Keyclick Sound"
+  </voice>
+</phrase>

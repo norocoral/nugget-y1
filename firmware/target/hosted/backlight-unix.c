@@ -266,40 +266,76 @@ void y1_aod_notify_event(void)
     y1_aod_event_pending = true;
 }
 
+static bool y1_aod_event_allowed(void)
+{
+    if (global_settings.aod_wps_only &&
+        get_current_activity() != ACTIVITY_WPS)
+        return false;
+
+    if (global_settings.aod_playback_only && !y1_playback_active())
+        return false;
+
+    return true;
+}
+
+static void y1_aod_event_wake(void)
+{
+    if (last_bl == BACKLIGHT_POWER_OFF)
+    {
+        y1_enter_hold_mode();
+        y1_set_screen_off_power_mode(true);
+        lcd_enable(true);
+        last_bl = BACKLIGHT_POWER_REDUCED;
+        y1_aod_set_level(y1_aod_brightness_level());
+        sysfs_set_int("/sys/class/leds/button-backlight/brightness", 0);
+    }
+    else if (y1_aod_level == 0)
+        y1_aod_set_level(y1_aod_brightness_level());
+
+    y1_set_display_power_saving(false);
+}
+
+static void y1_aod_event_restore_idle(void)
+{
+    if (last_bl != BACKLIGHT_POWER_REDUCED)
+        return;
+
+    if (y1_should_always_on())
+    {
+        y1_set_display_power_saving(true);
+        y1_set_screen_off_power_mode(true);
+    }
+    else
+        backlight_hw_off();
+}
+
 static bool y1_aod_event_update(void)
 {
     if (y1_aod_event_pending) {
         y1_aod_event_pending = false;
         if (global_settings.aod_important_events &&
-            y1_should_always_on() &&
+            y1_aod_event_allowed() &&
             (last_bl == BACKLIGHT_POWER_REDUCED ||
              last_bl == BACKLIGHT_POWER_OFF)) {
-            if (last_bl == BACKLIGHT_POWER_OFF)
-                backlight_hw_off();
-
-            if (last_bl == BACKLIGHT_POWER_REDUCED) {
-                if (y1_aod_level == 0)
-                    y1_aod_set_level(y1_aod_brightness_level());
-                y1_set_display_power_saving(false);
-                y1_aod_event_deadline = current_tick + Y1_AOD_EVENT_DURATION;
-                y1_aod_event_active = true;
-                y1_aod_event_fading = false;
-            }
+            y1_aod_event_wake();
+            y1_aod_event_deadline = current_tick + Y1_AOD_EVENT_DURATION;
+            y1_aod_event_active = true;
+            y1_aod_event_fading = false;
         }
     }
 
     if (!y1_aod_event_active)
         return false;
 
-    if (!global_settings.aod_important_events) {
+    if (!global_settings.aod_important_events ||
+        !y1_aod_event_allowed()) {
         y1_aod_event_active = false;
         y1_aod_event_fading = false;
-        if (last_bl == BACKLIGHT_POWER_REDUCED && y1_should_always_on())
-            y1_set_display_power_saving(true);
+        y1_aod_event_restore_idle();
         return false;
     }
 
-    if (!y1_should_always_on() || last_bl != BACKLIGHT_POWER_REDUCED) {
+    if (last_bl != BACKLIGHT_POWER_REDUCED) {
         y1_aod_event_active = false;
         y1_aod_event_fading = false;
         return false;
@@ -314,8 +350,7 @@ static bool y1_aod_event_update(void)
     if (y1_aod_event_fading && y1_aod_update_fade()) {
         y1_aod_event_active = false;
         y1_aod_event_fading = false;
-        y1_set_display_power_saving(true);
-        y1_set_screen_off_power_mode(true);
+        y1_aod_event_restore_idle();
     }
     return true;
 }

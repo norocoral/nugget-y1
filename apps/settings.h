@@ -937,6 +937,10 @@ struct user_settings
     bool aod_wps_only;
     bool aod_playback_only;
     bool aod_important_events;
+    bool scroll_abc;
+    bool keyclick_wheel_only;
+    bool keyclick_list_edge;
+    char keyclick_custom_sound[MAX_PATH];
     int mfb_single_click;
     int mfb_double_click;
     int mfb_triple_click;

@@ -174,6 +174,18 @@ static const char* tree_get_filename(int selected_item, void *data,
     return(name);
 }
 
+#if defined(INNIOASIS_Y1)
+static const char* tree_get_abc_name(int selected_item, void *data,
+                                     char *buffer, size_t buffer_len)
+{
+    (void)buffer;
+    (void)buffer_len;
+    struct tree_context *local_tc = data;
+    struct entry *entry = get_valid_entry(__func__, local_tc, selected_item);
+    return entry->name;
+}
+#endif
+
 #ifdef HAVE_LCD_COLOR
 static int tree_get_filecolor(int selected_item, void * data)
 {
@@ -414,6 +426,12 @@ static int update_dir(void)
 
     /* Ensure that list is initialized before update_dir returns */
     gui_synclist_init(list, &tree_get_filename, &tc, false, 1, NULL);
+#if defined(INNIOASIS_Y1)
+    list->scroll_abc = global_settings.scroll_abc &&
+        (tc.sort_dir == SORT_ALPHA || tc.sort_dir == SORT_ALPHA_REVERSED);
+    if (list->scroll_abc && *tc.dirfilter != SHOW_ID3DB)
+        gui_synclist_set_abc_name_callback(list, &tree_get_abc_name);
+#endif
 
 #ifdef HAVE_TAGCACHE
     /* Checks for changes */

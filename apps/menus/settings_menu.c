@@ -22,6 +22,8 @@
 #include <stddef.h>
 #include <limits.h>
 #include <string.h>
+#include "string-extra.h"
+#include <ctype.h>
 #include "config.h"
 #include "lang.h"
 #include "action.h"
@@ -343,13 +345,41 @@ MENUITEM_SETTING(volume_adjust_norm_steps, &global_settings.volume_adjust_norm_s
 /* Keyclick menu */
 MENUITEM_SETTING(keyclick, &global_settings.keyclick, NULL);
 MENUITEM_SETTING(keyclick_repeats, &global_settings.keyclick_repeats, NULL);
+#if defined(INNIOASIS_Y1)
+static int keyclick_custom_sound_action(void);
+static int keyclick_custom_sound_clear(void);
+MENUITEM_FUNCTION(y1_keyclick_custom_sound_item, 0,
+                  ID2P(LANG_Y1_KEYCLICK_CUSTOM_SOUND),
+                  keyclick_custom_sound_action, NULL, Icon_NOICON);
+MENUITEM_FUNCTION(y1_keyclick_custom_sound_clear_item, 0,
+                  ID2P(LANG_Y1_KEYCLICK_SOUND_CLEARED),
+                  keyclick_custom_sound_clear, NULL, Icon_NOICON);
+MENUITEM_SETTING(y1_keyclick_wheel_only_item,
+                 &global_settings.keyclick_wheel_only, NULL);
+MENUITEM_SETTING(y1_keyclick_list_edge_item,
+                 &global_settings.keyclick_list_edge, NULL);
+#endif
 #ifdef HAVE_HARDWARE_CLICK
 MENUITEM_SETTING(keyclick_hardware, &global_settings.keyclick_hardware, NULL);
+#if defined(INNIOASIS_Y1)
+MAKE_MENU(keyclick_menu, ID2P(LANG_KEYCLICK), 0, Icon_NOICON,
+           &keyclick, &keyclick_hardware, &keyclick_repeats,
+           &y1_keyclick_wheel_only_item, &y1_keyclick_list_edge_item,
+           &y1_keyclick_custom_sound_item, &y1_keyclick_custom_sound_clear_item);
+#else
 MAKE_MENU(keyclick_menu, ID2P(LANG_KEYCLICK), 0, Icon_NOICON,
            &keyclick, &keyclick_hardware, &keyclick_repeats);
+#endif
+#else
+#if defined(INNIOASIS_Y1)
+MAKE_MENU(keyclick_menu, ID2P(LANG_KEYCLICK), 0, Icon_NOICON,
+           &keyclick, &keyclick_repeats,
+           &y1_keyclick_wheel_only_item, &y1_keyclick_list_edge_item,
+           &y1_keyclick_custom_sound_item, &y1_keyclick_custom_sound_clear_item);
 #else
 MAKE_MENU(keyclick_menu, ID2P(LANG_KEYCLICK), 0, Icon_NOICON,
            &keyclick, &keyclick_repeats);
+#endif
 #endif
 
 #if CONFIG_CHARGING
@@ -434,10 +464,58 @@ MENUITEM_SETTING(y1_always_on_screen_item, &global_settings.always_on_screen, NU
 MENUITEM_SETTING(y1_aod_wps_item, &global_settings.aod_wps_only, NULL);
 MENUITEM_SETTING(y1_aod_playback_item, &global_settings.aod_playback_only, NULL);
 MENUITEM_SETTING(y1_aod_important_events_item, &global_settings.aod_important_events, NULL);
+MENUITEM_SETTING(y1_scroll_abc_item, &global_settings.scroll_abc, NULL);
 MENUITEM_SETTING(y1_cpu_mode_setting, &global_settings.y1_cpu_mode, NULL);
 MENUITEM_SETTING(y1_cpu_cores_setting, &global_settings.y1_cpu_cores, NULL);
 MENUITEM_SETTING(y1_screen_off_cpu_save_item, &global_settings.y1_screen_off_cpu_save, NULL);
 MENUITEM_SETTING(y1_bt_enable_item, &global_settings.bt_enabled, NULL);
+
+static bool keyclick_custom_sound_show_item(char *name, int attr,
+                                            struct tree_context *tc)
+{
+    (void)tc;
+    if (attr & ATTR_DIRECTORY)
+        return true;
+
+    size_t len = strlen(name);
+    return len >= 4 && name[len - 4] == '.' &&
+           tolower((unsigned char)name[len - 3]) == 'w' &&
+           tolower((unsigned char)name[len - 2]) == 'a' &&
+           tolower((unsigned char)name[len - 1]) == 'v';
+}
+
+static int keyclick_custom_sound_action(void)
+{
+    char path[MAX_PATH];
+    struct browse_context browse = {
+        .dirfilter = SHOW_ALL,
+        .flags = BROWSE_SELECTONLY | BROWSE_NO_CONTEXT_MENU | BROWSE_DIRFILTER,
+        .title = str(LANG_Y1_KEYCLICK_CUSTOM_SOUND),
+        .icon = Icon_NOICON,
+        .root = "/",
+        .buf = path,
+        .bufsize = sizeof(path),
+        .callback_show_item = keyclick_custom_sound_show_item,
+    };
+
+    path[0] = '\0';
+    if (rockbox_browse(&browse) == GO_TO_PREVIOUS && path[0])
+    {
+        strmemccpy(global_settings.keyclick_custom_sound, path,
+                   sizeof(global_settings.keyclick_custom_sound));
+        settings_save();
+    }
+
+    return 0;
+}
+
+static int keyclick_custom_sound_clear(void)
+{
+    global_settings.keyclick_custom_sound[0] = '\0';
+    settings_save();
+    splash(HZ, ID2P(LANG_RESET_DONE_CLEAR));
+    return 0;
+}
 
 static struct y1_bt_device ui_bt_devs[Y1_BT_MAX_DEVICES];
 static int ui_bt_dev_count = 0;
@@ -717,6 +795,7 @@ MAKE_MENU(nugget_device_menu, ID2P(LANG_DEVICE), 0, Icon_NOICON,
           &y1_aod_wps_item,
           &y1_aod_playback_item,
           &y1_aod_important_events_item,
+          &y1_scroll_abc_item,
           &y1_double_click_unhold_item,
           &y1_cpu_mode_setting,
           &y1_cpu_cores_setting,

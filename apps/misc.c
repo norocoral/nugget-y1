@@ -60,6 +60,9 @@
 #include "sound.h"
 #if defined(INNIOASIS_Y1)
 #include "bt-y1.h"
+#ifndef HAVE_HARDWARE_BEEP
+#include "pcm_mixer.h"
+#endif
 #endif
 #include "playlist.h"
 #include "yesno.h"
@@ -1217,6 +1220,188 @@ void keyclick_set_callback(keyclick_callback cb, void* data)
     keyclick_data = data;
 }
 
+#if defined(INNIOASIS_Y1) && !defined(HAVE_HARDWARE_BEEP)
+#define Y1_KEYCLICK_MAX_MS 500
+
+static int16_t *y1_keyclick_pcm;
+static size_t y1_keyclick_frames;
+static char y1_keyclick_path[MAX_PATH];
+static unsigned int y1_keyclick_output_rate;
+static bool y1_keyclick_load_attempted;
+
+static uint16_t y1_wav_u16(const unsigned char *p)
+{
+    return (uint16_t)p[0] | ((uint16_t)p[1] << 8);
+}
+
+static uint32_t y1_wav_u32(const unsigned char *p)
+{
+    return (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
+           ((uint32_t)p[2] << 16) | ((uint32_t)p[3] << 24);
+}
+
+static bool y1_read_exact(int fd, void *buffer, size_t size)
+{
+    unsigned char *out = buffer;
+    while (size)
+    {
+        ssize_t count = read(fd, out, size);
+        if (count <= 0)
+            return false;
+        out += count;
+        size -= count;
+    }
+    return true;
+}
+
+static bool y1_load_custom_keyclick(void)
+{
+    const char *path = global_settings.keyclick_custom_sound;
+    unsigned char header[12], chunk[8], format[16];
+    uint16_t channels = 0, bits = 0, block_align = 0, encoding = 0;
+    uint32_t sample_rate = 0, data_size = 0;
+    bool have_format = false;
+    unsigned int output_rate = mixer_get_frequency();
+
+    if (!path[0])
+        return false;
+    if (y1_keyclick_load_attempted && !strcmp(path, y1_keyclick_path) &&
+        (output_rate == 0 || output_rate == y1_keyclick_output_rate))
+        return y1_keyclick_pcm != NULL;
+
+    mixer_channel_stop(PCM_MIXER_CHAN_BEEP);
+    free(y1_keyclick_pcm);
+    y1_keyclick_pcm = NULL;
+    y1_keyclick_frames = 0;
+    strmemccpy(y1_keyclick_path, path, sizeof(y1_keyclick_path));
+    y1_keyclick_load_attempted = true;
+    y1_keyclick_output_rate = output_rate;
+
+    int fd = open(path, O_RDONLY);
+    if (fd < 0)
+    {
+        DEBUGF("Keyclick WAV open failed: %s\n", path);
+        return false;
+    }
+
+    bool valid = y1_read_exact(fd, header, sizeof(header)) &&
+                 !memcmp(header, "RIFF", 4) &&
+                 !memcmp(header + 8, "WAVE", 4);
+
+    while (valid && y1_read_exact(fd, chunk, sizeof(chunk)))
+    {
+        uint32_t chunk_size = y1_wav_u32(chunk + 4);
+        if (!memcmp(chunk, "fmt ", 4))
+        {
+            if (chunk_size < sizeof(format) ||
+                chunk_size > INT32_MAX - (chunk_size & 1) ||
+                !y1_read_exact(fd, format, sizeof(format)))
+            {
+                valid = false;
+                break;
+            }
+            encoding = y1_wav_u16(format);
+            channels = y1_wav_u16(format + 2);
+            sample_rate = y1_wav_u32(format + 4);
+            block_align = y1_wav_u16(format + 12);
+            bits = y1_wav_u16(format + 14);
+            have_format = true;
+            if (lseek(fd, chunk_size - sizeof(format) +
+                      (chunk_size & 1), SEEK_CUR) < 0)
+                valid = false;
+        }
+        else if (!memcmp(chunk, "data", 4))
+        {
+            data_size = chunk_size;
+            break;
+        }
+        else if (chunk_size > INT32_MAX - (chunk_size & 1) ||
+                 lseek(fd, chunk_size + (chunk_size & 1), SEEK_CUR) < 0)
+            valid = false;
+    }
+
+    if (!valid || !have_format || encoding != 1 ||
+        (channels != 1 && channels != 2) || bits != 16 ||
+        sample_rate < 8000 || sample_rate > 192000 ||
+        block_align != channels * sizeof(int16_t) || data_size < block_align)
+    {
+        close(fd);
+        DEBUGF("Unsupported or invalid keyclick WAV: %s\n", path);
+        return false;
+    }
+
+    size_t source_frames = MIN((size_t)(data_size / block_align),
+                               (size_t)sample_rate * Y1_KEYCLICK_MAX_MS / 1000);
+    size_t source_samples = source_frames * channels;
+    int16_t *source = malloc(source_samples * sizeof(*source));
+    if (!source || !y1_read_exact(fd, source, source_samples * sizeof(*source)))
+    {
+        free(source);
+        close(fd);
+        DEBUGF("Keyclick WAV read failed: %s\n", path);
+        return false;
+    }
+    close(fd);
+
+    if (output_rate == 0)
+        output_rate = sample_rate;
+    size_t output_frames = ((uint64_t)source_frames * output_rate +
+                            sample_rate - 1) / sample_rate;
+    if (output_frames == 0)
+    {
+        free(source);
+        return false;
+    }
+
+    int16_t *output = malloc(output_frames * 2 * sizeof(*output));
+    if (!output)
+    {
+        free(source);
+        DEBUGF("Keyclick WAV buffer allocation failed\n");
+        return false;
+    }
+
+    for (size_t frame = 0; frame < output_frames; frame++)
+    {
+        uint64_t position = (uint64_t)frame * sample_rate;
+        size_t first = position / output_rate;
+        first = MIN(first, source_frames - 1);
+        size_t second = MIN(first + 1, source_frames - 1);
+        uint32_t fraction = position % output_rate;
+        for (int channel = 0; channel < 2; channel++)
+        {
+            int source_channel = channels == 1 ? 0 : channel;
+            int32_t a = source[first * channels + source_channel];
+            int32_t b = source[second * channels + source_channel];
+            output[frame * 2 + channel] =
+                (int16_t)(((int64_t)a * (output_rate - fraction) +
+                           (int64_t)b * fraction) / output_rate);
+        }
+    }
+
+    free(source);
+    y1_keyclick_pcm = output;
+    y1_keyclick_frames = output_frames;
+    y1_keyclick_output_rate = output_rate;
+    return true;
+}
+
+static bool y1_play_custom_keyclick(void)
+{
+    if (!y1_load_custom_keyclick())
+        return false;
+
+    mixer_channel_stop(PCM_MIXER_CHAN_BEEP);
+    unsigned amplitude = MIX_AMP_UNITY;
+    if (global_settings.keyclick < 3)
+        amplitude >>= 3 - MAX(1, global_settings.keyclick);
+    mixer_channel_set_amplitude(PCM_MIXER_CHAN_BEEP, amplitude);
+    mixer_channel_play_data(PCM_MIXER_CHAN_BEEP, NULL, y1_keyclick_pcm,
+                            y1_keyclick_frames * 2 * sizeof(*y1_keyclick_pcm));
+    return true;
+}
+#endif
+
 /* Produce keyclick based upon button and global settings */
 void keyclick_click(bool rawbutton, int action)
 {
@@ -1265,12 +1450,23 @@ void keyclick_click(bool rawbutton, int action)
         do_beep = keyclick_current_callback(action, keyclick_data);
     keyclick_current_callback = NULL;
 
+#if defined(INNIOASIS_Y1)
+    if (global_settings.keyclick_wheel_only &&
+        !(button & (BUTTON_SCROLL_FWD | BUTTON_SCROLL_BACK)))
+        do_beep = false;
+#endif
+
     if (do_beep)
     {
 #ifdef HAVE_HARDWARE_CLICK
         if (global_settings.keyclick)
         {
+#if defined(INNIOASIS_Y1) && !defined(HAVE_HARDWARE_BEEP)
+            if (!y1_play_custom_keyclick())
+                system_sound_play(SOUND_KEYCLICK);
+#else
             system_sound_play(SOUND_KEYCLICK);
+#endif
         }
         if (global_settings.keyclick_hardware)
         {
@@ -1279,7 +1475,12 @@ void keyclick_click(bool rawbutton, int action)
 #endif
         }
 #else
+#if defined(INNIOASIS_Y1) && !defined(HAVE_HARDWARE_BEEP)
+        if (!y1_play_custom_keyclick())
+            system_sound_play(SOUND_KEYCLICK);
+#else
         system_sound_play(SOUND_KEYCLICK);
+#endif
 #endif
     }
 }

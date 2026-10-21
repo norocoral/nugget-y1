@@ -151,6 +151,7 @@ struct gui_synclist
     bool talk_menu;
     bool wraparound;
     bool scroll_paginated;
+    bool scroll_abc;
     /* whether the text of the whole items of the list have to be
      * scrolled or only for the selected item */
     bool scroll_all;
@@ -258,6 +259,8 @@ extern void gui_synclist_add_item(struct gui_synclist * lists);
 extern void gui_synclist_del_item(struct gui_synclist * lists);
 extern void gui_synclist_set_title(struct gui_synclist * lists, const char * title,
                                    enum themable_icons icon);
+extern void gui_synclist_set_abc_name_callback(struct gui_synclist *lists,
+                                                list_get_name callback);
 
 extern bool gui_synclist_keyclick_callback(int action, void* data);
 /*

@@ -39,6 +39,7 @@
 #include "viewport.h"
 #include "appevents.h"
 #include "statusbar-skinned.h"
+#include "rbunicode.h"
 
 /* The minimum number of pending button events in queue before starting
  * to limit list drawing interval.
@@ -50,6 +51,183 @@ void list_draw(struct screen *display, struct gui_synclist *list);
 static long last_dirty_tick;
 static struct viewport parent[NB_SCREENS];
 static struct gui_synclist *current_lists;
+static struct gui_synclist *abc_name_owner;
+static list_get_name *abc_name_callback;
+
+#if defined(INNIOASIS_Y1) && defined(HAVE_LCD_COLOR)
+#define SCROLL_ABC_OVERLAY_TICKS HZ
+#define SCROLL_ABC_RADIUS 26
+
+static char scroll_abc_overlay[5];
+static long scroll_abc_overlay_tick;
+static bool scroll_abc_overlay_visible;
+static struct gui_synclist *scroll_abc_overlay_owner;
+static long scroll_abc_last_wheel_tick;
+
+static bool scroll_abc_is_fast_wheel_action(void)
+{
+    int button = get_action_statuscode(NULL);
+    if (!(button & (BUTTON_SCROLL_FWD | BUTTON_SCROLL_BACK)))
+    {
+        scroll_abc_last_wheel_tick = 0;
+        return false;
+    }
+
+    bool fast = (button & BUTTON_REPEAT) ||
+                (scroll_abc_last_wheel_tick &&
+                 TIME_BEFORE(current_tick,
+                             scroll_abc_last_wheel_tick + HZ / 3));
+    scroll_abc_last_wheel_tick = current_tick;
+    return fast;
+}
+
+static ucschar_t scroll_abc_fold(ucschar_t ch)
+{
+    if ((ch >= 'A' && ch <= 'Z') ||
+        (ch >= 0x00c0 && ch <= 0x00d6) ||
+        (ch >= 0x00d8 && ch <= 0x00de) ||
+        (ch >= 0x0391 && ch <= 0x03a1) ||
+        (ch >= 0x03a3 && ch <= 0x03ab) ||
+        (ch >= 0x0410 && ch <= 0x042f) ||
+        (ch >= 0x0531 && ch <= 0x0556) ||
+        (ch >= 0xff21 && ch <= 0xff3a))
+        return ch + 0x20;
+
+    if (ch == 0x0401)
+        return 0x0451;
+
+    return ch;
+}
+
+static bool scroll_abc_get_initial(struct gui_synclist *lists, int item,
+                                   ucschar_t *folded, char *initial)
+{
+    char name[128];
+    const char *text;
+    const unsigned char *next;
+    ucschar_t ch;
+
+    list_get_name *get_name = lists == abc_name_owner && abc_name_callback ?
+                              abc_name_callback :
+                              lists->callback_get_item_name;
+    if (!get_name || item < 0 || item >= lists->nb_items)
+        return false;
+
+    text = get_name(item, lists->data, name, sizeof(name));
+    if (!text || !*text)
+        return false;
+
+    next = utf8decode((const unsigned char *)text, &ch);
+    if (next == (const unsigned char *)text || ch == 0)
+        return false;
+
+    size_t len = next - (const unsigned char *)text;
+    memcpy(initial, text, len);
+    initial[len] = '\0';
+    *folded = scroll_abc_fold(ch);
+    return true;
+}
+
+static bool scroll_abc_move(struct gui_synclist *lists, int direction,
+                            bool allow_wrap)
+{
+    ucschar_t current, candidate;
+    char initial[5];
+    char candidate_initial[5];
+    int count = lists->nb_items;
+
+    if (!scroll_abc_get_initial(lists, lists->selected_item, &current,
+                                initial))
+        return false;
+
+    for (int offset = 1; offset < count; offset++)
+    {
+        int item = lists->selected_item + direction * offset;
+        if (allow_wrap)
+            item = (item % count + count) % count;
+        else if (item < 0 || item >= count)
+            break;
+
+        if (scroll_abc_get_initial(lists, item, &candidate,
+                                   candidate_initial) &&
+            candidate != current)
+        {
+            gui_synclist_select_item(lists, item);
+            size_t len = strlen(candidate_initial);
+            memcpy(scroll_abc_overlay, candidate_initial, len + 1);
+            scroll_abc_overlay_tick = current_tick;
+            scroll_abc_overlay_visible = true;
+            scroll_abc_overlay_owner = lists;
+            return true;
+        }
+    }
+
+    return false;
+}
+
+static bool scroll_abc_overlay_active(void)
+{
+    return scroll_abc_overlay_visible &&
+           TIME_BEFORE(current_tick,
+                       scroll_abc_overlay_tick + SCROLL_ABC_OVERLAY_TICKS);
+}
+
+static bool scroll_abc_is_engaged(struct gui_synclist *lists)
+{
+    return scroll_abc_overlay_owner == lists &&
+           scroll_abc_overlay_active();
+}
+
+static void scroll_abc_draw_overlay(struct gui_synclist *lists)
+{
+    struct screen *display = &screens[SCREEN_MAIN];
+    struct viewport *old_vp = *display->current_viewport;
+    struct viewport *vp = lists->parent[SCREEN_MAIN];
+    int width = vp->width;
+    int height = vp->height;
+    int radius = MIN(SCROLL_ABC_RADIUS, MIN(width, height) / 2);
+    int cx = width - radius - 8;
+    int cy = height / 2;
+    unsigned old_fg = display->get_foreground();
+    unsigned old_bg = display->get_background();
+    int old_font = old_vp->font;
+    int list_font = vp->font;
+    int theme_font = display->getuifont();
+    int text_width, text_height;
+
+    if (!scroll_abc_overlay_active())
+    {
+        scroll_abc_overlay_visible = false;
+        return;
+    }
+
+    vp->font = theme_font;
+    display->set_viewport(vp);
+    display->setfont(theme_font);
+    display->set_drawmode(DRMODE_SOLID);
+    display->set_foreground(global_settings.fg_color);
+    for (int y = -radius; y <= radius; y++)
+    {
+        int x = radius;
+        while (x * x + y * y > radius * radius)
+            x--;
+        display->hline(cx - x, cx + x, cy + y);
+    }
+
+    display->set_foreground(global_settings.bg_color);
+    display->getstringsize((const unsigned char *)scroll_abc_overlay,
+                           &text_width, &text_height);
+    display->putsxy(cx - text_width / 2, cy - text_height / 2,
+                    (const unsigned char *)scroll_abc_overlay);
+    display->update_viewport_rect(cx - radius, cy - radius,
+                                  radius * 2 + 1, radius * 2 + 1);
+    display->set_foreground(old_fg);
+    display->set_background(old_bg);
+    display->set_viewport(old_vp);
+    vp->font = list_font;
+    display->setfont(old_font);
+}
+#endif
 
 static bool list_is_dirty(struct gui_synclist *list)
 {
@@ -159,6 +337,12 @@ void gui_synclist_init(struct gui_synclist * gui_list,
     gui_list->callback_draw_item = NULL;
     gui_list->nb_items = 0;
     gui_list->selected_item = 0;
+    if (gui_list == abc_name_owner)
+    {
+        abc_name_owner = NULL;
+        abc_name_callback = NULL;
+    }
+    gui_list->scroll_abc = false;
     gui_synclist_init_display_settings(gui_list);
 #ifdef HAVE_TOUCHSCREEN
     gui_list->y_pos = 0;
@@ -193,6 +377,13 @@ void gui_synclist_init(struct gui_synclist * gui_list,
     gui_list->callback_get_item_color = NULL;
     gui_list->selection_color = NULL;
 #endif
+}
+
+void gui_synclist_set_abc_name_callback(struct gui_synclist *lists,
+                                         list_get_name callback)
+{
+    abc_name_owner = lists;
+    abc_name_callback = callback;
 }
 
 int gui_list_get_item_offset(struct gui_synclist * gui_list,
@@ -239,6 +430,10 @@ void gui_synclist_draw(struct gui_synclist *gui_list)
             list_draw(&screens[i], gui_list);
         skin_mark_dirty(i);
     }
+#if defined(INNIOASIS_Y1) && defined(HAVE_LCD_COLOR)
+    if (gui_list == scroll_abc_overlay_owner && scroll_abc_overlay_active())
+        scroll_abc_draw_overlay(gui_list);
+#endif
 }
 
 /* sets up the list so the selection is shown correctly on the screen */
@@ -286,6 +481,10 @@ static void gui_list_put_selection_on_screen(struct gui_synclist * gui_list,
 
 static void edge_beep(struct gui_synclist * gui_list, bool wrap)
 {
+#if defined(INNIOASIS_Y1)
+    if (!global_settings.keyclick_list_edge)
+        return;
+#endif
     if (gui_list->keyclick)
     {
         enum system_sound sound = SOUND_LIST_EDGE_BEEP_WRAP;
@@ -608,6 +807,16 @@ bool gui_synclist_do_button(struct gui_synclist * lists, int *actionptr)
     int action = *actionptr;
     static bool pgleft_allow_cancel = false;
 
+#if defined(INNIOASIS_Y1) && defined(HAVE_LCD_COLOR)
+    if (action == ACTION_NONE && scroll_abc_overlay_visible &&
+        lists == scroll_abc_overlay_owner &&
+        !scroll_abc_overlay_active())
+    {
+        scroll_abc_overlay_visible = false;
+        gui_synclist_draw(lists);
+    }
+#endif
+
 #ifdef HAVE_WHEEL_ACCELERATION
     int next_item_modifier = button_apply_acceleration(get_action_data());
 #else
@@ -695,6 +904,18 @@ bool gui_synclist_do_button(struct gui_synclist * lists, int *actionptr)
             /*Fallthrough*/
         case ACTION_STD_PREV:
 
+#if defined(INNIOASIS_Y1) && defined(HAVE_LCD_COLOR)
+            if (lists->scroll_abc && global_settings.scroll_abc &&
+                (scroll_abc_is_engaged(lists) ||
+                 next_item_modifier > 1 || scroll_abc_is_fast_wheel_action()) &&
+                scroll_abc_move(lists, -1, allow_wrap))
+            {
+                gui_synclist_draw(lists);
+                yield();
+                *actionptr = ACTION_STD_PREV;
+                return true;
+            }
+#endif
             gui_list_select_at_offset(lists, -next_item_modifier, allow_wrap);
 #ifndef HAVE_WHEEL_ACCELERATION
             if (button_queue_count() < FRAMEDROP_TRIGGER)
@@ -708,6 +929,18 @@ bool gui_synclist_do_button(struct gui_synclist * lists, int *actionptr)
             allow_wrap = false; /* Prevent list wraparound on repeating actions */
             /*Fallthrough*/
         case ACTION_STD_NEXT:
+#if defined(INNIOASIS_Y1) && defined(HAVE_LCD_COLOR)
+            if (lists->scroll_abc && global_settings.scroll_abc &&
+                (scroll_abc_is_engaged(lists) ||
+                 next_item_modifier > 1 || scroll_abc_is_fast_wheel_action()) &&
+                scroll_abc_move(lists, 1, allow_wrap))
+            {
+                gui_synclist_draw(lists);
+                yield();
+                *actionptr = ACTION_STD_NEXT;
+                return true;
+            }
+#endif
             gui_list_select_at_offset(lists, next_item_modifier, allow_wrap);
 #ifndef HAVE_WHEEL_ACCELERATION
             if (button_queue_count() < FRAMEDROP_TRIGGER)
