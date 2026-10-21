@@ -146,6 +146,11 @@ static uint32_t avrcp_position_ms;
 static uint8_t avrcp_play_status;
 
 static uint8_t remote_seid = 1;
+static uint8_t remote_sink_seids[32];
+static uint8_t remote_sink_count;
+static uint8_t remote_sink_index;
+static uint8_t sbc_remote_octet0;
+static uint8_t sbc_remote_octet1;
 static uint8_t sbc_cfg_octet0 = 0x21; /* 44.1kHz, Joint Stereo */
 static uint8_t sbc_cfg_octet1 = 0x15; /* 16 blocks, 8 subbands, Loudness */
 static uint8_t sbc_bitpool    = 53;
@@ -359,6 +364,11 @@ static void reset_bt_session(void)
     avdtp_discover_sent = false;
     avdtp_opening_media = false;
     remote_seid = 1;
+    memset(remote_sink_seids, 0, sizeof(remote_sink_seids));
+    remote_sink_count = 0;
+    remote_sink_index = 0;
+    sbc_remote_octet0 = 0;
+    sbc_remote_octet1 = 0;
     sbc_cfg_octet0 = 0x21;
     sbc_cfg_octet1 = 0x15;
     sbc_bitpool = 53;
@@ -641,6 +651,20 @@ static void avdtp_send_accept(uint8_t rx_hdr, uint8_t sig_id, const void *params
     l2cap_send_pdu(cid_avdtp_sig_remote, buf, 2 + plen);
 }
 
+static bool avdtp_request_next_sink_capabilities(void)
+{
+    if (remote_sink_index >= remote_sink_count)
+    {
+        bt_log("No remote audio sink endpoint supports SBC\n");
+        return false;
+    }
+
+    remote_seid = remote_sink_seids[remote_sink_index++];
+    uint8_t param[1] = { (uint8_t)(remote_seid << 2) };
+    avdtp_send_cmd(AVDTP_GET_CAPABILITIES, param, sizeof(param));
+    return true;
+}
+
 static void handle_avdtp_sig_pdu(const uint8_t *pdu, uint16_t len)
 {
     if (len < 2)
@@ -729,58 +753,106 @@ static void handle_avdtp_sig_pdu(const uint8_t *pdu, uint16_t len)
         switch (sig_id)
         {
             case AVDTP_DISCOVER: {
-                /* Find first Sink SEP (TSEP bit 3 == 1 -> Audio Sink) that is not in use */
-                remote_seid = 1;
+                remote_sink_count = 0;
+                remote_sink_index = 0;
                 for (int i = 2; i + 1 < len; i += 2) {
                     uint8_t seid = pdu[i] >> 2;
                     bool in_use = (pdu[i] & 0x02) != 0;
                     bool is_sink = (pdu[i + 1] & 0x08) != 0;
                     uint8_t media_type = pdu[i + 1] >> 4;
-                    if (!in_use && is_sink && media_type == 0 && seid > 0) {
-                        remote_seid = seid;
-                        break;
-                    }
+                    if (!in_use && is_sink && media_type == 0 && seid > 0 &&
+                        remote_sink_count < sizeof(remote_sink_seids))
+                        remote_sink_seids[remote_sink_count++] = seid;
                 }
-                uint8_t param[1] = { (uint8_t)(remote_seid << 2) };
-                avdtp_send_cmd(AVDTP_GET_CAPABILITIES, param, 1);
+                avdtp_request_next_sink_capabilities();
                 break;
             }
             case AVDTP_GET_CAPABILITIES:
             case AVDTP_GET_ALL_CAPABILITIES: {
-                /* Parse remote Sink's SBC capabilities */
-                uint8_t sup_o0 = 0x2F, sup_o1 = 0xFF, min_bp = 2, max_bp = 53;
+                bool found_sbc = false;
+                uint8_t sup_o0 = 0, sup_o1 = 0, min_bp = 0, max_bp = 0;
                 for (int i = 2; i + 7 < len; i++) {
-                    if (pdu[i] == 0x07 && pdu[i + 1] >= 0x06 && pdu[i + 2] == 0x00 && pdu[i + 3] == 0x00) {
+                    if (pdu[i] == 0x07 && pdu[i + 1] == 0x06 &&
+                        pdu[i + 2] == 0x00 && pdu[i + 3] == 0x00) {
                         sup_o0 = pdu[i + 4];
                         sup_o1 = pdu[i + 5];
                         min_bp = pdu[i + 6];
                         max_bp = pdu[i + 7];
+                        found_sbc = true;
                         break;
                     }
                 }
+                if (!found_sbc || min_bp < 2 || max_bp < min_bp || max_bp > 250)
+                {
+                    if (!avdtp_request_next_sink_capabilities())
+                        bt_log("Remote endpoints do not expose valid SBC capabilities\n");
+                    break;
+                }
+
                 sbc_remote_min_bitpool = min_bp;
                 sbc_remote_max_bitpool = max_bp;
-                /* Prefer the highest commonly supported SBC sample rate. */
+                sbc_remote_octet0 = sup_o0;
+                sbc_remote_octet1 = sup_o1;
+
                 uint8_t freq = (sup_o0 & 0x10) ? 0x10 :
                                (sup_o0 & 0x20) ? 0x20 :
                                (sup_o0 & 0x40) ? 0x40 : 0x80;
-                /* Try SBC XQ first: Dual Channel (0x04) at bitpool 38 (452 kbps) */
-                if ((sup_o0 & 0x04) && max_bp >= 38) {
+                if (!(sup_o0 & 0xF0))
+                {
+                    if (!avdtp_request_next_sink_capabilities())
+                        bt_log("Remote SBC endpoint has no common sample rate\n");
+                    break;
+                }
+
+                uint8_t channel_mode = (sup_o0 & 0x01) ? 0x01 :
+                                       (sup_o0 & 0x02) ? 0x02 :
+                                       (sup_o0 & 0x04) ? 0x04 :
+                                       (sup_o0 & 0x08) ? 0x08 : 0;
+                if (channel_mode == 0)
+                {
+                    if (!avdtp_request_next_sink_capabilities())
+                        bt_log("Remote SBC endpoint has no common channel mode\n");
+                    break;
+                }
+
+                uint8_t blocks = (sup_o1 & 0x10) ? 0x10 :
+                                 (sup_o1 & 0x20) ? 0x20 :
+                                 (sup_o1 & 0x40) ? 0x40 :
+                                 (sup_o1 & 0x80) ? 0x80 : 0;
+                uint8_t subbands = (sup_o1 & 0x04) ? 0x04 :
+                                   (sup_o1 & 0x08) ? 0x08 : 0;
+                uint8_t allocation = (sup_o1 & 0x01) ? 0x01 :
+                                     (sup_o1 & 0x02) ? 0x02 : 0;
+                if (!blocks || !subbands || !allocation)
+                {
+                    if (!avdtp_request_next_sink_capabilities())
+                        bt_log("Remote SBC endpoint has no compatible SBC parameters\n");
+                    break;
+                }
+
+                sbc_is_xq = false;
+                sbc_cfg_octet0 = freq | channel_mode;
+                sbc_bitpool = max_bp > 53 ? 53 : max_bp;
+                if (sbc_bitpool < min_bp)
+                {
+                    if (!avdtp_request_next_sink_capabilities())
+                        bt_log("Remote SBC bitpool range is unsupported\n");
+                    break;
+                }
+
+                /* Use standard SBC parameters first; these are widely supported by speakers. */
+                sbc_cfg_octet1 = blocks | subbands | allocation;
+                if ((sup_o0 & 0x04) && min_bp <= 38 && max_bp >= 38 &&
+                    remote_sink_count == 1)
+                {
+                    /* Preserve the higher-quality mode for a single compatible endpoint. */
                     sbc_is_xq = true;
                     sbc_cfg_octet0 = freq | 0x04; /* Dual Channel */
-                    sbc_bitpool = (max_bp >= 38) ?
-                                  (min_bp > 38 ? min_bp : 38) : max_bp;
+                    sbc_bitpool = 38;
                     bt_log("Negotiating SBC XQ (Dual Channel, high-bitpool)\n");
                 } else {
-                    /* Fallback to standard SBC Joint Stereo (0x01) or Stereo (0x02) */
-                    sbc_is_xq = false;
-                    uint8_t chm  = (sup_o0 & 0x01) ? 0x01 : 0x02;
-                    sbc_cfg_octet0 = freq | chm;
-                    sbc_bitpool = (max_bp > 53) ? 53 : ((max_bp < 2) ? 35 : max_bp);
-                    bt_log("Negotiating standard SBC (Joint Stereo)\n");
+                    bt_log("Negotiating standard SBC\n");
                 }
-                /* Choose 16 blocks (0x10), 8 subbands (0x04), Loudness (0x01) or SNR (0x02) */
-                sbc_cfg_octet1 = 0x14 | ((sup_o1 & 0x01) ? 0x01 : 0x02);
 
                 reinit_a2dp_sbc();
 
@@ -833,12 +905,21 @@ static void handle_avdtp_sig_pdu(const uint8_t *pdu, uint16_t len)
                 /* Remote rejected SBC XQ: fallback to standard SBC Joint Stereo */
                 bt_log("Falling back from SBC XQ to standard SBC (Joint Stereo)\n");
                 sbc_is_xq = false;
-                uint8_t freq = (sbc_cfg_octet0 & 0x20) ? 0x20 : 0x10;
-                sbc_cfg_octet0 = freq | 0x01; /* Joint Stereo */
+                uint8_t freq = sbc_cfg_octet0 & 0xF0;
+                uint8_t channel_mode = (sbc_remote_octet0 & 0x01) ? 0x01 :
+                                       (sbc_remote_octet0 & 0x02) ? 0x02 :
+                                       (sbc_remote_octet0 & 0x04) ? 0x04 :
+                                       (sbc_remote_octet0 & 0x08) ? 0x08 : 0;
+                sbc_cfg_octet0 = freq | channel_mode;
                 sbc_bitpool = sbc_remote_max_bitpool > 53 ?
                               53 : sbc_remote_max_bitpool;
                 if (sbc_bitpool < sbc_remote_min_bitpool)
                     sbc_bitpool = sbc_remote_min_bitpool;
+                sbc_cfg_octet1 = (sbc_remote_octet1 & 0x10) ? 0x10 :
+                                 (sbc_remote_octet1 & 0x20) ? 0x20 :
+                                 (sbc_remote_octet1 & 0x40) ? 0x40 : 0x80;
+                sbc_cfg_octet1 |= (sbc_remote_octet1 & 0x04) ? 0x04 : 0x08;
+                sbc_cfg_octet1 |= (sbc_remote_octet1 & 0x01) ? 0x01 : 0x02;
                 reinit_a2dp_sbc();
 
                 uint8_t set_cfg[12] = {
@@ -852,6 +933,10 @@ static void handle_avdtp_sig_pdu(const uint8_t *pdu, uint16_t len)
                     sbc_bitpool                  /* max_bp */
                 };
                 avdtp_send_cmd(AVDTP_SET_CONFIGURATION, set_cfg, sizeof(set_cfg));
+            }
+            else if (!sbc_is_xq && !avdtp_request_next_sink_capabilities())
+            {
+                bt_log("All available SBC endpoint configurations were rejected\n");
             }
         }
     }

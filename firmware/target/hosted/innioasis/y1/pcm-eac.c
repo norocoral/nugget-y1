@@ -66,7 +66,11 @@ struct Register_Control {
 
 static int eac_fd = -1;
 static unsigned long current_sampr = 44100;
+static unsigned long programmed_sampr;
+static bool audio_output_enabled;
 static int wakelock_fd = -1;
+static volatile sig_atomic_t dma_stopped = 1;
+static volatile sig_atomic_t dma_locked = 0;
 
 static void y1_play_wake_lock(bool hold)
 {
@@ -94,6 +98,7 @@ static void y1_audio_clocks(int on)
 }
 static int pending_vol_l = 0;
 static int pending_vol_r = 0;
+static void sink_set_freq(uint16_t freq);
 
 /* MT6323 AUDTOP_CON5 (0x70a): HPL bits [14:12], HPR bits [10:8], 0..7.
  * 2 dB/step, index 7 = +14 dB. Low bits 0x0014 keep the HP path powered.
@@ -106,16 +111,16 @@ static int pending_vol_r = 0;
 #define MT6323_HP_PGA_MAX_CB     (MT6323_HP_PGA_MAX_IDX * MT6323_HP_PGA_STEP_CB)
 #define MT6323_HP_PGA_OFFSET_CB  MT6323_HP_PGA_MAX_CB
 
-static inline void set_afereg(int fd, uint32_t offset, uint32_t val, uint32_t mask)
+static inline int set_afereg(int fd, uint32_t offset, uint32_t val, uint32_t mask)
 {
     struct Register_Control reg = { offset, val, mask };
-    ioctl(fd, AUDDRV_SET_AFEREG, &reg);
+    return ioctl(fd, AUDDRV_SET_AFEREG, &reg);
 }
 
-static inline void set_anareg(int fd, uint32_t offset, uint32_t val, uint32_t mask)
+static inline int set_anareg(int fd, uint32_t offset, uint32_t val, uint32_t mask)
 {
     struct Register_Control reg = { offset, val, mask };
-    ioctl(fd, AUDDRV_SET_ANAREG, &reg);
+    return ioctl(fd, AUDDRV_SET_ANAREG, &reg);
 }
 
 static inline uint32_t get_anareg(int fd, uint32_t offset)
@@ -222,6 +227,55 @@ static void apply_hp_analog_gain(int idx_l, int idx_r)
     set_anareg(eac_fd, MT6323_AUDTOP_CON5, con5, 0xffff);
 }
 
+static void y1_audio_set_output_enabled(bool enable)
+{
+    if (eac_fd < 0 || audio_output_enabled == enable)
+        return;
+
+    if (!enable)
+    {
+        set_afereg(eac_fd, 0x10, 0, 1 << 1);
+        ioctl(eac_fd, SET_HEADPHONE_OFF, 0);
+        set_anareg(eac_fd, 0x4014, 0, 1);
+        set_anareg(eac_fd, 0x4000, 0, 1);
+        top_ctl_trigger(eac_fd);
+        set_afereg(eac_fd, 0x10, 0, 1 << 0);
+        y1_audio_clocks(0);
+        audio_output_enabled = false;
+        programmed_sampr = 0;
+        return;
+    }
+
+    y1_audio_clocks(1);
+    set_anareg(eac_fd, 0x106, 1, 0xffff);
+    set_anareg(eac_fd, 0x10c, 0x100, 0x100);
+    set_afereg(eac_fd, 0x10, 1, 1);
+    audio_output_enabled = true;
+    sink_set_freq((uint16_t)current_sampr);
+    set_anareg(eac_fd, 0x700, 0x7800, 0x7f80);
+    set_anareg(eac_fd, 0x704, 0x00f0, 0x00ff);
+    set_anareg(eac_fd, 0x702, 0x0500, 0x0700);
+    set_anareg(eac_fd, 0x700, 0x0050, 0x0070);
+    set_anareg(eac_fd, 0x710, 0x0008, 0x0008);
+    set_anareg(eac_fd, 0x700, 0x0180, 0x0180);
+    set_anareg(eac_fd, 0x704, 0x0003, 0x0003);
+    set_anareg(eac_fd, 0x70c, 0xf7f2, 0xffff);
+    set_anareg(eac_fd, 0x700, 0x7000, 0xf000);
+    set_anareg(eac_fd, 0x70a, 0x0014, 0xffff);
+    set_anareg(eac_fd, 0x708, 0x007c, 0xffff);
+    usleep(10000);
+    set_anareg(eac_fd, 0x70c, 0xf5ba, 0xffff);
+    apply_hp_analog_gain(vol_cb_to_hp_idx(pending_vol_l),
+                         vol_cb_to_hp_idx(pending_vol_r));
+    set_anareg(eac_fd, 0x4014, 1, 1);
+    top_ctl_trigger(eac_fd);
+    set_anareg(eac_fd, 0x4000, 1, 1);
+    ioctl(eac_fd, SET_HEADPHONE_ON, 3);
+
+    if (dma_stopped == 0 && dma_locked == 0)
+        set_afereg(eac_fd, 0x10, 1 << 1, 1 << 1);
+}
+
 void audiohw_set_volume(int vol_l, int vol_r)
 {
     /* vol_l / vol_r are centibels (-740 to +60), 1 dB UI steps. Analog HP
@@ -247,8 +301,6 @@ static pthread_t pcm_thread;
 static pthread_mutex_t pcm_mtx = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t pcm_cond = PTHREAD_COND_INITIALIZER;
 
-static volatile sig_atomic_t dma_stopped = 1;
-static volatile sig_atomic_t dma_locked  = 0;
 static volatile bool pcm_thread_exit = false;
 
 static const void *pcm_data = NULL;
@@ -294,6 +346,11 @@ static void *pcm_worker(void *arg)
                     break;
 
                 bool bt_active = y1_bt_a2dp_is_streaming();
+                if (bt_active && audio_output_enabled)
+                    y1_audio_set_output_enabled(false);
+                else if (!bt_active && !audio_output_enabled && dma_stopped == 0)
+                    y1_audio_set_output_enabled(true);
+
                 ssize_t written;
                 if (bt_active) {
                     /* Keep A2DP paced without driving the analog DAC. */
@@ -489,10 +546,13 @@ static void sink_dma_init(void)
             /* 13. PMIC CDC Clock Synchronization & Master Enable */
             top_ctl_trigger(eac_fd);
             set_anareg(eac_fd, 0x4000, 1, 1);                      /* PMIC TOP_CON0: Audio Digital Master ON */
+            audio_output_enabled = true;
+            programmed_sampr = current_sampr;
             log_audio_debug("[pcm-eac] MT6323 PMIC Digital Audio Codec & Headphone Amp fully configured.\n");
         }
     }
 
+    y1_audio_set_output_enabled(false);
     pcm_thread_exit = false;
     dma_stopped = 1;
     dma_locked = 1;
@@ -514,13 +574,13 @@ static void sink_dma_postinit(void)
 static void sink_set_freq(uint16_t freq)
 {
     unsigned long sampr = (freq < HW_NUM_FREQ) ? hw_freq_sampr[freq] : freq;
-    if (sampr == current_sampr)
+    if (sampr == current_sampr && sampr == programmed_sampr)
     {
-        return; /* Frequency hasn't changed; avoid re-syncing clocks between tracks */
+        return;
     }
     current_sampr = sampr;
 
-    if (eac_fd >= 0)
+    if (eac_fd >= 0 && audio_output_enabled)
     {
         uint32_t dac_con1;
         uint32_t rate_code;
@@ -585,29 +645,37 @@ static void sink_set_freq(uint16_t freq)
         usleep(5000);
 
         /* 1. DL1 sample rate in AFE_DAC_CON1 (0x14 bits 0..3) */
-        set_afereg(eac_fd, 0x14, rate_code, 0x0f);
+        bool rate_programmed = true;
+        if (set_afereg(eac_fd, 0x14, rate_code, 0x0f) < 0)
+            rate_programmed = false;
 
         /* 2. IRQ1 sample rate in AFE_IRQ_MCU_CON (0x3a0 bits 4..7) & enable (bit 0) */
-        set_afereg(eac_fd, 0x3a0, (rate_code << 4) | 1, 0xf1);
+        if (set_afereg(eac_fd, 0x3a0, (rate_code << 4) | 1, 0xf1) < 0)
+            rate_programmed = false;
 
         /* 3. IRQ1 period count in AFE_IRQ_MCU_CNT1 (0x3ac) = 1024 samples */
-        set_afereg(eac_fd, 0x3ac, 1024, ~0U);
+        if (set_afereg(eac_fd, 0x3ac, 1024, ~0U) < 0)
+            rate_programmed = false;
 
         /* 4. PMIC New IF DAC output config (0x108) */
-        set_afereg(eac_fd, 0x108, dac_con1, ~0U);
+        if (set_afereg(eac_fd, 0x108, dac_con1, ~0U) < 0)
+            rate_programmed = false;
 
         /* 5. I2S Out format & sample rate (AFE_I2S_CON1 / 0x34).
          * Init uses 0x00000909: bits[11:8] = rate, bits[3:0] = 0x9
          * (bit 0 I2S enable, bit 3 16-bit). Putting rate_code in the low
          * nibble clears enable for even rates (48 kHz is 10), which muted
          * AUTO 48 kHz tracks. */
-        set_afereg(eac_fd, 0x34, (rate_code << 8) | 0x09, ~0U);
+        if (set_afereg(eac_fd, 0x34, (rate_code << 8) | 0x09, ~0U) < 0)
+            rate_programmed = false;
 
         /* 6. PMIC NewIF Downlink Frequency (0x4024) */
-        set_anareg(eac_fd, 0x4024, (pmic_newif_rate << 12) | 0x330, 0xffff);
+        if (set_anareg(eac_fd, 0x4024, (pmic_newif_rate << 12) | 0x330, 0xffff) < 0)
+            rate_programmed = false;
 
         /* 7. PMIC Codec Downlink Sampling Rate (0x4002) */
-        set_anareg(eac_fd, 0x4002, rate_code, 0x0f);
+        if (set_anareg(eac_fd, 0x4002, rate_code, 0x0f) < 0)
+            rate_programmed = false;
 
         /* 8. Trigger PMIC TopCtl Clock Synchronization */
         top_ctl_trigger(eac_fd);
@@ -618,6 +686,10 @@ static void sink_set_freq(uint16_t freq)
         {
             set_afereg(eac_fd, 0x10, 1 << 1, 1 << 1);
         }
+        if (rate_programmed)
+            programmed_sampr = sampr;
+        else
+            log_audio_debug("[pcm-eac] Failed to program one or more sample-rate registers; will retry.\n");
     }
 }
 
@@ -626,16 +698,23 @@ static void sink_dma_start(const void *addr, size_t size)
     pcm_data = addr;
     pcm_size = size;
 
+    pthread_mutex_lock(&pcm_mtx);
+    dma_stopped = 0;
+    pthread_mutex_unlock(&pcm_mtx);
+
     if (eac_fd >= 0)
     {
-        y1_audio_clocks(1);
         y1_play_wake_lock(true);
-        /* Ensure AFE Master Switch and DL1 DMA are active */
-        set_afereg(eac_fd, 0x10, (1 << 0) | (1 << 1), (1 << 0) | (1 << 1));
+        y1_audio_set_output_enabled(!y1_bt_a2dp_is_streaming());
+        if (audio_output_enabled)
+        {
+            sink_set_freq((uint16_t)current_sampr);
+            set_afereg(eac_fd, 0x10, (1 << 0) | (1 << 1),
+                       (1 << 0) | (1 << 1));
+        }
     }
 
     pthread_mutex_lock(&pcm_mtx);
-    dma_stopped = 0;
     pthread_cond_signal(&pcm_cond);
     pthread_mutex_unlock(&pcm_mtx);
 
@@ -650,8 +729,7 @@ static void sink_dma_stop(void)
 
     if (eac_fd >= 0)
     {
-        /* Pause DL1 but keep the AFE/AIF clocks stable between playback sessions. */
-        set_afereg(eac_fd, 0x10, 0, 1 << 1);
+        y1_audio_set_output_enabled(false);
         y1_play_wake_lock(false);
     }
 }
@@ -660,7 +738,7 @@ void audiohw_close(void)
 {
     if (eac_fd >= 0)
     {
-        ioctl(eac_fd, SET_HEADPHONE_OFF, 0);
+        y1_audio_set_output_enabled(false);
         ioctl(eac_fd, FREE_MEMIF_FP, 0);
         ioctl(eac_fd, AUDDRV_FREE_DL1_BUF, 0);
         ioctl(eac_fd, FREE_MEMIF_BUF, 0);
