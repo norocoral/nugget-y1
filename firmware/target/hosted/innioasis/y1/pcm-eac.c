@@ -68,6 +68,8 @@ static int eac_fd = -1;
 static unsigned long current_sampr = 44100;
 static unsigned long programmed_sampr;
 static bool audio_output_enabled;
+static bool y1_deep_idle_enabled = true;
+static bool y1_cpu_powerdown_enabled = true;
 static int wakelock_fd = -1;
 static volatile sig_atomic_t dma_stopped = 1;
 static volatile sig_atomic_t dma_locked = 0;
@@ -174,6 +176,46 @@ static void log_audio_debug(const char *msg)
         (void)!write(kfd, msg, strlen(msg));
         close(kfd);
     }
+}
+
+static bool y1_write_power_state(const char *value)
+{
+    int fd = open("/sys/power/dpidle_state", O_WRONLY | O_CLOEXEC);
+    if (fd < 0) {
+        log_audio_debug("[pcm-eac] Failed to open deep-idle control\n");
+        return false;
+    }
+
+    size_t length = strlen(value);
+    bool success = write(fd, value, length) == (ssize_t)length;
+    close(fd);
+
+    if (!success)
+        log_audio_debug("[pcm-eac] Failed to write MT6572 deep-idle control\n");
+    return success;
+}
+
+static bool y1_set_deep_idle(bool enable)
+{
+    const char *deep_idle = enable ? "1\n" : "0\n";
+    const char *cpu_powerdown = enable ? "cpupdn 1\n" : "cpupdn 0\n";
+    bool success = true;
+
+    if (y1_cpu_powerdown_enabled != enable) {
+        if (y1_write_power_state(cpu_powerdown))
+            y1_cpu_powerdown_enabled = enable;
+        else
+            success = false;
+    }
+
+    if (y1_deep_idle_enabled != enable) {
+        if (y1_write_power_state(deep_idle))
+            y1_deep_idle_enabled = enable;
+        else
+            success = false;
+    }
+
+    return success;
 }
 
 void audiohw_preinit(void) { }
@@ -697,6 +739,7 @@ static void sink_dma_start(const void *addr, size_t size)
 {
     pcm_data = addr;
     pcm_size = size;
+    y1_set_deep_idle(false);
 
     pthread_mutex_lock(&pcm_mtx);
     dma_stopped = 0;
@@ -732,6 +775,7 @@ static void sink_dma_stop(void)
         y1_audio_set_output_enabled(false);
         y1_play_wake_lock(false);
     }
+    y1_set_deep_idle(true);
 }
 
 void audiohw_close(void)
