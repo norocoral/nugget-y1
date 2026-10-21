@@ -192,7 +192,6 @@ static void scroll_abc_draw_overlay(struct gui_synclist *lists)
     unsigned old_bg = display->get_background();
     int old_font = old_vp->font;
     int list_font = vp->font;
-    int theme_font = display->getuifont();
     int text_width, text_height;
 
     if (!scroll_abc_overlay_active())
@@ -201,9 +200,8 @@ static void scroll_abc_draw_overlay(struct gui_synclist *lists)
         return;
     }
 
-    vp->font = theme_font;
     display->set_viewport(vp);
-    display->setfont(theme_font);
+    display->setfont(list_font);
     display->set_drawmode(DRMODE_SOLID);
     display->set_foreground(global_settings.fg_color);
     for (int y = -radius; y <= radius; y++)
@@ -224,7 +222,6 @@ static void scroll_abc_draw_overlay(struct gui_synclist *lists)
     display->set_foreground(old_fg);
     display->set_background(old_bg);
     display->set_viewport(old_vp);
-    vp->font = list_font;
     display->setfont(old_font);
 }
 #endif

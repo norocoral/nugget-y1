@@ -105,6 +105,8 @@ static volatile bool req_scan = false;
 static volatile bool req_connect = false;
 static uint8_t req_connect_bdaddr[6];
 static volatile bool req_disconnect = false;
+static bool pending_switch_connect;
+static uint8_t pending_switch_bdaddr[6];
 
 /* Active ACL + L2CAP + AVDTP state */
 static uint16_t acl_handle = 0xFFFF;
@@ -1497,6 +1499,13 @@ static void handle_hci_event(const uint8_t *pkt, size_t len)
             pthread_mutex_unlock(&bt_mtx);
             bt_log("ACL Disconnected\n");
             y1_bt_audio_disconnect_hook();
+            if (pending_switch_connect && bt_target_enabled) {
+                memcpy(req_connect_bdaddr, pending_switch_bdaddr,
+                       sizeof(req_connect_bdaddr));
+                pending_switch_connect = false;
+                req_connect = true;
+                bt_log("Starting connection to selected Bluetooth device\n");
+            }
             break;
         }
 
@@ -1743,14 +1752,14 @@ static void drain_a2dp_pcm_and_transmit(void)
         rtp_pkt[5]  = (uint8_t)(rtp_timestamp >> 16);
         rtp_pkt[6]  = (uint8_t)(rtp_timestamp >> 8);
         rtp_pkt[7]  = (uint8_t)(rtp_timestamp & 0xFF);
-        rtp_timestamp += (uint32_t)samples_per_pkt;
         rtp_pkt[8]  = 0x00;
         rtp_pkt[9]  = 0x00;
         rtp_pkt[10] = 0x00;
         rtp_pkt[11] = 0x01; /* SSRC = 1 */
-        rtp_pkt[12] = (uint8_t)frames_per_pkt; /* Unfragmented SBC payload header */
+        rtp_pkt[12] = 0; /* Updated with the number of successfully encoded frames */
 
         size_t pkt_len = 13;
+        int encoded_frames = 0;
         for (int f = 0; f < frames_per_pkt; f++) {
             int16_t block_pcm[512];
             for (size_t s = 0; s < samples_per_frame; s++) {
@@ -1765,13 +1774,22 @@ static void drain_a2dp_pcm_and_transmit(void)
                                      &rtp_pkt[pkt_len], sizeof(rtp_pkt) - pkt_len, &written);
             if (res > 0 && written > 0) {
                 pkt_len += (size_t)written;
+                encoded_frames++;
+            } else {
+                bt_log("SBC encoder failed to produce a complete frame\n");
+                break;
             }
         }
 
+        if (encoded_frames == 0)
+            break;
+
+        rtp_pkt[12] = (uint8_t)encoded_frames;
         if (l2cap_send_pdu(cid_avdtp_med_remote, rtp_pkt, (uint16_t)pkt_len) < 0)
             break;
 
         pcm_ring_r = r;
+        rtp_timestamp += (uint32_t)(samples_per_frame * encoded_frames);
         pkts_sent++;
     }
 }
@@ -1801,6 +1819,7 @@ static void *bt_worker_thread(void *arg)
                 close(stpbt_fd);
                 stpbt_fd = -1;
                 reset_bt_session();
+                pending_switch_connect = false;
                 pthread_mutex_lock(&bt_mtx);
                 for (int i = 0; i < bt_num_devices; i++)
                     bt_devices[i].connected = false;
@@ -1852,6 +1871,8 @@ static void *bt_worker_thread(void *arg)
         /* Handle UI thread requests */
         if (req_disconnect) {
             req_disconnect = false;
+            req_connect = false;
+            pending_switch_connect = false;
             if (acl_handle != 0xFFFF) {
                 uint8_t disc[3] = { (uint8_t)(acl_handle & 0xFF), (uint8_t)(acl_handle >> 8), 0x13 };
                 hci_send_cmd(0x0406, disc, 3); /* HCI_Disconnect */
@@ -1870,6 +1891,34 @@ static void *bt_worker_thread(void *arg)
 
         if (req_connect) {
             req_connect = false;
+            if (acl_handle != 0xFFFF &&
+                !pending_switch_connect &&
+                memcmp(active_bdaddr, req_connect_bdaddr, sizeof(active_bdaddr)) == 0)
+                continue;
+
+            if (acl_handle != 0xFFFF) {
+                memcpy(pending_switch_bdaddr, req_connect_bdaddr,
+                       sizeof(pending_switch_bdaddr));
+                if (pending_switch_connect)
+                    continue;
+
+                pending_switch_connect = true;
+                uint8_t disc[3] = {
+                    (uint8_t)(acl_handle & 0xFF),
+                    (uint8_t)(acl_handle >> 8),
+                    0x13
+                };
+                if (hci_send_cmd(0x0406, disc, sizeof(disc)) < 0) {
+                    pending_switch_connect = false;
+                    bt_state = Y1_BT_STATE_ERROR;
+                    bt_log("Failed to disconnect before switching Bluetooth device\n");
+                } else {
+                    bt_state = Y1_BT_STATE_CONNECTING;
+                    bt_log("Disconnecting current device before switching Bluetooth device\n");
+                }
+                continue;
+            }
+
             if (bt_state == Y1_BT_STATE_SCANNING) {
                 hci_send_cmd(0x0402, NULL, 0); /* HCI_Inquiry_Cancel */
                 usleep(20000);
@@ -2185,6 +2234,13 @@ static inline int16_t bt_soft_clamp(int16_t sample)
     return sample;
 }
 
+static int16_t bt_resample_linear(int16_t a, int16_t b, uint32_t fraction)
+{
+    int32_t value = (int32_t)a * (int32_t)(65536 - fraction) +
+                    (int32_t)b * (int32_t)fraction;
+    return bt_soft_clamp((int16_t)(value / 65536));
+}
+
 /* Called from pcm-eac.c worker thread with 16-bit signed stereo PCM */
 void y1_bt_a2dp_write_pcm(const void *buf, size_t bytes, unsigned long sampr)
 {
@@ -2237,9 +2293,17 @@ void y1_bt_a2dp_write_pcm(const void *buf, size_t bytes, unsigned long sampr)
             if (((w - r) & (PCM_RING_SAMPLES - 1)) >= PCM_RING_SAMPLES - 2)
                 break;
             size_t s_idx = (pos_fp >> 16) * 2;
+            size_t next_s_idx = s_idx + 2;
+            if (next_s_idx >= in_frames * 2)
+                next_s_idx = s_idx;
+            uint32_t fraction = (uint32_t)(pos_fp & 0xFFFF);
             size_t d_idx = (w & (PCM_RING_SAMPLES - 1)) * 2;
-            pcm_ring[d_idx + 0] = bt_soft_clamp(src[s_idx + 0]);
-            pcm_ring[d_idx + 1] = bt_soft_clamp(src[s_idx + 1]);
+            pcm_ring[d_idx + 0] = bt_resample_linear(src[s_idx + 0],
+                                                     src[next_s_idx + 0],
+                                                     fraction);
+            pcm_ring[d_idx + 1] = bt_resample_linear(src[s_idx + 1],
+                                                     src[next_s_idx + 1],
+                                                     fraction);
             w = (w + 1) & (PCM_RING_SAMPLES - 1);
             pos_fp += step_fp;
         }
