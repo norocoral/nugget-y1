@@ -937,6 +937,8 @@ struct user_settings
     bool aod_wps_only;
     bool aod_playback_only;
     bool aod_important_events;
+    int aod_brightness;
+    int aod_timeout;
     bool scroll_abc;
     bool keyclick_wheel_only;
     bool keyclick_list_edge;

@@ -2053,7 +2053,7 @@ static bool tagtree_select_named_entry(struct tree_context *c,
     for (int i = 0; i < c->filesindir; i++)
     {
         struct tagentry *entry = tagtree_get_entry(c, i);
-        if (!strcmp(P2STR(entry->name), name))
+        if (!strcmp(P2STR((unsigned char *)entry->name), name))
         {
             c->selected_item = i;
             return true;

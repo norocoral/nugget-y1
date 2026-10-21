@@ -64,10 +64,16 @@ static const char * const sysfs_bl_power =
 #endif
 
 static int current_brightness = DEFAULT_BRIGHTNESS_SETTING;
+#if defined(BACKLIGHT_INNIOASIS)
+static long y1_aod_last_activity_tick;
+#endif
 
 bool backlight_hw_init(void)
 {
     current_brightness = DEFAULT_BRIGHTNESS_SETTING;
+#if defined(BACKLIGHT_INNIOASIS)
+    y1_aod_last_activity_tick = current_tick;
+#endif
     backlight_hw_on();
     backlight_hw_brightness(DEFAULT_BRIGHTNESS_SETTING);
 #ifdef HAVE_BUTTON_LIGHT
@@ -136,10 +142,42 @@ static void write_bl_hw(int val)
 
 static int y1_aod_brightness_level(void)
 {
-    int dimmed = current_brightness / 2;
-    if (dimmed < 5)
-        dimmed = 5;
-    return (dimmed * 255) / 100;
+    int brightness = global_settings.aod_brightness < 0 ?
+                     current_brightness / 2 :
+                     global_settings.aod_brightness;
+    brightness = MAX(0, MIN(brightness, 100));
+    return (brightness * 255) / 100;
+}
+
+static int y1_aod_timeout_seconds(void)
+{
+    static const int timeout_seconds[] = {
+        0, 5 * 60, 10 * 60, 30 * 60, 60 * 60, 2 * 60 * 60, 5 * 60 * 60
+    };
+    int choice = global_settings.aod_timeout;
+
+    if (choice < 0 || (unsigned)choice >= ARRAYLEN(timeout_seconds))
+        return 0;
+
+    return timeout_seconds[choice];
+}
+
+bool y1_aod_timeout_expired(void)
+{
+    int timeout = y1_aod_timeout_seconds();
+    return timeout > 0 &&
+           TIME_AFTER(current_tick, y1_aod_last_activity_tick + timeout * HZ);
+}
+
+void y1_aod_activity_notify(void)
+{
+    y1_aod_last_activity_tick = current_tick;
+}
+
+void y1_aod_timeout_setting_changed(int choice)
+{
+    (void)choice;
+    y1_aod_activity_notify();
 }
 
 static void y1_aod_set_level(int level)
@@ -150,6 +188,13 @@ static void y1_aod_set_level(int level)
         level = 255;
     y1_aod_level = level;
     write_bl_hw(level);
+}
+
+void y1_aod_brightness_setting_changed(int brightness)
+{
+    (void)brightness;
+    if (last_bl == BACKLIGHT_POWER_REDUCED && y1_should_always_on())
+        y1_aod_set_level(y1_aod_brightness_level());
 }
 
 static void y1_aod_begin_fade(int target)
@@ -268,6 +313,9 @@ void y1_aod_notify_event(void)
 
 static bool y1_aod_event_allowed(void)
 {
+    if (y1_aod_timeout_expired())
+        return false;
+
     if (global_settings.aod_wps_only &&
         get_current_activity() != ACTIVITY_WPS)
         return false;
@@ -402,9 +450,7 @@ void backlight_hw_off(void)
 #ifdef HAVE_LCD_ENABLE
             lcd_enable(true);
 #endif
-            int dimmed = current_brightness / 2;
-            if (dimmed < 5) dimmed = 5;
-            int hw_val = (dimmed * 255) / 100;
+            int hw_val = y1_aod_brightness_level();
             y1_aod_level = hw_val;
             write_bl_hw(hw_val);
             sysfs_set_int("/sys/class/leds/button-backlight/brightness", 0);
@@ -467,9 +513,7 @@ void backlight_hw_brightness(int brightness)
         int hw_val = (brightness * 255) / 100;
         write_bl_hw(hw_val);
     } else if (last_bl == BACKLIGHT_POWER_REDUCED && y1_should_always_on()) {
-        int dimmed = brightness / 2;
-        if (dimmed < 5) dimmed = 5;
-        y1_aod_level = (dimmed * 255) / 100;
+        y1_aod_level = y1_aod_brightness_level();
         write_bl_hw(y1_aod_level);
     }
 #else

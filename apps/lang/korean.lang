@@ -17232,6 +17232,118 @@
   </voice>
 </phrase>
 <phrase>
+  id: LANG_Y1_AOD_BRIGHTNESS
+  desc: in Settings -> Nugget -> Device
+  user: core
+  <source>
+    *: "AOD Brightness"
+  </source>
+  <dest>
+    *: "AOD 밝기"
+  </dest>
+  <voice>
+    *: "AOD 밝기"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_AOD_TIMEOUT
+  desc: in Settings -> Nugget -> Device
+  user: core
+  <source>
+    *: "AOD Timeout"
+  </source>
+  <dest>
+    *: "AOD 시간 제한"
+  </dest>
+  <voice>
+    *: "AOD 시간 제한"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_AOD_TIMEOUT_5M
+  desc: AOD timeout setting
+  user: core
+  <source>
+    *: "5 minutes"
+  </source>
+  <dest>
+    *: "5분"
+  </dest>
+  <voice>
+    *: "5분"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_AOD_TIMEOUT_10M
+  desc: AOD timeout setting
+  user: core
+  <source>
+    *: "10 minutes"
+  </source>
+  <dest>
+    *: "10분"
+  </dest>
+  <voice>
+    *: "10분"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_AOD_TIMEOUT_30M
+  desc: AOD timeout setting
+  user: core
+  <source>
+    *: "30 minutes"
+  </source>
+  <dest>
+    *: "30분"
+  </dest>
+  <voice>
+    *: "30분"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_AOD_TIMEOUT_1H
+  desc: AOD timeout setting
+  user: core
+  <source>
+    *: "1 hour"
+  </source>
+  <dest>
+    *: "1시간"
+  </dest>
+  <voice>
+    *: "1시간"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_AOD_TIMEOUT_2H
+  desc: AOD timeout setting
+  user: core
+  <source>
+    *: "2 hours"
+  </source>
+  <dest>
+    *: "2시간"
+  </dest>
+  <voice>
+    *: "2시간"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_AOD_TIMEOUT_5H
+  desc: AOD timeout setting
+  user: core
+  <source>
+    *: "5 hours"
+  </source>
+  <dest>
+    *: "5시간"
+  </dest>
+  <voice>
+    *: "5시간"
+  </voice>
+</phrase>
+<phrase>
   id: LANG_Y1_CPU_CORES
   desc: in Settings -> Nugget -> Device
   user: core

@@ -85,6 +85,8 @@
 extern void y1_set_resolution_setting(int mode);
 extern void y1_apply_resolution_setting(int mode);
 extern void y1_set_always_on_screen(bool on);
+extern void y1_aod_brightness_setting_changed(int brightness);
+extern void y1_aod_timeout_setting_changed(int timeout);
 #endif
 
 #define UNUSED {.RESERVED=NULL}
@@ -548,6 +550,26 @@ static const char* formatter_time_unit_0_is_off(char *buffer, size_t buffer_size
         return str(LANG_OFF);
     return buffer;
 }
+
+#if defined(INNIOASIS_Y1)
+static const char* formatter_aod_brightness(char *buffer, size_t buffer_size,
+                                            int value, const char *unit)
+{
+    if (value < 0)
+        return str(LANG_AUTO);
+
+    snprintf(buffer, buffer_size, "%d%s", value, unit);
+    return buffer;
+}
+
+static int32_t getlang_aod_brightness(int value, int unit)
+{
+    if (value < 0)
+        return LANG_AUTO;
+
+    return TALK_ID(value, unit);
+}
+#endif
 
 static int32_t getlang_time_unit_0_is_off(int value, int unit)
 {
@@ -2634,6 +2656,33 @@ const struct settings_list settings[] = {
                   false,
                   "aod important events",
                   NULL),
+    INT_SETTING(0,
+                aod_brightness,
+                LANG_Y1_AOD_BRIGHTNESS,
+                -1,
+                "aod brightness",
+                UNIT_PERCENT,
+                -1,
+                100,
+                1,
+                formatter_aod_brightness,
+                getlang_aod_brightness,
+                y1_aod_brightness_setting_changed),
+    CHOICE_SETTING(0,
+                   aod_timeout,
+                   LANG_Y1_AOD_TIMEOUT,
+                   0,
+                   "aod timeout",
+                   "off,5m,10m,30m,1hr,2hr,5hr",
+                   y1_aod_timeout_setting_changed,
+                   7,
+                   ID2P(LANG_OFF),
+                   ID2P(LANG_Y1_AOD_TIMEOUT_5M),
+                   ID2P(LANG_Y1_AOD_TIMEOUT_10M),
+                   ID2P(LANG_Y1_AOD_TIMEOUT_30M),
+                   ID2P(LANG_Y1_AOD_TIMEOUT_1H),
+                   ID2P(LANG_Y1_AOD_TIMEOUT_2H),
+                   ID2P(LANG_Y1_AOD_TIMEOUT_5H)),
     OFFON_SETTING(0,
                   scroll_abc,
                   LANG_Y1_SCROLL_ABC,

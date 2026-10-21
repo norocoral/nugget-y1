@@ -219,6 +219,8 @@ static long last_powersave_tick = 0;
 void y1_set_always_on_screen(bool on)
 {
     y1_always_on_enabled = on;
+    if (on)
+        y1_aod_activity_notify();
 }
 
 bool y1_is_always_on_screen(void)
@@ -235,6 +237,9 @@ bool y1_playback_active(void)
 bool y1_should_always_on(void)
 {
     if (!global_settings.always_on_screen)
+        return false;
+
+    if (y1_aod_timeout_expired())
         return false;
 
     if (global_settings.aod_wps_only && get_current_activity() != ACTIVITY_WPS)

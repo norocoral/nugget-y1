@@ -33,5 +33,7 @@ extern bool y1_is_display_power_saving(void);
 extern bool y1_playback_active(void);
 extern void y1_backlight_idle_check(void);
 extern void y1_aod_notify_event(void);
+extern void y1_aod_activity_notify(void);
+extern bool y1_aod_timeout_expired(void);
 
 #endif /* __LCD_TARGET_H__ */

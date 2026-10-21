@@ -1245,8 +1245,11 @@ static int get_action_worker(action_last_t *last, action_cur_t *cur)
     {
 #if defined(INNIOASIS_Y1) && !defined(BOOTLOADER)
         if (cur->button != BUTTON_NONE &&
-            !(cur->button & (BUTTON_REL | BUTTON_REPEAT)))
+            !(cur->button & (BUTTON_REL | BUTTON_REPEAT))) {
+            extern void y1_aod_activity_notify(void);
+            y1_aod_activity_notify();
             y1_aod_notify_event();
+        }
 #endif
         return cur->button;
     }

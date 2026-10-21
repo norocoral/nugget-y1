@@ -17373,6 +17373,118 @@
   </voice>
 </phrase>
 <phrase>
+  id: LANG_Y1_AOD_BRIGHTNESS
+  desc: in Settings -> Nugget -> Device
+  user: core
+  <source>
+    *: "AOD Brightness"
+  </source>
+  <dest>
+    *: "AOD Brightness"
+  </dest>
+  <voice>
+    *: "AOD brightness"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_AOD_TIMEOUT
+  desc: in Settings -> Nugget -> Device
+  user: core
+  <source>
+    *: "AOD Timeout"
+  </source>
+  <dest>
+    *: "AOD Timeout"
+  </dest>
+  <voice>
+    *: "AOD timeout"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_AOD_TIMEOUT_5M
+  desc: AOD timeout setting
+  user: core
+  <source>
+    *: "5 minutes"
+  </source>
+  <dest>
+    *: "5 minutes"
+  </dest>
+  <voice>
+    *: "5 minutes"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_AOD_TIMEOUT_10M
+  desc: AOD timeout setting
+  user: core
+  <source>
+    *: "10 minutes"
+  </source>
+  <dest>
+    *: "10 minutes"
+  </dest>
+  <voice>
+    *: "10 minutes"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_AOD_TIMEOUT_30M
+  desc: AOD timeout setting
+  user: core
+  <source>
+    *: "30 minutes"
+  </source>
+  <dest>
+    *: "30 minutes"
+  </dest>
+  <voice>
+    *: "30 minutes"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_AOD_TIMEOUT_1H
+  desc: AOD timeout setting
+  user: core
+  <source>
+    *: "1 hour"
+  </source>
+  <dest>
+    *: "1 hour"
+  </dest>
+  <voice>
+    *: "1 hour"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_AOD_TIMEOUT_2H
+  desc: AOD timeout setting
+  user: core
+  <source>
+    *: "2 hours"
+  </source>
+  <dest>
+    *: "2 hours"
+  </dest>
+  <voice>
+    *: "2 hours"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_AOD_TIMEOUT_5H
+  desc: AOD timeout setting
+  user: core
+  <source>
+    *: "5 hours"
+  </source>
+  <dest>
+    *: "5 hours"
+  </dest>
+  <voice>
+    *: "5 hours"
+  </voice>
+</phrase>
+<phrase>
   id: LANG_Y1_CPU_CORES
   desc: in Settings -> Nugget -> Device
   user: core
