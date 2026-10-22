@@ -312,7 +312,11 @@ cd "$BUILD_DIR"
 
 chmod +x "$ROCKBOX_SRC/tools/configure"
 
-if [[ ! -f Makefile ]]; then
+if [[ -f Makefile ]] && ! grep -Fqx 'export SHARED_CFLAGS=-fPIC -fvisibility=hidden' Makefile; then
+    echo "[*] Refreshing stale Y1 plugin build configuration..."
+    make clean
+    "$ROCKBOX_SRC/tools/configure" --target=310 --type=N
+elif [[ ! -f Makefile ]]; then
     "$ROCKBOX_SRC/tools/configure" --target=310 --type=N
 fi
 

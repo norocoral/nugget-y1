@@ -89,10 +89,12 @@
 #define CID_AVCTP_LOCAL      0x0043
 
 static pthread_mutex_t bt_mtx = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t bt_enable_mtx = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t bt_enable_cond = PTHREAD_COND_INITIALIZER;
 static pthread_t bt_thread;
 static bool bt_thread_started = false;
 
-static volatile bool bt_target_enabled = false;
+static bool bt_target_enabled = false;
 static volatile enum y1_bt_state bt_state = Y1_BT_STATE_OFF;
 static int stpbt_fd = -1;
 
@@ -108,6 +110,30 @@ static uint8_t req_connect_bdaddr[6];
 static volatile bool req_disconnect = false;
 static bool pending_switch_connect;
 static uint8_t pending_switch_bdaddr[6];
+
+static bool bt_is_target_enabled(void)
+{
+    pthread_mutex_lock(&bt_enable_mtx);
+    bool enabled = bt_target_enabled;
+    pthread_mutex_unlock(&bt_enable_mtx);
+    return enabled;
+}
+
+static void bt_set_target_enabled(bool enabled)
+{
+    pthread_mutex_lock(&bt_enable_mtx);
+    bt_target_enabled = enabled;
+    pthread_cond_broadcast(&bt_enable_cond);
+    pthread_mutex_unlock(&bt_enable_mtx);
+}
+
+static void bt_wait_until_enabled(void)
+{
+    pthread_mutex_lock(&bt_enable_mtx);
+    while (!bt_target_enabled)
+        pthread_cond_wait(&bt_enable_cond, &bt_enable_mtx);
+    pthread_mutex_unlock(&bt_enable_mtx);
+}
 
 /* Active ACL + L2CAP + AVDTP state */
 static uint16_t acl_handle = 0xFFFF;
@@ -1569,12 +1595,12 @@ static void handle_hci_event(const uint8_t *pkt, size_t len)
             pthread_mutex_lock(&bt_mtx);
             for (int i = 0; i < bt_num_devices; i++)
                 bt_devices[i].connected = false;
-            if (bt_target_enabled)
+            if (bt_is_target_enabled())
                 bt_state = Y1_BT_STATE_IDLE;
             pthread_mutex_unlock(&bt_mtx);
             bt_log("ACL Disconnected\n");
             y1_bt_audio_disconnect_hook();
-            if (pending_switch_connect && bt_target_enabled) {
+            if (pending_switch_connect && bt_is_target_enabled()) {
                 memcpy(req_connect_bdaddr, pending_switch_bdaddr,
                        sizeof(req_connect_bdaddr));
                 pending_switch_connect = false;
@@ -1883,7 +1909,7 @@ static void *bt_worker_thread(void *arg)
 
     while (1)
     {
-        if (!bt_target_enabled)
+        if (!bt_is_target_enabled())
         {
             if (stpbt_fd >= 0) {
                 if (acl_handle != 0xFFFF) {
@@ -1904,7 +1930,7 @@ static void *bt_worker_thread(void *arg)
                 bt_log("Closed /dev/stpbt (MT6572 BT Radio powered down)\n");
             }
             bt_autoconnect_attempted = false;
-            usleep(100000);
+            bt_wait_until_enabled();
             continue;
         }
 
@@ -1914,7 +1940,7 @@ static void *bt_worker_thread(void *arg)
             rx_len = 0;
             if (!mt6572_bt_hw_open_and_init()) {
                 bt_state = Y1_BT_STATE_ERROR;
-                bt_target_enabled = false;
+                bt_set_target_enabled(false);
                 continue;
             }
             bt_state = Y1_BT_STATE_IDLE;
@@ -2088,7 +2114,7 @@ void y1_bt_init(void)
 {
     pthread_mutex_lock(&bt_mtx);
     if (!bt_thread_started) {
-        bt_target_enabled = global_settings.bt_enabled;
+        bt_set_target_enabled(global_settings.bt_enabled);
         bt_thread_started = true;
         pthread_create(&bt_thread, NULL, bt_worker_thread, NULL);
     }
@@ -2098,12 +2124,12 @@ void y1_bt_init(void)
 void y1_bt_set_enabled(bool enable)
 {
     y1_bt_init();
-    bt_target_enabled = enable;
+    bt_set_target_enabled(enable);
 }
 
 bool y1_bt_is_enabled(void)
 {
-    return bt_target_enabled;
+    return bt_is_target_enabled();
 }
 
 enum y1_bt_state y1_bt_get_state(void)
@@ -2141,7 +2167,7 @@ const char *y1_bt_get_connected_name(void)
 
 int y1_bt_start_scan(void)
 {
-    if (!bt_target_enabled) {
+    if (!bt_is_target_enabled()) {
         y1_bt_set_enabled(true);
     }
     req_scan = true;
@@ -2195,7 +2221,7 @@ int y1_bt_get_new_devices(struct y1_bt_device *out_devs, int max_devs)
 
 int y1_bt_connect_device(const uint8_t bdaddr[6])
 {
-    if (!bt_target_enabled)
+    if (!bt_is_target_enabled())
         y1_bt_set_enabled(true);
     memcpy(req_connect_bdaddr, bdaddr, 6);
     req_connect = true;
@@ -2204,7 +2230,7 @@ int y1_bt_connect_device(const uint8_t bdaddr[6])
 
 int y1_bt_connect_device_with_pin(const uint8_t bdaddr[6], const char *pin)
 {
-    if (!bt_target_enabled)
+    if (!bt_is_target_enabled())
         y1_bt_set_enabled(true);
 
     pthread_mutex_lock(&bt_mtx);
