@@ -932,6 +932,7 @@ struct user_settings
     int y1_cpu_mode;
     int y1_cpu_cores;
     bool y1_screen_off_cpu_save;
+    bool y1_logging_enabled;
     int y1_screen_resolution;
     bool always_on_screen;
     bool aod_wps_only;

@@ -36,6 +36,7 @@
 #include "kernel.h"
 #include "button.h"
 #include "settings.h"
+#include "y1-log.h"
 #include "bt-y1.h"
 #include "sbc/sbc.h"
 
@@ -165,18 +166,7 @@ static int  resolve_idx = 0;
 /* Logging helper */
 static void bt_log(const char *msg)
 {
-    int kfd = open("/dev/kmsg", O_WRONLY | O_CLOEXEC);
-    if (kfd >= 0) {
-        (void)!write(kfd, "<6>[bt-y1] ", 11);
-        (void)!write(kfd, msg, strlen(msg));
-        close(kfd);
-    }
-
-    int dfd = open("/mnt/sdcard/bt_debug.txt", O_WRONLY | O_CREAT | O_APPEND, 0666);
-    if (dfd >= 0) {
-        (void)!write(dfd, msg, strlen(msg));
-        close(dfd);
-    }
+    y1_log(msg);
 }
 
 static void format_bdaddr(const uint8_t bd[6], char *out, size_t out_sz)

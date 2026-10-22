@@ -5,13 +5,11 @@
  *  - Devtmpfs and device node auto-discovery (/dev/graphics/fb0 <-> /dev/fb0)
  *  - Dynamic Physical MicroSD discovery via /proc/partitions (waiting up to 5s for SDXC)
  *  - Exclusive Physical SD card primary mounting (eMMC virtual SD is excluded per design)
- *  - Multi-partition MicroSD & USB storage automounting
+ *  - Multi-partition physical MicroSD mounting at boot
  *  - USB Mass Storage & LUN initialization for PC music transfer (Windows/Mac/Linux)
- *  - MT6323 Headphone Amplifier hardware unmute & MTK AFE/AIF audio clocks
  *  - Click wheel touch scanning activation (/proc/tpd_keys_enable)
- *  - Persistent early boot logging to /mnt/sdcard/boot_log.txt and /dev/kmsg
+ *  - Optional diagnostic logging to /mnt/sdcard/y1_debug.txt and /dev/kmsg
  *  - Hardware Framebuffer unblanking & visual splash verification
- *  - Background hotplug automounter daemon
  *  - Execution of /rockbox with error recovery
  */
 
@@ -34,87 +32,64 @@
 #include <dirent.h>
 #include <sys/wait.h>
 
-#define SET_SPEAKER_OFF     0x400443a2
-#define SET_HEADPHONE_ON    0x400443a4
-#define SET_EARPIECE_OFF    0x400443a7
-#define AUDDRV_SET_ANAREG   0xc0044302
-#define AUDDRV_GET_ANAREG   0xc0044303
-#define AUD_DRV_AFE_CLK     0xc0044355
-#define AUD_DRV_AIF_CLK     0xc0044351
-
-struct Register_Control {
-    uint32_t offset;
-    uint32_t value;
-    uint32_t mask;
-};
-
-static void set_anareg(int fd, uint32_t offset, uint32_t val, uint32_t mask)
-{
-    struct Register_Control reg = { offset, val, mask };
-    ioctl(fd, AUDDRV_SET_ANAREG, &reg);
-}
-
-static inline uint32_t get_anareg(int fd, uint32_t offset)
-{
-    struct Register_Control reg = { offset, 0, ~0U };
-    if (ioctl(fd, AUDDRV_GET_ANAREG, &reg) == 0)
-        return reg.value;
-    return 0;
-}
-
-static inline void top_ctl_trigger(int fd)
-{
-    uint32_t val = get_anareg(fd, 0x4016);
-    uint32_t toggle = ((~val) << 8) & 0x300;
-    set_anareg(fd, 0x4016, toggle, 0x300);
-}
-
 #ifndef VESA_NO_BLANKING
 #define VESA_NO_BLANKING 0
 #endif
 
-static int log_fd = -1;
-static char early_log_buf[8192];
-static size_t early_log_len = 0;
-
 static char active_sd_dev[64] = {0};
 static char active_ext_dev[64] = {0};
+static char early_log_buf[8192];
+static size_t early_log_len;
+
+static int logging_enabled_from_config(void)
+{
+    FILE *fp = fopen("/mnt/sdcard/.rockbox/config.cfg", "r");
+    if (!fp)
+        return 0;
+
+    char line[128];
+    char value[16];
+    int enabled = 0;
+    while (fgets(line, sizeof(line), fp)) {
+        if (sscanf(line, "y1 logging: %15s", value) == 1) {
+            enabled = strcmp(value, "on") == 0;
+            break;
+        }
+    }
+    fclose(fp);
+    return enabled;
+}
 
 static void log_line(const char *msg)
 {
+    if (!logging_enabled_from_config()) {
+        size_t len = strlen(msg);
+        if (early_log_len + len < sizeof(early_log_buf)) {
+            memcpy(early_log_buf + early_log_len, msg, len);
+            early_log_len += len;
+        }
+        return;
+    }
+
     size_t len = strlen(msg);
 
-    /* 1. Write to stdout */
+    int fd = open("/mnt/sdcard/y1_debug.txt",
+                  O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0666);
+    if (fd >= 0) {
+        if (early_log_len > 0) {
+            (void)!write(fd, early_log_buf, early_log_len);
+            early_log_len = 0;
+        }
+        (void)!write(fd, msg, len);
+        close(fd);
+    }
+
     (void)!write(1, msg, len);
-
-    /* 2. Buffer early log before persistent storage is mounted */
-    if (log_fd < 0 && early_log_len + len < sizeof(early_log_buf)) {
-        memcpy(early_log_buf + early_log_len, msg, len);
-        early_log_len += len;
-        early_log_buf[early_log_len] = '\0';
-    }
-
-    /* 3. Write to persistent boot log */
-    if (log_fd >= 0) {
-        (void)!write(log_fd, msg, len);
-        fsync(log_fd);
-    }
-
-    /* 4. Write to kernel ring buffer */
     int kfd = open("/dev/kmsg", O_WRONLY | O_CLOEXEC);
     if (kfd >= 0) {
         (void)!write(kfd, "<6>[init] ", 10);
         (void)!write(kfd, msg, len);
         close(kfd);
-    }
-}
-
-static void flush_early_log(void)
-{
-    if (log_fd >= 0 && early_log_len > 0) {
-        (void)!write(log_fd, early_log_buf, early_log_len);
-        fsync(log_fd);
-        early_log_len = 0;
     }
 }
 
@@ -329,8 +304,8 @@ static void link_sdcard_to_root(void)
     closedir(d);
 }
 
-/* Full storage scanner & automounter (Physical MicroSD only, eMMC excluded) */
-static void scan_and_mount_storage(int verbose)
+/* Mount physical MicroSD storage once during boot (eMMC excluded). */
+static void mount_storage_at_boot(int verbose)
 {
     scan_proc_partitions_and_create_nodes();
 
@@ -376,22 +351,13 @@ static void scan_and_mount_storage(int verbose)
             }
         }
 
-        /* If mounted, setup standard compatibility symlinks & open boot log */
+        /* If mounted, setup standard compatibility symlinks. */
         if (is_mounted("/mnt/sdcard")) {
             mkdir("/storage", 0755);
             unlink("/storage/sdcard0");
             (void)!symlink("/mnt/sdcard", "/storage/sdcard0");
             unlink("/sdcard");
             (void)!symlink("/mnt/sdcard", "/sdcard");
-
-            if (log_fd < 0) {
-                log_fd = open("/mnt/sdcard/boot_log.txt", O_WRONLY | O_CREAT | O_APPEND, 0666);
-                if (log_fd >= 0) {
-                    flush_early_log();
-                    dup2(log_fd, 1);
-                    dup2(log_fd, 2);
-                }
-            }
 
             link_sdcard_to_root();
         }
@@ -443,37 +409,7 @@ static void scan_and_mount_storage(int verbose)
         (void)!symlink("/mnt/extsd", "/mnt/external_sd");
     }
 
-    /* 3. Scan and mount USB OTG drives (sda1..p8 or raw sda) */
-    int usb_count = 0;
-    for (int p = 1; p <= 8; p++) {
-        char devpath[64], mntpath[64], linkpath[64];
-        snprintf(devpath, sizeof(devpath), "/dev/block/sda%d", p);
-        if (access(devpath, F_OK) != 0) {
-            snprintf(devpath, sizeof(devpath), "/dev/sda%d", p);
-        }
-        if (access(devpath, F_OK) == 0) {
-            if (usb_count == 0) {
-                snprintf(mntpath, sizeof(mntpath), "/mnt/usb");
-                snprintf(linkpath, sizeof(linkpath), "/mnt/sdcard/USB");
-            } else {
-                snprintf(mntpath, sizeof(mntpath), "/mnt/usb%d", usb_count + 1);
-                snprintf(linkpath, sizeof(linkpath), "/mnt/sdcard/USB%d", usb_count + 1);
-            }
-            if (is_mounted(mntpath) || try_mount_storage(devpath, mntpath) == 0) {
-                usb_count++;
-                unlink(linkpath);
-                (void)!symlink(mntpath, linkpath);
-                if (verbose) {
-                    char logmsg[256];
-                    snprintf(logmsg, sizeof(logmsg), "Mounted USB storage (%s) on %s, linked %s\n",
-                             devpath, mntpath, linkpath);
-                    log_line(logmsg);
-                }
-            }
-        }
-    }
-
-    /* 4. Update USB gadget LUN0 backing file dynamically */
+    /* Keep the PC mass-storage gadget backed by the boot-mounted SD card. */
     if (access("/sys/class/android_usb/android0/f_mass_storage/lun0/file", F_OK) == 0) {
         const char *lun_target = NULL;
         if (access("/dev/block/mmcblk1", F_OK) == 0) {
@@ -653,88 +589,6 @@ static void display_screen(const char *name)
         log_line("ERROR: mmap framebuffer failed during display screen!\n");
     }
 
-    close(fd);
-}
-
-static int setup_eac_node(void)
-{
-    int maj = 10, min = -1;
-    FILE *fp = fopen("/sys/class/misc/eac/dev", "r");
-    if (fp) {
-        if (fscanf(fp, "%d:%d", &maj, &min) == 2 && min >= 0) {
-            char msg[128];
-            snprintf(msg, sizeof(msg), "Discovered /dev/eac from sysfs: major %d, minor %d\n", maj, min);
-            log_line(msg);
-        }
-        fclose(fp);
-    }
-    if (min < 0) {
-        log_line("Notice: /sys/class/misc/eac/dev not available, using fallback minor 255\n");
-        min = 255;
-    }
-    unlink("/dev/eac");
-    mknod("/dev/eac", S_IFCHR | 0666, makedev(maj, min));
-    return min;
-}
-
-static void unmute_audio(void)
-{
-    log_line("Initializing MTK Audio hardware & clocks...\n");
-    setup_eac_node();
-    int fd = open("/dev/eac", O_RDWR | O_CLOEXEC);
-    if (fd < 0) {
-        char errbuf[128];
-        snprintf(errbuf, sizeof(errbuf), "ERROR: open(/dev/eac) failed: %s (errno=%d)\n", strerror(errno), errno);
-        log_line(errbuf);
-        return;
-    }
-    log_line("Successfully opened /dev/eac for audio unmute.\n");
-    /* Turn on hardware audio clocks on SoC */
-    ioctl(fd, AUD_DRV_AFE_CLK, 1);
-    ioctl(fd, AUD_DRV_AIF_CLK, 1);
-
-    /* Route to Headphone amplifier and mute unused */
-    ioctl(fd, SET_SPEAKER_OFF, 0);
-    ioctl(fd, SET_EARPIECE_OFF, 0);
-
-    /* Power up MT6323 PMIC Audio Clocks */
-    set_anareg(fd, 0x106, 1, 0xffff);        /* PMIC TOP_CKPDN_CON0: Power on audio clock */
-    set_anareg(fd, 0x10c, 0x100, 0x100);    /* PMIC TOP_CKG_CON1 bit 8: Audio 13M clock gating */
-
-    /* Power up MT6323 PMIC Audio Downlink DAC & Clocks */
-    set_anareg(fd, 0x700, 0x7800, 0x7f80);
-    set_anareg(fd, 0x704, 0x00f0, 0x00ff);
-    set_anareg(fd, 0x702, 0x0500, 0x0700); /* Maximum preamp buffer gain Right (5 << 8) */
-    set_anareg(fd, 0x700, 0x0050, 0x0070); /* Maximum preamp buffer gain Left (5 << 4) */
-    set_anareg(fd, 0x710, 0x0008, 0x0008);
-    set_anareg(fd, 0x700, 0x0180, 0x0180);
-    set_anareg(fd, 0x704, 0x0003, 0x0003);
-
-    /* Power up MT6323 PMIC Headphone Amplifier */
-    set_anareg(fd, 0x70c, 0xf7f2, 0xffff);
-    set_anareg(fd, 0x700, 0x7000, 0xf000);
-    set_anareg(fd, 0x70a, 0x0014, 0xffff);
-    set_anareg(fd, 0x708, 0x007c, 0xffff);
-    usleep(10000);
-    set_anareg(fd, 0x70c, 0xf5ba, 0xffff);
-    set_anareg(fd, 0x70a, 0x7714, 0xffff); /* Max +14dB analog gain Left & Right, Headphone powered */
-
-    /* Configure MT6323 PMIC Digital Audio Downlink (NewIF & Codec) */
-    set_anareg(fd, 0x4024, (7 << 12) | 0x330, 0xffff); /* PMIC NewIF DL 44.1kHz (0x7330) */
-    set_anareg(fd, 0x4002, 9, 0x0f);                   /* PMIC Codec DL 44.1kHz */
-    set_anareg(fd, 0x4006, 0, 0xffff);                 /* PMIC DL Left digital gain: 0dB */
-    set_anareg(fd, 0x4008, 0, 0xffff);                 /* PMIC DL Right digital gain: 0dB */
-    set_anareg(fd, 0x4014, 1, 1);                      /* PMIC Downlink channel enable */
-
-    /* PMIC CDC Clock Synchronization & Master Enable */
-    top_ctl_trigger(fd);
-    set_anareg(fd, 0x4000, 1, 1);                      /* PMIC TOP_CON0: Audio Digital Master ON */
-
-    if (ioctl(fd, SET_HEADPHONE_ON, 3) == 0) {
-        log_line("MT6323 Headphone amplifier powered ON (Stereo L+R).\n");
-    } else {
-        log_line("Warning: SET_HEADPHONE_ON ioctl failed.\n");
-    }
     close(fd);
 }
 
@@ -1038,7 +892,6 @@ int main(int argc, char *argv[])
     mkdir("/mnt", 0755);
     mkdir("/mnt/sdcard", 0755);
     mkdir("/mnt/extsd", 0755);
-    mkdir("/mnt/usb", 0755);
 
     log_line("=================================================\n");
     log_line("   Innioasis Y1 Hosted Rockbox Linux Boot       \n");
@@ -1067,15 +920,14 @@ int main(int argc, char *argv[])
         display_screen("sdcard");
     }
 
-    /* 6. Mount physical MicroSD, secondary partitions, USB storage, and setup symlinks */
-    scan_and_mount_storage(1);
+    /* 6. Mount physical MicroSD and its secondary partitions. */
+    mount_storage_at_boot(1);
 
     /* 7. Apply aggressive battery and power saving optimizations */
     optimize_power_and_battery();
 
     /* 8. Hardware initialization, Bluetooth WMT/STP subsystem, & USB Gadget */
     enable_touch_keys();
-    unmute_audio();
     init_bluetooth_subsystem();
     setup_usb_gadget(active_sd_dev[0] ? active_sd_dev : NULL,
                      active_ext_dev[0] ? active_ext_dev : NULL);
@@ -1085,21 +937,8 @@ int main(int argc, char *argv[])
     int waited_for_rockbox = 0;
     const char *last_screen = card_found ? "boot" : "sdcard";
 
-    /* Start background automounter daemon for hotplugging */
-    pid_t am_pid = fork();
-    if (am_pid == 0) {
-        while (1) {
-            sleep(2);
-            scan_and_mount_storage(0);
-        }
-        _exit(0);
-    }
-
     while (1) {
         while (!rockbox_found) {
-            write_sysfs("/proc/sys/vm/drop_caches", "3\n");
-            scan_and_mount_storage(0);
-
             if (has_sdcard_rockbox()) {
                 unlink("/.rockbox");
                 if (symlink("/mnt/sdcard/.rockbox", "/.rockbox") == 0) {
@@ -1143,7 +982,6 @@ int main(int argc, char *argv[])
         setenv("TERM", "linux", 1);
 
         log_line("Launching Rockbox application from the MicroSD card...\n");
-        if (log_fd >= 0) fsync(log_fd);
 
         pid_t rb_pid = fork();
         if (rb_pid == 0) {
@@ -1166,8 +1004,8 @@ int main(int argc, char *argv[])
             } else {
                 log_line("Rockbox exited normally.\n");
             }
-            log_line(crash_msg);
-            if (log_fd >= 0) fsync(log_fd);
+            if (crashed)
+                log_line(crash_msg);
         } else {
             crashed = 1;
             log_line("CRITICAL: Failed to fork Rockbox process!\n");
@@ -1185,9 +1023,6 @@ int main(int argc, char *argv[])
          * - If .rockbox missing: sdcard.raw
          * - When issues are resolved, seamlessly continue operation! */
         while (1) {
-            write_sysfs("/proc/sys/vm/drop_caches", "3\n");
-            scan_and_mount_storage(0);
-
             int usb_to_pc = 0;
             int ufd = open("/sys/class/android_usb/android0/state", O_RDONLY);
             if (ufd >= 0) {

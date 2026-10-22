@@ -32,6 +32,7 @@
 #include "settings.h"
 #include "misc.h"
 #include "audio.h"
+#include "y1-log.h"
 
 #ifndef VESA_NO_BLANKING
 #define VESA_NO_BLANKING 0
@@ -73,12 +74,7 @@ fb_data *framebuffer = NULL; /* global variable referenced by lcd-memframe / lcd
 
 static void klog(const char *msg)
 {
-    int kfd = open("/dev/kmsg", O_WRONLY | O_CLOEXEC);
-    if (kfd >= 0) {
-        write(kfd, msg, strlen(msg));
-        close(kfd);
-    }
-    write(1, msg, strlen(msg));
+    y1_log(msg);
 }
 
 static inline uint32_t rgb565_to_xrgb8888_calc(uint32_t px)

@@ -35,6 +35,9 @@
 #include "kernel.h"
 #include "misc.h"
 #include "settings.h"
+#if defined(INNIOASIS_Y1)
+#include "innioasis/y1/y1-log.h"
+#endif
 
 #if defined(BACKLIGHT_RG_NANO)
 static const char * const sysfs_bl_brightness =
@@ -543,8 +546,10 @@ void lcd_sleep(void)
 #endif
 
     /* Suspend to RAM until a key wakes the kernel. Playback never reaches here. */
-    sysfs_set_string("/sys/power/state", "mem");
-    sysfs_set_string("/sys/power/state", "on");
+    if (!sysfs_set_string("/sys/power/state", "mem"))
+        y1_log("Y1: failed to request suspend via /sys/power/state\n");
+    if (!sysfs_set_string("/sys/power/state", "on"))
+        y1_log("Y1: failed to restore /sys/power/state after wake\n");
 }
 #else
 void lcd_awake(void)

@@ -27,6 +27,7 @@
 #include "sysfs.h"
 #include "settings.h"
 #include "powermgmt.h"
+#include "y1-log.h"
 
 #ifndef KEY_HEADSETHOOK
 #define KEY_HEADSETHOOK 226
@@ -59,11 +60,7 @@ static bool phys_play_poweroff_fired = false;
 
 static void y1_kmsg_log(const char *msg)
 {
-    int kfd = open("/dev/kmsg", O_WRONLY | O_CLOEXEC);
-    if (kfd >= 0) {
-        (void)!write(kfd, msg, strlen(msg));
-        close(kfd);
-    }
+    y1_log(msg);
 }
 
 static inline int mfb_action_to_multimedia_btn(int action)

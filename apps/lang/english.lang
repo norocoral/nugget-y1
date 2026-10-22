@@ -17513,6 +17513,20 @@
   </voice>
 </phrase>
 <phrase>
+  id: LANG_Y1_LOGGING
+  desc: in Settings -> Nugget -> Device
+  user: core
+  <source>
+    *: "Diagnostic Logging"
+  </source>
+  <dest>
+    *: "Diagnostic Logging"
+  </dest>
+  <voice>
+    *: "Diagnostic logging"
+  </voice>
+</phrase>
+<phrase>
   id: LANG_Y1_HEADPHONE_REMOTE
   desc: in Settings -> Nugget -> Device
   user: core

@@ -42,6 +42,7 @@
 #include "pcm_sw_volume.h"
 #include "audiohw.h"
 #include "bt-y1.h"
+#include "y1-log.h"
 
 #define SET_SPEAKER_OFF          0x400443a2
 #define SET_HEADPHONE_ON         0x400443a4
@@ -159,23 +160,7 @@ static inline void top_ctl_trigger(int fd)
 
 static void log_audio_debug(const char *msg)
 {
-    /* 1. Write to stderr (redirected to /mnt/sdcard/boot_log.txt) */
-    fputs(msg, stderr);
-
-    /* 2. Write to persistent audio_debug.txt */
-    int dfd = open("/mnt/sdcard/audio_debug.txt", O_WRONLY | O_CREAT | O_APPEND, 0666);
-    if (dfd >= 0) {
-        (void)!write(dfd, msg, strlen(msg));
-        close(dfd);
-    }
-
-    /* 3. Write to /dev/kmsg */
-    int kfd = open("/dev/kmsg", O_WRONLY | O_CLOEXEC);
-    if (kfd >= 0) {
-        (void)!write(kfd, "<6>[pcm-eac] ", 13);
-        (void)!write(kfd, msg, strlen(msg));
-        close(kfd);
-    }
+    y1_log(msg);
 }
 
 static bool y1_write_power_state(const char *value)

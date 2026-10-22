@@ -470,6 +470,7 @@ MENUITEM_SETTING(y1_scroll_abc_item, &global_settings.scroll_abc, NULL);
 MENUITEM_SETTING(y1_cpu_mode_setting, &global_settings.y1_cpu_mode, NULL);
 MENUITEM_SETTING(y1_cpu_cores_setting, &global_settings.y1_cpu_cores, NULL);
 MENUITEM_SETTING(y1_screen_off_cpu_save_item, &global_settings.y1_screen_off_cpu_save, NULL);
+MENUITEM_SETTING(y1_logging_item, &global_settings.y1_logging_enabled, NULL);
 MENUITEM_SETTING(y1_bt_enable_item, &global_settings.bt_enabled, NULL);
 
 static bool keyclick_custom_sound_show_item(char *name, int attr,
@@ -829,6 +830,7 @@ MAKE_MENU(nugget_device_menu, ID2P(LANG_DEVICE), 0, Icon_NOICON,
           &y1_cpu_mode_setting,
           &y1_cpu_cores_setting,
           &y1_screen_off_cpu_save_item,
+          &y1_logging_item,
           &nugget_headphone_menu);
 
 MAKE_MENU(nugget_menu, ID2P(LANG_NUGGET), 0, Icon_NOICON,
