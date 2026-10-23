@@ -82,6 +82,13 @@
 #if defined(INNIOASIS_Y1)
 #include "cpufreq-y1.h"
 #include "bt-y1.h"
+
+static void bt_receiver_full_volume_setting_changed(bool enabled)
+{
+    (void)enabled;
+    if (y1_bt_is_receiver_mode())
+        sound_set_volume(global_status.volume);
+}
 extern void y1_set_resolution_setting(int mode);
 extern void y1_apply_resolution_setting(int mode);
 extern void y1_set_always_on_screen(bool on);
@@ -2804,6 +2811,24 @@ const struct settings_list settings[] = {
                   false,
                   "bluetooth",
                   y1_bt_set_enabled),
+    OFFON_SETTING(0,
+                  bt_receiver_auto_start,
+                  LANG_Y1_BT_RECEIVER_AUTO_START,
+                  false,
+                  "bt receiver auto start",
+                  NULL),
+    OFFON_SETTING(0,
+                  bt_receiver_auto_connect,
+                  LANG_Y1_BT_RECEIVER_AUTO_CONNECT,
+                  false,
+                  "bt receiver auto connect",
+                  NULL),
+    OFFON_SETTING(0,
+                  bt_receiver_full_volume,
+                  LANG_Y1_BT_RECEIVER_FULL_VOLUME,
+                  false,
+                  "bt receiver full volume",
+                  bt_receiver_full_volume_setting_changed),
 #endif
 #if !defined(SIMULATOR) && !defined(USB_NONE) && (defined(HAVE_USB_ADB) || defined(HAVE_USB_POWER))
     CHOICE_SETTING(0,

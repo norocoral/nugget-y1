@@ -35,6 +35,10 @@
 #include "sysfs.h"
 #include "button.h"
 #include "panic.h"
+#if defined(INNIOASIS_Y1)
+#include "innioasis/y1/button-target.h"
+#include "innioasis/y1/y1-log.h"
+#endif
 
 #ifdef HAVE_SCROLLWHEEL
 #include "powermgmt.h"
@@ -57,6 +61,64 @@
 static int num_devices = 0;
 static struct pollfd poll_fds[NR_POLL_DESC];
 static bool is_accdet_dev[NR_POLL_DESC];
+#if defined(INNIOASIS_Y1)
+static bool center_button_wakeup_enabled;
+
+static bool y1_enable_center_button_wakeup(int event_number)
+{
+    static const unsigned int center_keys[] = {
+        232, KEY_ENTER, KEY_KPENTER, KEY_OK, KEY_SELECT,
+        BTN_SELECT, BTN_START, BTN_A
+    };
+    const size_t bits_per_word = sizeof(unsigned long) * 8;
+    unsigned long key_bits[KEY_MAX / (sizeof(unsigned long) * 8) + 1];
+    memset(key_bits, 0, sizeof(key_bits));
+
+    if (ioctl(poll_fds[event_number].fd, EVIOCGBIT(EV_KEY, sizeof(key_bits)),
+              key_bits) < 0)
+        return false;
+
+    bool has_center_key = false;
+    for (size_t i = 0; i < sizeof(center_keys) / sizeof(center_keys[0]); i++) {
+        unsigned int key = center_keys[i];
+        if (key <= KEY_MAX &&
+            (key_bits[key / bits_per_word] & (1UL << (key % bits_per_word)))) {
+            has_center_key = true;
+            break;
+        }
+    }
+
+    if (!has_center_key)
+        return false;
+
+    char path[96];
+    snprintf(path, sizeof(path),
+             "/sys/class/input/event%d/device/power/wakeup", event_number);
+    int fd = open(path, O_WRONLY | O_CLOEXEC);
+    if (fd < 0)
+        return false;
+
+    static const char enabled[] = "enabled\n";
+    ssize_t written = write(fd, enabled, sizeof(enabled) - 1);
+    close(fd);
+    if (written != (ssize_t)(sizeof(enabled) - 1))
+        return false;
+
+    fd = open(path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0)
+        return false;
+
+    char state[16] = { 0 };
+    ssize_t length = read(fd, state, sizeof(state) - 1);
+    close(fd);
+    return length >= 7 && !strncmp(state, "enabled", 7);
+}
+
+bool button_center_wakeup_available(void)
+{
+    return center_button_wakeup_enabled;
+}
+#endif
 
 void button_add_input_device(int i)
 {
@@ -105,6 +167,11 @@ void button_add_input_device(int i)
             is_accdet_dev[i] = true;
         }
 
+#if defined(INNIOASIS_Y1)
+        if (y1_enable_center_button_wakeup(i))
+            center_button_wakeup_enabled = true;
+#endif
+
         char logmsg[160];
         snprintf(logmsg, sizeof(logmsg), "[button-devinput] Opened %s (name='%s', accdet=%d, fd=%d)\n",
                  path, dev_name, is_accdet_dev[i] ? 1 : 0, fd);
@@ -119,11 +186,18 @@ void button_add_input_device(int i)
 void button_init_device(void)
 {
     num_devices = 0;
+#if defined(INNIOASIS_Y1)
+    center_button_wakeup_enabled = false;
+#endif
     for(int i = 0; i < NR_POLL_DESC; i++)
     {
         poll_fds[i].fd = -1;
         button_add_input_device(i);
     }
+#if defined(INNIOASIS_Y1)
+    if (!center_button_wakeup_enabled)
+        y1_log("[button-devinput] Center-button wake source unavailable; suspend disabled\n");
+#endif
 #if defined(HAVE_CUSTOM_KEY_HANDLER)
     y1_mfb_init();
 #endif

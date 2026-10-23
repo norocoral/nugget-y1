@@ -971,6 +971,9 @@ struct user_settings
     int mfb_hold_5s;
     bool double_click_unhold;
     bool bt_enabled;
+    bool bt_receiver_auto_start;
+    bool bt_receiver_auto_connect;
+    bool bt_receiver_full_volume;
 #endif
 #if !defined(SIMULATOR) && !defined(USB_NONE) && (defined(HAVE_USB_ADB) || defined(HAVE_USB_POWER))
     int usb_mode;

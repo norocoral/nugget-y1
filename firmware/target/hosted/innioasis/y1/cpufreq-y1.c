@@ -18,6 +18,7 @@
 #include "cpufreq-y1.h"
 #include "sysfs.h"
 #include "settings.h"
+#include "bt-y1.h"
 
 static int _current_cpu_mode = -1;
 static int _saved_cpu_mode = -1;
@@ -40,6 +41,8 @@ void y1_set_screen_off_power_mode(bool screen_off)
 {
     if (screen_off) {
         if (!global_settings.y1_screen_off_cpu_save)
+            return;
+        if (y1_bt_is_receiver_mode())
             return;
         if (_saved_cpu_mode == -1) {
             _saved_cpu_mode = _current_cpu_mode >= 0 ? _current_cpu_mode : Y1_CPU_DYNAMIC;

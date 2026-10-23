@@ -57,6 +57,9 @@
 
 #ifdef HAVE_ALBUMART
 #include "albumart.h"
+#if defined(INNIOASIS_Y1)
+#include "bt-y1.h"
+#endif
 #endif
 
 #ifdef HAVE_PLAY_FREQ
@@ -196,6 +199,15 @@ static struct albumart_slot
     struct dim dim;     /* Holds width, height of the albumart */
     int used;           /* Counter; increments if something uses it */
 } albumart_slots[MAX_MULTIPLE_AA]; /* (A,O) */
+#if defined(INNIOASIS_Y1)
+static struct
+{
+    struct dim dim;
+    uint32_t generation;
+    int hid;
+    bool initialized;
+} receiver_albumart_slots[MAX_MULTIPLE_AA];
+#endif
 
 static char last_folder_aa_path[MAX_PATH] = "\0";
 static int last_folder_aa_hid[MAX_MULTIPLE_AA] = {0};
@@ -4118,6 +4130,60 @@ void audio_flush_and_reload_tracks(void)
 /* Return which album art handle is current for the user in the given slot */
 int playback_current_aa_hid(int slot)
 {
+#if defined(INNIOASIS_Y1)
+    if ((unsigned)slot < MAX_MULTIPLE_AA)
+    {
+        if (!receiver_albumart_slots[slot].initialized)
+        {
+            receiver_albumart_slots[slot].hid = ERR_HANDLE_NOT_FOUND;
+            receiver_albumart_slots[slot].initialized = true;
+        }
+
+        if (y1_bt_is_receiver_mode())
+        {
+            uint32_t generation = y1_bt_receiver_art_generation();
+            bool dimensions_changed =
+                receiver_albumart_slots[slot].dim.width !=
+                    albumart_slots[slot].dim.width ||
+                receiver_albumart_slots[slot].dim.height !=
+                    albumart_slots[slot].dim.height;
+            if (receiver_albumart_slots[slot].hid >= 0 &&
+                (receiver_albumart_slots[slot].generation != generation ||
+                 dimensions_changed))
+            {
+                bufclose(receiver_albumart_slots[slot].hid);
+                receiver_albumart_slots[slot].hid = ERR_HANDLE_NOT_FOUND;
+            }
+
+            if (receiver_albumart_slots[slot].hid < 0 &&
+                generation != 0 &&
+                file_exists(Y1_BT_RECEIVER_ART_PATH))
+            {
+                struct bufopen_bitmap_data user_data;
+                memset(&user_data, 0, sizeof(user_data));
+                user_data.dim = &albumart_slots[slot].dim;
+                int hid = bufopen(Y1_BT_RECEIVER_ART_PATH, 0,
+                                  TYPE_BITMAP, &user_data);
+                if (hid >= 0)
+                {
+                    receiver_albumart_slots[slot].hid = hid;
+                    receiver_albumart_slots[slot].generation = generation;
+                    receiver_albumart_slots[slot].dim =
+                        albumart_slots[slot].dim;
+                }
+            }
+
+            return receiver_albumart_slots[slot].hid;
+        }
+
+        if (receiver_albumart_slots[slot].hid >= 0)
+        {
+            bufclose(receiver_albumart_slots[slot].hid);
+            receiver_albumart_slots[slot].hid = ERR_HANDLE_NOT_FOUND;
+        }
+    }
+#endif
+
     if ((unsigned)slot < MAX_MULTIPLE_AA)
     {
         struct track_info user_cur;

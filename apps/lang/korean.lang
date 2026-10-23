@@ -17903,3 +17903,115 @@
     *: "텍스트 크로스페이드"
   </voice>
 </phrase>
+<phrase>
+  id: LANG_BLUETOOTH_RECEIVER
+  desc: Y1 top-level main menu item
+  user: core
+  <source>
+    *: "Bluetooth Receiver"
+  </source>
+  <dest>
+    *: "블루투스 수신기"
+  </dest>
+  <voice>
+    *: "블루투스 수신기"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_BT_RECEIVER_NOW_PLAYING
+  desc: Y1 Bluetooth Receiver menu item
+  user: core
+  <source>
+    *: "Now Playing"
+  </source>
+  <dest>
+    *: "현재 재생 중"
+  </dest>
+  <voice>
+    *: "현재 재생 중"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_BT_RECEIVER_SETTINGS
+  desc: Y1 Bluetooth Receiver settings submenu
+  user: core
+  <source>
+    *: "Settings"
+  </source>
+  <dest>
+    *: "설정"
+  </dest>
+  <voice>
+    *: "설정"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_BT_RECEIVER_QUIT
+  desc: Y1 Bluetooth Receiver quit menu item
+  user: core
+  <source>
+    *: "Quit"
+  </source>
+  <dest>
+    *: "종료"
+  </dest>
+  <voice>
+    *: "종료"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_BT_RECEIVER_QUIT_CONFIRM
+  desc: confirm exiting Bluetooth Receiver
+  user: core
+  <source>
+    *: "Quit Bluetooth Receiver?"
+  </source>
+  <dest>
+    *: "블루투스 수신기를 종료할까요?"
+  </dest>
+  <voice>
+    *: "블루투스 수신기를 종료할까요?"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_BT_RECEIVER_AUTO_START
+  desc: Bluetooth Receiver setting
+  user: core
+  <source>
+    *: "Turn On Automatically"
+  </source>
+  <dest>
+    *: "자동으로 켜기"
+  </dest>
+  <voice>
+    *: "자동으로 켜기"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_BT_RECEIVER_AUTO_CONNECT
+  desc: Bluetooth Receiver setting
+  user: core
+  <source>
+    *: "Connect Automatically"
+  </source>
+  <dest>
+    *: "자동 연결"
+  </dest>
+  <voice>
+    *: "자동 연결"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_BT_RECEIVER_FULL_VOLUME
+  desc: Bluetooth Receiver setting
+  user: core
+  <source>
+    *: "Full Volume Mode"
+  </source>
+  <dest>
+    *: "최대 음량 모드"
+  </dest>
+  <voice>
+    *: "최대 음량 모드"
+  </voice>
+</phrase>

@@ -29,6 +29,7 @@
 #include "powermgmt.h"
 #include "power.h"
 #include "y1-log.h"
+#include "bt-y1.h"
 
 #ifndef KEY_HEADSETHOOK
 #define KEY_HEADSETHOOK 226
@@ -86,6 +87,36 @@ static void y1_trigger_mfb_action(int action_setting)
     int btn = mfb_action_to_multimedia_btn(action_setting);
     if (btn != 0)
     {
+#if defined(INNIOASIS_Y1)
+        if (y1_bt_is_receiver_mode())
+        {
+            switch (action_setting)
+            {
+                case MFB_ACTION_PLAYPAUSE:
+                    y1_bt_receiver_send_control(Y1_BT_RECEIVER_PLAY_PAUSE);
+                    return;
+                case MFB_ACTION_NEXT:
+                    y1_bt_receiver_send_control(Y1_BT_RECEIVER_NEXT);
+                    return;
+                case MFB_ACTION_PREV:
+                    y1_bt_receiver_send_control(Y1_BT_RECEIVER_PREVIOUS);
+                    return;
+                case MFB_ACTION_FFWD:
+                    y1_bt_receiver_send_control(Y1_BT_RECEIVER_SEEK_FORWARD);
+                    return;
+                case MFB_ACTION_REW:
+                    y1_bt_receiver_send_control(Y1_BT_RECEIVER_SEEK_BACKWARD);
+                    return;
+                case MFB_ACTION_VOL_UP:
+                case MFB_ACTION_VOL_DOWN:
+                    if (global_settings.bt_receiver_full_volume)
+                        return;
+                    break;
+                default:
+                    break;
+            }
+        }
+#endif
         char kbuf[80];
         snprintf(kbuf, sizeof(kbuf), "[button-y1] MFB trigger action=%d -> 0x%08x\n", action_setting, btn);
         y1_kmsg_log(kbuf);

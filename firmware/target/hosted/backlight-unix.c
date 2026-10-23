@@ -38,6 +38,7 @@
 #include "settings.h"
 #if defined(INNIOASIS_Y1)
 #include "innioasis/y1/y1-log.h"
+#include "innioasis/y1/button-target.h"
 #endif
 
 #if defined(BACKLIGHT_RG_NANO)
@@ -99,6 +100,7 @@ static int last_bl = -1;
 #if defined(BACKLIGHT_INNIOASIS)
 #include "cpufreq-y1.h"
 #include "lcd-target.h"
+#include "innioasis/y1/bt-y1.h"
 extern void y1_enter_hold_mode(void);
 static int bl_fd = -1;
 
@@ -543,7 +545,8 @@ void lcd_awake(void)
 
 void lcd_sleep(void)
 {
-    if (y1_should_always_on() || y1_playback_active() ||
+    if (y1_bt_is_receiver_mode() ||
+        y1_should_always_on() || y1_playback_active() ||
         y1_aod_pause_state == Y1_AOD_PAUSE_HOLD ||
         y1_aod_pause_state == Y1_AOD_PAUSE_FADE_OUT)
         return;
@@ -551,6 +554,11 @@ void lcd_sleep(void)
 #ifdef HAVE_LCD_ENABLE
     lcd_enable(false);
 #endif
+
+    if (!button_center_wakeup_available()) {
+        y1_log("Y1: center-button wake is not enabled; remaining awake for input\n");
+        return;
+    }
 
     /* Suspend to RAM until a key wakes the kernel. Playback never reaches here. */
     int fd = open("/sys/power/state", O_WRONLY | O_CLOEXEC);

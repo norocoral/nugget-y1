@@ -22,6 +22,9 @@
 #include "config.h"
 #include "status.h"
 #include "audio.h"
+#if defined(INNIOASIS_Y1)
+#include "bt-y1.h"
+#endif
 #if CONFIG_TUNER
 #include "radio.h"
 #endif
@@ -43,6 +46,17 @@ enum playmode status_get_ffmode(void)
 int current_playmode(void)
 {
     int audio_stat = audio_status();
+
+#if defined(INNIOASIS_Y1)
+    if (y1_bt_is_receiver_mode()) {
+        uint8_t play_status = y1_bt_receiver_get_play_status();
+        if (play_status == 1 || play_status == 3 || play_status == 4)
+            return STATUS_PLAY;
+        if (play_status == 2)
+            return STATUS_PAUSE;
+        return STATUS_STOP;
+    }
+#endif
 
     /* ff_mode can be either STATUS_FASTFORWARD or STATUS_FASTBACKWARD
        and that supercedes the other modes */

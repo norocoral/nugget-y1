@@ -73,6 +73,11 @@
 #include "language.h"
 #include "plugin.h"
 #include "disk.h"
+#if defined(INNIOASIS_Y1)
+#include "bt-y1.h"
+#include "audio.h"
+static int bt_receiver_screen(void *param);
+#endif
 
 struct root_items {
     int (*function)(void* param);
@@ -514,6 +519,9 @@ static const struct root_items items[] = {
 #ifdef HAVE_TAGCACHE
     [GO_TO_PICTUREFLOW] = { pictureflow_screen, NULL, NULL },
 #endif
+#if defined(INNIOASIS_Y1)
+    [GO_TO_BT_RECEIVER] = { bt_receiver_screen, NULL, NULL },
+#endif
 
 };
 #define NUM_ITEMS (int)(sizeof(items)/sizeof(*items))
@@ -524,6 +532,73 @@ static int item_callback(int action,
 
 static int load_screen(int screen);
 static const struct menu_item_ex *context_shortcut_item;
+
+#if defined(INNIOASIS_Y1)
+MENUITEM_SETTING(bt_receiver_auto_start_item,
+                 &global_settings.bt_receiver_auto_start, NULL);
+MENUITEM_SETTING(bt_receiver_auto_connect_item,
+                 &global_settings.bt_receiver_auto_connect, NULL);
+MENUITEM_SETTING(bt_receiver_full_volume_item,
+                 &global_settings.bt_receiver_full_volume, NULL);
+
+MAKE_MENU(bt_receiver_settings_menu, ID2P(LANG_BT_RECEIVER_SETTINGS),
+          NULL, Icon_Menu_setting,
+          &nugget_bluetooth_menu,
+          &bt_receiver_auto_start_item,
+          &bt_receiver_auto_connect_item,
+          &bt_receiver_full_volume_item);
+
+static int bt_receiver_now_playing(void)
+{
+    push_current_activity(ACTIVITY_WPS);
+    gui_wps_show();
+    pop_current_activity();
+    return 0;
+}
+
+static int bt_receiver_quit_requested;
+
+static int bt_receiver_quit(void)
+{
+    if (yesno_pop(ID2P(LANG_BT_RECEIVER_QUIT_CONFIRM))) {
+        bt_receiver_quit_requested = true;
+        return GO_TO_ROOT;
+    }
+    return 0;
+}
+
+MENUITEM_FUNCTION(bt_receiver_now_playing_item, 0,
+                  ID2P(LANG_BT_RECEIVER_NOW_PLAYING),
+                  bt_receiver_now_playing, NULL, Icon_Playback_menu);
+MENUITEM_FUNCTION(bt_receiver_quit_item, MENU_FUNC_CHECK_RETVAL,
+                  ID2P(LANG_BT_RECEIVER_QUIT),
+                  bt_receiver_quit, NULL, Icon_NOICON);
+MAKE_MENU(bt_receiver_menu, ID2P(LANG_BLUETOOTH_RECEIVER), NULL,
+          Icon_Menu_functioncall,
+          &bt_receiver_now_playing_item,
+          &bt_receiver_settings_menu,
+          &bt_receiver_quit_item);
+
+static int bt_receiver_screen(void *param)
+{
+    (void)param;
+    int exit_result = GO_TO_ROOT;
+    audio_stop();
+    bt_receiver_quit_requested = false;
+    y1_bt_set_receiver_mode(true);
+
+    while (!bt_receiver_quit_requested) {
+        int result = do_menu(&bt_receiver_menu, NULL, NULL, false);
+        if (result == MENU_ATTACHED_USB) {
+            exit_result = result;
+            break;
+        }
+    }
+
+    y1_bt_set_receiver_mode(false);
+    return exit_result;
+}
+#endif
 
 MENUITEM_RETURNVALUE(shortcut_menu, ID2P(LANG_SHORTCUTS), GO_TO_SHORTCUTMENU,
                         NULL, Icon_Bookmark);
@@ -568,6 +643,10 @@ MENUITEM_RETURNVALUE(system_menu_, ID2P(LANG_SYSTEM), GO_TO_SYSTEM_SCREEN,
 MENUITEM_RETURNVALUE(pictureflow_menu_item, ID2P(LANG_PICTUREFLOW),
                      GO_TO_PICTUREFLOW, NULL, Icon_Plugin);
 #endif
+#if defined(INNIOASIS_Y1)
+MENUITEM_RETURNVALUE(bt_receiver_menu_item, ID2P(LANG_BLUETOOTH_RECEIVER),
+                     GO_TO_BT_RECEIVER, NULL, Icon_Plugin);
+#endif
 
 struct menu_item_ex root_menu_;
 static struct menu_callback_with_desc root_menu_desc = {
@@ -594,6 +673,9 @@ static struct menu_table menu_table[] = {
     { "shortcuts", &shortcut_menu },
 #ifdef HAVE_TAGCACHE
     { "pictureflow", &pictureflow_menu_item },
+#endif
+#if defined(INNIOASIS_Y1)
+    { "bluetooth_receiver", &bt_receiver_menu_item },
 #endif
 };
 #define MAX_MENU_ITEMS (sizeof(menu_table) / sizeof(struct menu_table))
@@ -1016,6 +1098,10 @@ static int root_menu_setup_screens(void)
 #endif
     }
 #endif /*(HAVE_HEADPHONE_DETECTION) || (HAVE_LINEOUT_DETECTION)*/
+#if defined(INNIOASIS_Y1)
+    if (global_settings.bt_receiver_auto_start)
+        new_screen = GO_TO_BT_RECEIVER;
+#endif
     return new_screen;
 }
 
@@ -1059,6 +1145,11 @@ void root_menu(void)
                 global_status.last_browser = previous_browser = next_screen;
                 goto load_next_screen;
                 break;
+#if defined(INNIOASIS_Y1)
+            case GO_TO_BT_RECEIVER:
+                goto load_next_screen;
+                break;
+#endif
 #if CONFIG_TUNER
             case GO_TO_WPS:
             case GO_TO_FM:

@@ -82,8 +82,43 @@
 static struct wps_state wps_state;
 
 #if defined(INNIOASIS_Y1)
+static struct mp3entry bt_receiver_track;
+static char bt_receiver_title[128];
+static char bt_receiver_artist[128];
+static char bt_receiver_album[128];
+
+static bool update_receiver_track(void)
+{
+    char title[sizeof(bt_receiver_title)];
+    char artist[sizeof(bt_receiver_artist)];
+    char album[sizeof(bt_receiver_album)];
+    y1_bt_get_receiver_metadata(title, sizeof(title),
+                                artist, sizeof(artist),
+                                album, sizeof(album));
+    if (title[0] == '\0')
+        strcpy(title, "Bluetooth Audio");
+
+    bool changed = strcmp(title, bt_receiver_title) != 0 ||
+                   strcmp(artist, bt_receiver_artist) != 0 ||
+                   strcmp(album, bt_receiver_album) != 0;
+    if (changed) {
+        strcpy(bt_receiver_title, title);
+        strcpy(bt_receiver_artist, artist);
+        strcpy(bt_receiver_album, album);
+    }
+
+    bt_receiver_track.title = bt_receiver_title;
+    bt_receiver_track.artist = bt_receiver_artist;
+    bt_receiver_track.album = bt_receiver_album;
+    bt_receiver_track.length = 0;
+    bt_receiver_track.elapsed = 0;
+    return changed;
+}
+
 static void update_bluetooth_player_info(void)
 {
+    if (y1_bt_is_receiver_mode())
+        return;
     struct mp3entry *id3 = wps_state.id3;
     int status = audio_status();
     uint8_t play_status = (status & AUDIO_STATUS_PLAY) ?
@@ -762,6 +797,9 @@ long gui_wps_show(void)
     struct wps_state *state = get_wps_state();
 #if defined(INNIOASIS_Y1)
     int last_y1_audio_status = audio_status();
+    uint8_t last_receiver_play_status = y1_bt_receiver_get_play_status();
+    uint32_t last_receiver_art_generation =
+        y1_bt_receiver_art_generation();
 #endif
 
     ab_reset_markers();
@@ -770,15 +808,40 @@ long gui_wps_show(void)
     while ( 1 )
     {
 #if defined(INNIOASIS_Y1)
+        if (y1_bt_is_receiver_mode() && update_receiver_track()) {
+            state->id3 = &bt_receiver_track;
+            update = true;
+            extern void y1_aod_notify_event(void);
+            y1_aod_notify_event();
+        }
+        uint32_t receiver_art_generation =
+            y1_bt_receiver_art_generation();
+        if (receiver_art_generation != last_receiver_art_generation) {
+            last_receiver_art_generation = receiver_art_generation;
+            update = true;
+        }
         int y1_audio_status = audio_status();
-        if (y1_audio_status != last_y1_audio_status) {
+        uint8_t receiver_play_status = y1_bt_receiver_get_play_status();
+        if (y1_audio_status != last_y1_audio_status ||
+            receiver_play_status != last_receiver_play_status) {
             extern void y1_aod_notify_event(void);
             y1_aod_notify_event();
             last_y1_audio_status = y1_audio_status;
+            last_receiver_play_status = receiver_play_status;
         }
 #endif
         bool hotkey = false;
+#if defined(INNIOASIS_Y1)
+        uint8_t remote_play_status = y1_bt_receiver_get_play_status();
+        bool remote_playing = remote_play_status == 1 ||
+                              remote_play_status == 3 ||
+                              remote_play_status == 4;
+        bool audio_paused = y1_bt_is_receiver_mode() ?
+                            !remote_playing :
+                            (audio_status() & AUDIO_STATUS_PAUSE) != 0;
+#else
         bool audio_paused = (audio_status() & AUDIO_STATUS_PAUSE)?true:false;
+#endif
         /* did someone else (i.e power thread) change audio pause mode? */
         if (state->paused != audio_paused) {
             state->paused = audio_paused;
@@ -850,7 +913,8 @@ long gui_wps_show(void)
 
         /* Exit if audio has stopped playing. This happens e.g. at end of
            playlist or if using the sleep timer. */
-        if (!(audio_status() & AUDIO_STATUS_PLAY))
+        if (!(audio_status() & AUDIO_STATUS_PLAY) &&
+            !y1_bt_is_receiver_mode())
             exit = true;
 #ifdef HAVE_TOUCHSCREEN
         if (button == ACTION_TOUCHSCREEN)
@@ -859,6 +923,21 @@ long gui_wps_show(void)
         button = do_party_mode(button); /* block select actions in party mode */
 
         button = action_wpsab_single(button); /* iPods/X5/M5 */
+
+#if defined(INNIOASIS_Y1)
+        if (y1_bt_is_receiver_mode() &&
+            button != ACTION_WPS_MENU && button != ACTION_NONE &&
+            button != ACTION_REDRAW &&
+            button != ACTION_WPS_PLAY &&
+            button != ACTION_WPS_SKIPNEXT &&
+            button != ACTION_WPS_SKIPPREV &&
+            button != ACTION_WPS_SEEKFWD &&
+            button != ACTION_WPS_SEEKBACK &&
+            button != ACTION_WPS_VOLUP &&
+            button != ACTION_WPS_VOLDOWN &&
+            !(button & BUTTON_MULTIMEDIA))
+            button = ACTION_NONE;
+#endif
 
         switch(button)
         {
@@ -929,14 +1008,20 @@ long gui_wps_show(void)
 
                 /* play/pause */
             case ACTION_WPS_PLAY:
-                wps_do_action(WPS_PLAYPAUSE, true);
-                break;
+                    if (y1_bt_is_receiver_mode())
+                        y1_bt_receiver_send_control(Y1_BT_RECEIVER_PLAY_PAUSE);
+                    else
+                        wps_do_action(WPS_PLAYPAUSE, true);
+                    break;
 
-            case ACTION_WPS_VOLUP: /* fall through */
-            case ACTION_WPS_VOLDOWN:
-                if (button == ACTION_WPS_VOLUP)
-                    adjust_volume(1);
-                else
+                case ACTION_WPS_VOLUP: /* fall through */
+                case ACTION_WPS_VOLDOWN:
+                    if (y1_bt_is_receiver_mode() &&
+                        global_settings.bt_receiver_full_volume)
+                        break;
+                    if (button == ACTION_WPS_VOLUP)
+                        adjust_volume(1);
+                    else
                     adjust_volume(-1);
 
                 setvol();
@@ -949,6 +1034,11 @@ long gui_wps_show(void)
             /* fast forward
                 OR next dir if this is straight after ACTION_WPS_SKIPNEXT */
             case ACTION_WPS_SEEKFWD:
+                if (y1_bt_is_receiver_mode())
+                {
+                    y1_bt_receiver_send_control(Y1_BT_RECEIVER_SEEK_FORWARD);
+                    break;
+                }
                 if (current_tick -last_right < HZ)
                 {
                     if (state->id3->cuesheet && playlist_check(1))
@@ -967,6 +1057,11 @@ long gui_wps_show(void)
             /* fast rewind
                 OR prev dir if this is straight after ACTION_WPS_SKIPPREV,*/
             case ACTION_WPS_SEEKBACK:
+                if (y1_bt_is_receiver_mode())
+                {
+                    y1_bt_receiver_send_control(Y1_BT_RECEIVER_SEEK_BACKWARD);
+                    break;
+                }
                 if (current_tick - last_left < HZ)
                 {
                     if (state->id3->cuesheet && playlist_check(-1))
@@ -995,6 +1090,11 @@ long gui_wps_show(void)
 
                 /* prev / restart */
             case ACTION_WPS_SKIPPREV:
+                if (y1_bt_is_receiver_mode())
+                {
+                    y1_bt_receiver_send_control(Y1_BT_RECEIVER_PREVIOUS);
+                    break;
+                }
                 last_left = current_tick;
 
                 /* if we're in A/B repeat mode and the current position
@@ -1011,6 +1111,11 @@ long gui_wps_show(void)
                 /* next
                    OR if skip length set, hop by predetermined amount. */
             case ACTION_WPS_SKIPNEXT:
+                if (y1_bt_is_receiver_mode())
+                {
+                    y1_bt_receiver_send_control(Y1_BT_RECEIVER_NEXT);
+                    break;
+                }
                 last_right = current_tick;
 
                 /* if we're in A/B repeat mode and the current position is
@@ -1212,7 +1317,13 @@ static void wps_state_init(void)
 {
     struct wps_state *state = get_wps_state();
     state->paused = false;
-    if(audio_status() & AUDIO_STATUS_PLAY)
+    if (y1_bt_is_receiver_mode())
+    {
+        update_receiver_track();
+        state->id3 = &bt_receiver_track;
+        state->nid3 = NULL;
+    }
+    else if(audio_status() & AUDIO_STATUS_PLAY)
     {
         state->id3 = audio_current_track();
         state->nid3 = audio_next_track();

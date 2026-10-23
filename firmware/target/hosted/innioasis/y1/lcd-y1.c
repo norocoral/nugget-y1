@@ -33,6 +33,7 @@
 #include "misc.h"
 #include "audio.h"
 #include "y1-log.h"
+#include "bt-y1.h"
 
 #ifndef VESA_NO_BLANKING
 #define VESA_NO_BLANKING 0
@@ -237,6 +238,10 @@ bool y1_is_always_on_screen(void)
 bool y1_playback_active(void)
 {
     int stat = audio_status();
+    if (y1_bt_is_receiver_mode()) {
+        uint8_t play_status = y1_bt_receiver_get_play_status();
+        return play_status == 1 || play_status == 3 || play_status == 4;
+    }
     return (stat & AUDIO_STATUS_PLAY) && !(stat & AUDIO_STATUS_PAUSE);
 }
 
@@ -253,8 +258,7 @@ bool y1_should_always_on(void)
 
     if (global_settings.aod_playback_only)
     {
-        int stat = audio_status();
-        if (!((stat & AUDIO_STATUS_PLAY) && !(stat & AUDIO_STATUS_PAUSE)))
+        if (!y1_playback_active())
             return false;
     }
 

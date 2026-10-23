@@ -61,6 +61,7 @@ else
 fi
 
 STRIP="${CROSS_COMPILE}strip"
+READELF="${CROSS_COMPILE}readelf"
 
 MAX_BOOT_SIZE=6291456 # 6 MiB
 
@@ -131,6 +132,11 @@ fi
 
 if ! command -v "$STRIP" >/dev/null 2>&1; then
     echo "[!] Cross-compiler strip not found: $STRIP"
+    exit 1
+fi
+
+if ! command -v "$READELF" >/dev/null 2>&1; then
+    echo "[!] Cross-compiler readelf not found: $READELF"
     exit 1
 fi
 
@@ -360,8 +366,15 @@ if [[ ! -f Makefile ]]; then
     exit 1
 fi
 
-# Remove broken object files left by interrupted builds.
+# Remove empty or invalid object files left by interrupted builds or stale
+# filesystem/cache artifacts so make recompiles them instead of failing at link.
 find "$BUILD_DIR" -type f -name '*.o' -size 0 -delete 2>/dev/null || true
+while IFS= read -r -d '' object; do
+    if ! "$READELF" -h "$object" >/dev/null 2>&1; then
+        echo "[*] Removing invalid object file: $object"
+        rm -f -- "$object"
+    fi
+done < <(find "$BUILD_DIR" -type f -name '*.o' -print0)
 
 echo "[*] Building Rockbox with $JOBS parallel jobs..."
 make -j"$JOBS"

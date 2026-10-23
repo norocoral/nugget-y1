@@ -38,6 +38,7 @@
 #include "settings.h"
 #include "y1-log.h"
 #include "bt-y1.h"
+#include "pcm-eac.h"
 #include "sbc/sbc.h"
 
 #define PAIRED_DB_PATH   "/mnt/sdcard/.rockbox/bt_paired.dat"
@@ -54,6 +55,7 @@
 #define PSM_SDP      0x0001
 #define PSM_AVCTP    0x0017
 #define PSM_AVDTP    0x0019
+#define PSM_BIP      0x001B
 
 /* L2CAP Signaling Commands */
 #define L2CAP_CONN_REQ       0x02
@@ -87,6 +89,7 @@
 #define CID_AVDTP_SIG_LOCAL  0x0041
 #define CID_AVDTP_MED_LOCAL  0x0042
 #define CID_AVCTP_LOCAL      0x0043
+#define CID_BIP_LOCAL        0x0044
 
 static pthread_mutex_t bt_mtx = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t bt_enable_mtx = PTHREAD_MUTEX_INITIALIZER;
@@ -95,6 +98,8 @@ static pthread_t bt_thread;
 static bool bt_thread_started = false;
 
 static bool bt_target_enabled = false;
+static volatile bool bt_receiver_mode = false;
+static bool receiver_previous_bt_enabled;
 static volatile enum y1_bt_state bt_state = Y1_BT_STATE_OFF;
 static int stpbt_fd = -1;
 
@@ -146,6 +151,7 @@ static uint16_t cid_sdp_remote = 0;
 static uint16_t cid_avdtp_sig_remote = 0;
 static uint16_t cid_avdtp_med_remote = 0;
 static uint16_t cid_avctp_remote = 0;
+static uint16_t cid_bip_remote = 0;
 
 static bool avdtp_sig_local_conf_done = false;
 static bool avdtp_sig_remote_conf_done = false;
@@ -168,6 +174,26 @@ static uint8_t avrcp_tx_label = 1;
 static char avrcp_title[128];
 static char avrcp_artist[128];
 static char avrcp_album[128];
+static char receiver_title[128];
+static char receiver_artist[128];
+static char receiver_album[128];
+static bool receiver_metadata_request_pending;
+static uint8_t receiver_metadata_request_label;
+static bool receiver_play_status_request_pending;
+static uint8_t receiver_play_status_request_label;
+static uint32_t last_receiver_metadata_query_ms;
+static uint32_t last_receiver_play_status_query_ms;
+static uint32_t receiver_art_generation;
+static char receiver_art_handle[96];
+static uint32_t receiver_art_connection_id;
+static bool receiver_art_has_connection_id;
+static bool receiver_art_connect_pending;
+static uint8_t receiver_art_data[65536];
+static size_t receiver_art_data_size;
+static uint8_t receiver_play_status;
+static bool bip_local_conf_done;
+static bool bip_remote_conf_done;
+static bool bip_obex_connected;
 static uint32_t avrcp_duration_ms;
 static uint32_t avrcp_position_ms;
 static uint8_t avrcp_play_status;
@@ -372,6 +398,7 @@ static void reset_bt_session(void)
     cid_avdtp_sig_remote = 0;
     cid_avdtp_med_remote = 0;
     cid_avctp_remote = 0;
+    cid_bip_remote = 0;
     avdtp_sig_local_conf_done = false;
     avdtp_sig_remote_conf_done = false;
     avdtp_med_local_conf_done = false;
@@ -395,6 +422,26 @@ static void reset_bt_session(void)
     in_sniff_mode = false;
     avrcp_play_notify_pending = false;
     avrcp_track_notify_pending = false;
+    receiver_metadata_request_pending = false;
+    receiver_play_status_request_pending = false;
+    receiver_art_connect_pending = false;
+    receiver_art_handle[0] = '\0';
+    receiver_art_data_size = 0;
+    receiver_art_has_connection_id = false;
+    receiver_art_connection_id = 0;
+    bip_local_conf_done = false;
+    bip_remote_conf_done = false;
+    bip_obex_connected = false;
+    unlink(Y1_BT_RECEIVER_ART_PATH);
+    pthread_mutex_lock(&bt_mtx);
+    receiver_play_status = 0;
+    receiver_art_generation++;
+    receiver_title[0] = '\0';
+    receiver_artist[0] = '\0';
+    receiver_album[0] = '\0';
+    pthread_mutex_unlock(&bt_mtx);
+    last_receiver_metadata_query_ms = 0;
+    last_receiver_play_status_query_ms = 0;
     avrcp_tx_label = 1;
     pcm_ring_r = 0;
     pcm_ring_w = 0;
@@ -526,7 +573,7 @@ static void l2cap_send_conf_req(uint16_t dcid, uint16_t mtu)
  * ============================================================================ */
 /* Pre-encoded SDP attribute list for A2DP Audio Source (Record 0x00010001) */
 static const uint8_t sdp_attr_a2dp_source[] = {
-    0x35, 0x46, /* Sequence (70 bytes) */
+    0x35, 0x38, /* Sequence (56 bytes) */
     /* Attr 0x0000: ServiceRecordHandle = 0x00010001 */
     0x09, 0x00, 0x00, 0x0A, 0x00, 0x01, 0x00, 0x01,
     /* Attr 0x0001: ServiceClassIDList = { 0x110A (AudioSource) } */
@@ -542,6 +589,18 @@ static const uint8_t sdp_attr_a2dp_source[] = {
     0x09, 0x03, 0x11, 0x09, 0x00, 0x01
 };
 
+static const uint8_t sdp_attr_a2dp_sink[] = {
+    0x35, 0x38,
+    0x09, 0x00, 0x00, 0x0A, 0x00, 0x01, 0x00, 0x01,
+    0x09, 0x00, 0x01, 0x35, 0x03, 0x19, 0x11, 0x0B,
+    0x09, 0x00, 0x04, 0x35, 0x10,
+        0x35, 0x06, 0x19, 0x01, 0x00, 0x09, 0x00, 0x19,
+        0x35, 0x06, 0x19, 0x00, 0x19, 0x09, 0x01, 0x02,
+    0x09, 0x00, 0x09, 0x35, 0x08,
+        0x35, 0x06, 0x19, 0x11, 0x0D, 0x09, 0x01, 0x02,
+    0x09, 0x03, 0x11, 0x09, 0x00, 0x01
+};
+
 static const uint8_t sdp_attr_avrcp_target[] = {
     0x35, 0x38,
     0x09, 0x00, 0x00, 0x0A, 0x00, 0x01, 0x00, 0x02,
@@ -552,6 +611,18 @@ static const uint8_t sdp_attr_avrcp_target[] = {
     0x09, 0x00, 0x09, 0x35, 0x08,
         0x35, 0x06, 0x19, 0x11, 0x0E, 0x09, 0x01, 0x06,
     0x09, 0x03, 0x11, 0x09, 0x00, 0x01
+};
+
+static const uint8_t sdp_attr_avrcp_controller[] = {
+    0x35, 0x38,
+    0x09, 0x00, 0x00, 0x0A, 0x00, 0x01, 0x00, 0x02,
+    0x09, 0x00, 0x01, 0x35, 0x03, 0x19, 0x11, 0x0F,
+    0x09, 0x00, 0x04, 0x35, 0x10,
+        0x35, 0x06, 0x19, 0x01, 0x00, 0x09, 0x00, 0x17,
+        0x35, 0x06, 0x19, 0x00, 0x17, 0x09, 0x01, 0x04,
+    0x09, 0x00, 0x09, 0x35, 0x08,
+        0x35, 0x06, 0x19, 0x11, 0x0E, 0x09, 0x01, 0x06,
+    0x09, 0x03, 0x11, 0x09, 0x00, 0x02
 };
 
 static bool sdp_request_is_avrcp(const uint8_t *pdu, uint16_t len)
@@ -573,8 +644,11 @@ static void handle_sdp_pdu(const uint8_t *pdu, uint16_t len)
     uint16_t tid = ((uint16_t)pdu[1] << 8) | pdu[2];
     uint8_t rsp[128];
     bool avrcp = sdp_request_is_avrcp(pdu, len);
-    const uint8_t *record = avrcp ? sdp_attr_avrcp_target :
-                                    sdp_attr_a2dp_source;
+    const uint8_t *record = avrcp ?
+                            (bt_receiver_mode ? sdp_attr_avrcp_controller :
+                                                sdp_attr_avrcp_target) :
+                            (bt_receiver_mode ? sdp_attr_a2dp_sink :
+                                                sdp_attr_a2dp_source);
     uint16_t record_len = avrcp ? sizeof(sdp_attr_avrcp_target) :
                                   sizeof(sdp_attr_a2dp_source);
 
@@ -604,7 +678,11 @@ static void handle_sdp_pdu(const uint8_t *pdu, uint16_t len)
                               ((uint32_t)pdu[6] << 16) |
                               ((uint32_t)pdu[7] << 8) | pdu[8];
             avrcp = handle == 0x00010002;
-            record = avrcp ? sdp_attr_avrcp_target : sdp_attr_a2dp_source;
+            record = avrcp ?
+                     (bt_receiver_mode ? sdp_attr_avrcp_controller :
+                                         sdp_attr_avrcp_target) :
+                     (bt_receiver_mode ? sdp_attr_a2dp_sink :
+                                         sdp_attr_a2dp_source);
             record_len = avrcp ? sizeof(sdp_attr_avrcp_target) :
                                  sizeof(sdp_attr_a2dp_source);
         }
@@ -695,8 +773,8 @@ static void handle_avdtp_sig_pdu(const uint8_t *pdu, uint16_t len)
         switch (sig_id)
         {
             case AVDTP_DISCOVER: {
-                /* Advertise Local SEID 1: Audio Source (TSEP=0 Source -> bit 3 = 0) */
-                uint8_t seps[2] = { (1 << 2), 0x00 }; /* SEID=1, InUse=0, MediaType=Audio(0), TSEP=Source(0) */
+                uint8_t seps[2] = { (1 << 2),
+                                    bt_receiver_mode ? 0x08 : 0x00 };
                 avdtp_send_accept(hdr, sig_id, seps, 2);
                 break;
             }
@@ -737,21 +815,27 @@ static void handle_avdtp_sig_pdu(const uint8_t *pdu, uint16_t len)
                 a2dp_streaming = true;
                 bt_state = Y1_BT_STATE_STREAMING;
                 bt_log("A2DP STREAMING STARTED (remote initiated)\n");
-                if (!was_streaming) {
+                if (!was_streaming && !bt_receiver_mode) {
                     y1_bt_audio_connect_hook();
                 }
+                if (bt_receiver_mode)
+                    y1_audio_receiver_set_active(true, a2dp_sample_rate());
                 break;
             }
             case AVDTP_SUSPEND:
                 avdtp_send_accept(hdr, sig_id, NULL, 0);
                 a2dp_streaming = false;
                 bt_state = Y1_BT_STATE_CONNECTED;
+                if (bt_receiver_mode)
+                    y1_audio_receiver_set_active(false, a2dp_sample_rate());
                 break;
             case AVDTP_CLOSE:
             case AVDTP_ABORT:
                 avdtp_send_accept(hdr, sig_id, NULL, 0);
                 a2dp_streaming = false;
                 cid_avdtp_med_remote = 0;
+                if (bt_receiver_mode)
+                    y1_audio_receiver_set_active(false, a2dp_sample_rate());
                 break;
             case AVDTP_DELAYREPORT:
                 avdtp_send_accept(hdr, sig_id, NULL, 0);
@@ -984,6 +1068,355 @@ static void send_avrcp_vendor_response(const uint8_t *request, uint8_t ctype,
     l2cap_send_pdu(cid_avctp_remote, rsp, (uint16_t)(13 + params_len));
 }
 
+static void request_receiver_metadata(void)
+{
+    if (!bt_receiver_mode || cid_avctp_remote == 0 ||
+        receiver_metadata_request_pending)
+        return;
+
+    uint8_t request[38] = { 0 };
+    receiver_metadata_request_label = avrcp_tx_label++ & 0x0F;
+    request[0] = (uint8_t)(receiver_metadata_request_label << 4);
+    request[1] = 0x11;
+    request[2] = 0x0E;
+    request[3] = 0x00;
+    request[4] = 0x48;
+    request[5] = 0x00;
+    request[6] = 0x00;
+    request[7] = 0x19;
+    request[8] = 0x58;
+    request[9] = 0x20;
+    request[10] = 0x00;
+    request[11] = 0x00;
+    request[12] = 0x19;
+    memset(&request[13], 0xFF, 8);
+    request[21] = 4;
+    request[22] = 0x00; request[23] = 0x00;
+    request[24] = 0x00; request[25] = 0x01;
+    request[26] = 0x00; request[27] = 0x00;
+    request[28] = 0x00; request[29] = 0x02;
+    request[30] = 0x00; request[31] = 0x00;
+    request[32] = 0x00; request[33] = 0x03;
+    request[34] = 0x00; request[35] = 0x00;
+    request[36] = 0x00; request[37] = 0x08;
+
+    if (l2cap_send_pdu(cid_avctp_remote, request, sizeof(request)) >= 0) {
+        struct timespec now;
+        clock_gettime(CLOCK_MONOTONIC, &now);
+        receiver_metadata_request_pending = true;
+        last_receiver_metadata_query_ms = (uint32_t)(now.tv_sec * 1000 +
+                                                     now.tv_nsec / 1000000);
+    }
+}
+
+static void request_receiver_play_status(void)
+{
+    if (!bt_receiver_mode || cid_avctp_remote == 0 ||
+        receiver_play_status_request_pending)
+        return;
+
+    uint8_t request[13] = {
+        0, 0x11, 0x0E, 0x00, 0x48, 0x00, 0x00, 0x19, 0x58,
+        0x30, 0x00, 0x00, 0x00
+    };
+    receiver_play_status_request_label = avrcp_tx_label++ & 0x0F;
+    request[0] = (uint8_t)(receiver_play_status_request_label << 4);
+    if (l2cap_send_pdu(cid_avctp_remote, request, sizeof(request)) >= 0) {
+        receiver_play_status_request_pending = true;
+        struct timespec now;
+        clock_gettime(CLOCK_MONOTONIC, &now);
+        last_receiver_play_status_query_ms =
+            (uint32_t)(now.tv_sec * 1000 + now.tv_nsec / 1000000);
+    }
+}
+
+static void receiver_send_obex_connect(void)
+{
+    static const uint8_t cover_art_target[16] = {
+        0x71, 0x63, 0xDD, 0x54, 0x4A, 0x7E, 0x11, 0xE2,
+        0xB4, 0x7C, 0x00, 0x25, 0x00, 0x9A, 0xA3, 0x26
+    };
+    uint8_t request[26] = {
+        0x80, 0x00, 0x1A, 0x10, 0x00, 0x04, 0x00,
+        0x46, 0x00, 0x13
+    };
+    memcpy(&request[10], cover_art_target, sizeof(cover_art_target));
+    if (l2cap_send_pdu(cid_bip_remote, request, sizeof(request)) < 0)
+        bt_log("Failed to send AVRCP cover-art OBEX connect\n");
+    else
+        receiver_art_connect_pending = true;
+}
+
+static void receiver_bip_try_connect(void)
+{
+    if (cid_bip_remote != 0 && bip_local_conf_done &&
+        bip_remote_conf_done && !bip_obex_connected &&
+        !receiver_art_connect_pending)
+        receiver_send_obex_connect();
+}
+
+static void receiver_send_obex_get_thumbnail(void)
+{
+    static const char type[] = "x-bt/img-thm";
+    uint8_t request[256];
+    size_t offset = 3;
+
+    request[0] = 0x83;
+    if (receiver_art_has_connection_id) {
+        request[offset++] = 0xCB;
+        request[offset++] = (uint8_t)(receiver_art_connection_id >> 24);
+        request[offset++] = (uint8_t)(receiver_art_connection_id >> 16);
+        request[offset++] = (uint8_t)(receiver_art_connection_id >> 8);
+        request[offset++] = (uint8_t)receiver_art_connection_id;
+    }
+
+    size_t type_len = sizeof(type);
+    request[offset++] = 0x42;
+    request[offset++] = (uint8_t)((type_len + 3) >> 8);
+    request[offset++] = (uint8_t)(type_len + 3);
+    memcpy(&request[offset], type, type_len);
+    offset += type_len;
+
+    size_t name_len = strlen(receiver_art_handle);
+    size_t name_header_len = 3 + (name_len + 1) * 2;
+    request[offset++] = 0x01;
+    request[offset++] = (uint8_t)(name_header_len >> 8);
+    request[offset++] = (uint8_t)name_header_len;
+    for (size_t i = 0; i < name_len; i++) {
+        request[offset++] = 0;
+        request[offset++] = (uint8_t)receiver_art_handle[i];
+    }
+    request[offset++] = 0;
+    request[offset++] = 0;
+
+    request[1] = (uint8_t)(offset >> 8);
+    request[2] = (uint8_t)offset;
+    if (offset > sizeof(request) ||
+        l2cap_send_pdu(cid_bip_remote, request, (uint16_t)offset) < 0)
+        bt_log("Failed to request AVRCP cover-art thumbnail\n");
+}
+
+static void receiver_request_cover_art(const char *handle)
+{
+    if (!bt_receiver_mode || !handle || !handle[0] ||
+        strlen(handle) >= sizeof(receiver_art_handle) ||
+        strcmp(handle, receiver_art_handle) == 0)
+        return;
+
+    strcpy(receiver_art_handle, handle);
+    receiver_art_data_size = 0;
+    receiver_art_has_connection_id = false;
+    receiver_art_connect_pending = false;
+
+    if (cid_bip_remote != 0 && bip_obex_connected)
+        receiver_send_obex_get_thumbnail();
+    else if (cid_bip_remote == 0)
+        l2cap_send_conn_req(PSM_BIP, CID_BIP_LOCAL);
+}
+
+static void receiver_save_cover_art(void)
+{
+    static const char temp_path[] =
+        "/mnt/sdcard/.rockbox/albumart/bt-receiver.jpg.tmp";
+    if (receiver_art_data_size < 4 ||
+        receiver_art_data[0] != 0xFF || receiver_art_data[1] != 0xD8) {
+        bt_log("AVRCP cover-art thumbnail is not a JPEG image\n");
+        receiver_art_data_size = 0;
+        return;
+    }
+
+    if (mkdir("/mnt/sdcard/.rockbox/albumart", 0777) < 0 && errno != EEXIST) {
+        bt_log("Failed to create AVRCP cover-art cache directory\n");
+        receiver_art_data_size = 0;
+        return;
+    }
+
+    int fd = open(temp_path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0666);
+    if (fd < 0) {
+        bt_log("Failed to open AVRCP cover-art cache file\n");
+        receiver_art_data_size = 0;
+        return;
+    }
+
+    size_t written = 0;
+    while (written < receiver_art_data_size) {
+        ssize_t result = write(fd, &receiver_art_data[written],
+                               receiver_art_data_size - written);
+        if (result > 0)
+            written += (size_t)result;
+        else if (result < 0 && errno == EINTR)
+            continue;
+        else
+            break;
+    }
+    close(fd);
+
+    if (written != receiver_art_data_size ||
+        rename(temp_path, Y1_BT_RECEIVER_ART_PATH) < 0) {
+        unlink(temp_path);
+        bt_log("Failed to save AVRCP cover-art thumbnail\n");
+        receiver_art_data_size = 0;
+        return;
+    }
+
+    receiver_art_data_size = 0;
+    pthread_mutex_lock(&bt_mtx);
+    receiver_art_generation++;
+    pthread_mutex_unlock(&bt_mtx);
+}
+
+static void handle_receiver_bip_pdu(const uint8_t *pdu, uint16_t len)
+{
+    if (len < 3)
+        return;
+    uint16_t packet_len = ((uint16_t)pdu[1] << 8) | pdu[2];
+    if (packet_len < 3 || packet_len > len)
+        return;
+
+    uint8_t response = pdu[0];
+    size_t offset = 3;
+    if (response == 0xA0 && receiver_art_connect_pending) {
+        if (packet_len < 7)
+            return;
+        receiver_art_connect_pending = false;
+        offset = 7;
+        while (offset < packet_len) {
+            uint8_t id = pdu[offset];
+            uint8_t kind = id & 0xC0;
+            if (kind == 0x80) {
+                if (packet_len - offset < 2)
+                    break;
+                offset += 2;
+            } else if (kind == 0xC0) {
+                if (packet_len - offset < 5)
+                    break;
+                if (id == 0xCB) {
+                    receiver_art_connection_id =
+                        ((uint32_t)pdu[offset + 1] << 24) |
+                        ((uint32_t)pdu[offset + 2] << 16) |
+                        ((uint32_t)pdu[offset + 3] << 8) |
+                        pdu[offset + 4];
+                    receiver_art_has_connection_id = true;
+                }
+                offset += 5;
+            } else {
+                if (packet_len - offset < 3)
+                    break;
+                uint16_t header_len = ((uint16_t)pdu[offset + 1] << 8) |
+                                      pdu[offset + 2];
+                if (header_len < 3 || header_len > packet_len - offset)
+                    break;
+                offset += header_len;
+            }
+        }
+        bip_obex_connected = true;
+        receiver_send_obex_get_thumbnail();
+        return;
+    }
+
+    if (response != 0x90 && response != 0xA0) {
+        bt_log("Phone rejected AVRCP cover-art request\n");
+        receiver_art_data_size = 0;
+        return;
+    }
+
+    while (offset < packet_len) {
+        uint8_t id = pdu[offset];
+        uint8_t kind = id & 0xC0;
+        if (kind == 0x80) {
+            if (packet_len - offset < 2)
+                break;
+            offset += 2;
+        } else if (kind == 0x40 || kind == 0x00) {
+            if (packet_len - offset < 3)
+                break;
+            uint16_t header_len = ((uint16_t)pdu[offset + 1] << 8) |
+                                  pdu[offset + 2];
+            if (header_len < 3 || header_len > packet_len - offset)
+                break;
+            size_t body_len = header_len - 3;
+            if ((id == 0x48 || id == 0x49) && body_len > 0) {
+                if (body_len > sizeof(receiver_art_data) -
+                               receiver_art_data_size) {
+                    bt_log("AVRCP cover-art thumbnail exceeds cache limit\n");
+                    receiver_art_data_size = 0;
+                    return;
+                }
+                memcpy(&receiver_art_data[receiver_art_data_size],
+                       &pdu[offset + 3], body_len);
+                receiver_art_data_size += body_len;
+            }
+            offset += header_len;
+        } else {
+            break;
+        }
+    }
+
+    if (response == 0x90)
+        receiver_send_obex_get_thumbnail();
+    else if (receiver_art_data_size > 0)
+        receiver_save_cover_art();
+}
+
+bool y1_bt_receiver_send_control(enum y1_bt_receiver_command command)
+{
+    if (!bt_receiver_mode || cid_avctp_remote == 0)
+        return false;
+
+    uint8_t op_id;
+    switch (command)
+    {
+        case Y1_BT_RECEIVER_PLAY_PAUSE:
+            op_id = y1_bt_a2dp_is_streaming() ? 0x46 : 0x44;
+            break;
+        case Y1_BT_RECEIVER_NEXT:
+            op_id = 0x4B;
+            break;
+        case Y1_BT_RECEIVER_PREVIOUS:
+            op_id = 0x4C;
+            break;
+        case Y1_BT_RECEIVER_SEEK_FORWARD:
+            op_id = 0x49;
+            break;
+        case Y1_BT_RECEIVER_SEEK_BACKWARD:
+            op_id = 0x48;
+            break;
+        default:
+            return false;
+    }
+
+    uint8_t request[8] = {
+        (uint8_t)((avrcp_tx_label++ & 0x0F) << 4),
+        0x11, 0x0E, 0x00, 0x48, 0x7C, op_id, 0x00
+    };
+    if (l2cap_send_pdu(cid_avctp_remote, request, sizeof(request)) < 0)
+    {
+        bt_log("Failed to send AVRCP receiver control\n");
+        return false;
+    }
+
+    request[0] = (uint8_t)((avrcp_tx_label++ & 0x0F) << 4);
+    request[6] |= 0x80;
+    if (l2cap_send_pdu(cid_avctp_remote, request, sizeof(request)) < 0)
+    {
+        bt_log("Failed to release AVRCP receiver control\n");
+        return false;
+    }
+
+    return true;
+}
+
+static void copy_receiver_attribute(char *out, size_t out_size,
+                                    const uint8_t *text, size_t text_size)
+{
+    if (out_size == 0)
+        return;
+    if (text_size >= out_size)
+        text_size = out_size - 1;
+    memcpy(out, text, text_size);
+    out[text_size] = '\0';
+}
+
 int y1_bt_get_active_device_volume(void)
 {
     pthread_mutex_lock(&bt_mtx);
@@ -1024,8 +1457,69 @@ static void handle_avctp_pdu(const uint8_t *pdu, uint16_t len)
         return;
 
     uint8_t avctp_hdr = pdu[0];
-    if ((avctp_hdr & 0x02) != 0)
+    if ((avctp_hdr & 0x02) != 0) {
+        if (bt_receiver_mode && receiver_play_status_request_pending &&
+            (avctp_hdr >> 4) == receiver_play_status_request_label &&
+            len >= 22 && pdu[5] == 0x00 && pdu[9] == 0x30) {
+            uint16_t params_len = ((uint16_t)pdu[11] << 8) | pdu[12];
+            if (params_len >= 9 && len >= 22) {
+                pthread_mutex_lock(&bt_mtx);
+                receiver_play_status = pdu[21];
+                pthread_mutex_unlock(&bt_mtx);
+            }
+            receiver_play_status_request_pending = false;
+        } else if (bt_receiver_mode && receiver_metadata_request_pending &&
+            (avctp_hdr >> 4) == receiver_metadata_request_label &&
+            len >= 14 && pdu[5] == 0x00 && pdu[9] == 0x20) {
+            uint16_t params_len = ((uint16_t)pdu[11] << 8) | pdu[12];
+            size_t pos = 13;
+            size_t end = pos + params_len;
+            char cover_handle[sizeof(receiver_art_handle)] = "";
+            if (end > len)
+                end = len;
+            if (pos < end) {
+                uint8_t attr_count = pdu[pos++];
+                pthread_mutex_lock(&bt_mtx);
+                for (uint8_t i = 0; i < attr_count && pos + 8 <= end; i++) {
+                    uint32_t attr_id = ((uint32_t)pdu[pos] << 24) |
+                                       ((uint32_t)pdu[pos + 1] << 16) |
+                                       ((uint32_t)pdu[pos + 2] << 8) |
+                                       pdu[pos + 3];
+                    uint16_t charset = ((uint16_t)pdu[pos + 4] << 8) |
+                                       pdu[pos + 5];
+                    uint16_t text_len = ((uint16_t)pdu[pos + 6] << 8) |
+                                        pdu[pos + 7];
+                    pos += 8;
+                    if (text_len > end - pos)
+                        break;
+                    if (charset == 0x006A) {
+                        if (attr_id == 1)
+                            copy_receiver_attribute(receiver_title,
+                                                    sizeof(receiver_title),
+                                                    &pdu[pos], text_len);
+                        else if (attr_id == 2)
+                            copy_receiver_attribute(receiver_artist,
+                                                    sizeof(receiver_artist),
+                                                    &pdu[pos], text_len);
+                        else if (attr_id == 3)
+                            copy_receiver_attribute(receiver_album,
+                                                    sizeof(receiver_album),
+                                                    &pdu[pos], text_len);
+                        else if (attr_id == 8)
+                            copy_receiver_attribute(cover_handle,
+                                                    sizeof(cover_handle),
+                                                    &pdu[pos], text_len);
+                    }
+                    pos += text_len;
+                }
+                pthread_mutex_unlock(&bt_mtx);
+            }
+            receiver_metadata_request_pending = false;
+            if (cover_handle[0])
+                receiver_request_cover_art(cover_handle);
+        }
         return; /* Ignore responses, only handle commands (C/R bit = 0) */
+    }
 
     uint8_t opcode = pdu[5];
     if (opcode == 0x7C) /* PASS THROUGH */
@@ -1040,7 +1534,7 @@ static void handle_avctp_pdu(const uint8_t *pdu, uint16_t len)
         rsp[3] = 0x09;                        /* AVRCP Response: ACCEPTED */
         l2cap_send_pdu(cid_avctp_remote, rsp, 8);
 
-        if (!released) {
+        if (!released && !bt_receiver_mode) {
             int btn = 0;
             switch (op_id) {
                 case 0x44: /* PLAY */
@@ -1265,6 +1759,12 @@ static void handle_l2cap_sig(const uint8_t *sig, uint16_t len)
                         dcid = CID_AVCTP_LOCAL;
                         cid_avctp_remote = scid;
                         result = 0;
+                    } else if (psm == PSM_BIP && bt_receiver_mode) {
+                        dcid = CID_BIP_LOCAL;
+                        cid_bip_remote = scid;
+                        bip_local_conf_done = false;
+                        bip_remote_conf_done = false;
+                        result = 0;
                     }
 
                     uint8_t rsp[8] = {
@@ -1295,6 +1795,11 @@ static void handle_l2cap_sig(const uint8_t *sig, uint16_t len)
                         } else if (scid == CID_AVCTP_LOCAL) {
                             cid_avctp_remote = dcid;
                             l2cap_send_conf_req(dcid, 512);
+                        } else if (scid == CID_BIP_LOCAL) {
+                            cid_bip_remote = dcid;
+                            bip_local_conf_done = false;
+                            bip_remote_conf_done = false;
+                            l2cap_send_conf_req(dcid, 512);
                         }
                     }
                 }
@@ -1308,6 +1813,10 @@ static void handle_l2cap_sig(const uint8_t *sig, uint16_t len)
                     else if (dcid == CID_AVDTP_SIG_LOCAL) { rcid = cid_avdtp_sig_remote; avdtp_sig_remote_conf_done = true; }
                     else if (dcid == CID_AVDTP_MED_LOCAL) { rcid = cid_avdtp_med_remote; avdtp_med_remote_conf_done = true; }
                     else if (dcid == CID_AVCTP_LOCAL) rcid = cid_avctp_remote;
+                    else if (dcid == CID_BIP_LOCAL) {
+                        rcid = cid_bip_remote;
+                        bip_remote_conf_done = true;
+                    }
 
                     uint8_t rsp[6] = {
                         (uint8_t)(rcid & 0xFF), (uint8_t)(rcid >> 8),
@@ -1316,6 +1825,7 @@ static void handle_l2cap_sig(const uint8_t *sig, uint16_t len)
                     };
                     l2cap_send_sig(L2CAP_CONF_RSP, ident, rsp, 6);
                     check_avdtp_channels_ready();
+                    receiver_bip_try_connect();
                 }
                 break;
             }
@@ -1326,7 +1836,12 @@ static void handle_l2cap_sig(const uint8_t *sig, uint16_t len)
                     if (result == 0x0000) {
                         if (scid == CID_AVDTP_SIG_LOCAL) avdtp_sig_local_conf_done = true;
                         else if (scid == CID_AVDTP_MED_LOCAL) avdtp_med_local_conf_done = true;
+                        else if (scid == CID_AVCTP_LOCAL)
+                            request_receiver_metadata();
+                        else if (scid == CID_BIP_LOCAL)
+                            bip_local_conf_done = true;
                         check_avdtp_channels_ready();
+                        receiver_bip_try_connect();
                     }
                 }
                 break;
@@ -1341,10 +1856,23 @@ static void handle_l2cap_sig(const uint8_t *sig, uint16_t len)
                     if (dcid == CID_AVDTP_MED_LOCAL || scid == cid_avdtp_med_remote) {
                         cid_avdtp_med_remote = 0;
                         a2dp_streaming = false;
+                        if (bt_receiver_mode)
+                            y1_audio_receiver_set_active(false,
+                                                          a2dp_sample_rate());
                     }
                     if (dcid == CID_AVDTP_SIG_LOCAL || scid == cid_avdtp_sig_remote) {
                         cid_avdtp_sig_remote = 0;
                         a2dp_streaming = false;
+                        if (bt_receiver_mode)
+                            y1_audio_receiver_set_active(false,
+                                                          a2dp_sample_rate());
+                    }
+                    if (dcid == CID_BIP_LOCAL || scid == cid_bip_remote) {
+                        cid_bip_remote = 0;
+                        bip_local_conf_done = false;
+                        bip_remote_conf_done = false;
+                        bip_obex_connected = false;
+                        receiver_art_connect_pending = false;
                     }
                 }
                 break;
@@ -1391,6 +1919,33 @@ static void handle_acl_packet(const uint8_t *pkt, size_t len)
         handle_avdtp_sig_pdu(payload, l2cap_len);
     } else if (cid == CID_AVCTP_LOCAL) {
         handle_avctp_pdu(payload, l2cap_len);
+    } else if (cid == CID_BIP_LOCAL && bt_receiver_mode) {
+        handle_receiver_bip_pdu(payload, l2cap_len);
+    } else if (cid == CID_AVDTP_MED_LOCAL && bt_receiver_mode &&
+               a2dp_streaming && a2dp_sbc_ready && l2cap_len > 13) {
+        const uint8_t *rtp = payload;
+        uint8_t frame_count = rtp[12] & 0x3F;
+        size_t offset = 13;
+        for (uint8_t i = 0; i < frame_count && offset < l2cap_len; i++) {
+            int16_t decoded[512];
+            size_t decoded_bytes = 0;
+            ssize_t consumed = sbc_decode(&a2dp_sbc, &rtp[offset],
+                                          l2cap_len - offset, decoded,
+                                          sizeof(decoded), &decoded_bytes);
+            if (consumed <= 0 || decoded_bytes == 0)
+                break;
+            offset += (size_t)consumed;
+            size_t samples = decoded_bytes / sizeof(int16_t);
+            if (a2dp_sbc.mode == SBC_MODE_MONO) {
+                for (size_t sample = samples; sample > 0; sample--) {
+                    int16_t value = decoded[sample - 1];
+                    decoded[(sample - 1) * 2] = value;
+                    decoded[(sample - 1) * 2 + 1] = value;
+                }
+                samples *= 2;
+            }
+            y1_audio_receiver_write(decoded, samples / 2);
+        }
     }
 }
 
@@ -1574,7 +2129,7 @@ static void handle_hci_event(const uint8_t *pkt, size_t len)
                     }
 
                     /* If we initiated the connection, request authentication -> then open L2CAP AVDTP */
-                    if (avdtp_initiator) {
+                    if (avdtp_initiator || bt_receiver_mode) {
                         uint8_t auth[2] = { (uint8_t)(acl_handle & 0xFF), (uint8_t)(acl_handle >> 8) };
                         hci_send_cmd(0x0411, auth, 2); /* HCI_Authentication_Requested */
                     }
@@ -1599,7 +2154,10 @@ static void handle_hci_event(const uint8_t *pkt, size_t len)
                 bt_state = Y1_BT_STATE_IDLE;
             pthread_mutex_unlock(&bt_mtx);
             bt_log("ACL Disconnected\n");
-            y1_bt_audio_disconnect_hook();
+            if (bt_receiver_mode)
+                y1_audio_receiver_set_active(false, a2dp_sample_rate());
+            else
+                y1_bt_audio_disconnect_hook();
             if (pending_switch_connect && bt_is_target_enabled()) {
                 memcpy(req_connect_bdaddr, pending_switch_bdaddr,
                        sizeof(req_connect_bdaddr));
@@ -1617,7 +2175,9 @@ static void handle_hci_event(const uint8_t *pkt, size_t len)
                     /* Enable link encryption, and if Initiator, open L2CAP AVDTP signaling */
                     uint8_t enc[3] = { (uint8_t)(acl_handle & 0xFF), (uint8_t)(acl_handle >> 8), 0x01 };
                     hci_send_cmd(0x0413, enc, 3); /* HCI_Set_Connection_Encryption */
-                    if (avdtp_initiator && cid_avdtp_sig_remote == 0) {
+                    if (bt_receiver_mode && cid_avctp_remote == 0) {
+                        l2cap_send_conn_req(PSM_AVCTP, CID_AVCTP_LOCAL);
+                    } else if (avdtp_initiator && cid_avdtp_sig_remote == 0) {
                         l2cap_send_conn_req(PSM_AVDTP, CID_AVDTP_SIG_LOCAL);
                     }
                 } else if (avdtp_initiator && acl_handle != 0xFFFF && cid_avdtp_sig_remote == 0) {
@@ -1817,7 +2377,9 @@ static bool mt6572_bt_hw_open_and_init(void)
  * ============================================================================ */
 static void drain_a2dp_pcm_and_transmit(void)
 {
-    if (!a2dp_streaming || cid_avdtp_med_remote == 0 || acl_handle == 0xFFFF || !a2dp_sbc_ready)
+    if (bt_receiver_mode || !a2dp_streaming ||
+        cid_avdtp_med_remote == 0 || acl_handle == 0xFFFF ||
+        !a2dp_sbc_ready)
         return;
 
     size_t codesize = sbc_get_codesize(&a2dp_sbc);
@@ -1925,7 +2487,10 @@ static void *bt_worker_thread(void *arg)
                 for (int i = 0; i < bt_num_devices; i++)
                     bt_devices[i].connected = false;
                 pthread_mutex_unlock(&bt_mtx);
-                y1_bt_audio_disconnect_hook();
+                if (bt_receiver_mode)
+                    y1_audio_receiver_set_active(false, a2dp_sample_rate());
+                else
+                    y1_bt_audio_disconnect_hook();
                 bt_state = Y1_BT_STATE_OFF;
                 bt_log("Closed /dev/stpbt (MT6572 BT Radio powered down)\n");
             }
@@ -1946,8 +2511,12 @@ static void *bt_worker_thread(void *arg)
             bt_state = Y1_BT_STATE_IDLE;
         }
 
-        if (bt_paired_devices_loaded && !bt_autoconnect_attempted &&
-            !req_connect)
+        bool receiver_autoconnect = bt_receiver_mode &&
+                                    global_settings.bt_receiver_auto_connect;
+        if (bt_paired_devices_loaded &&
+            !bt_autoconnect_attempted &&
+            !req_connect &&
+            (!bt_receiver_mode || receiver_autoconnect))
         {
             uint8_t last_used[6];
             bool have_last_used = false;
@@ -2026,7 +2595,7 @@ static void *bt_worker_thread(void *arg)
             }
             resolving_names = false;
             bt_state = Y1_BT_STATE_CONNECTING;
-            avdtp_initiator = true;
+            avdtp_initiator = !bt_receiver_mode;
 
             uint8_t cc[13];
             memcpy(&cc[0], req_connect_bdaddr, 6);
@@ -2043,8 +2612,29 @@ static void *bt_worker_thread(void *arg)
         /* Drain PCM ringbuffer into A2DP SBC packets when streaming */
         drain_a2dp_pcm_and_transmit();
 
-        /* Low-Power Sniff Mode optimization: enter sniff mode if idle for >= 2.0s */
-        if (acl_handle != 0xFFFF && !in_sniff_mode && !req_connect && !req_scan && !resolving_names) {
+        if (bt_receiver_mode && cid_avctp_remote != 0) {
+            struct timespec now;
+            clock_gettime(CLOCK_MONOTONIC, &now);
+            uint32_t now_ms = (uint32_t)(now.tv_sec * 1000 +
+                                         now.tv_nsec / 1000000);
+            if (receiver_metadata_request_pending &&
+                now_ms - last_receiver_metadata_query_ms >= 750)
+                receiver_metadata_request_pending = false;
+            if (receiver_play_status_request_pending &&
+                now_ms - last_receiver_play_status_query_ms >= 750)
+                receiver_play_status_request_pending = false;
+            if (!receiver_metadata_request_pending &&
+                now_ms - last_receiver_metadata_query_ms >= 250)
+                request_receiver_metadata();
+            if (!receiver_play_status_request_pending &&
+                now_ms - last_receiver_play_status_query_ms >= 250)
+                request_receiver_play_status();
+        }
+
+        /* Do not throttle receiver links or active media streams: incoming
+         * audio does not update the source-side PCM activity timestamp. */
+        if (acl_handle != 0xFFFF && !bt_receiver_mode && !a2dp_streaming &&
+            !in_sniff_mode && !req_connect && !req_scan && !resolving_names) {
             struct timespec now;
             clock_gettime(CLOCK_MONOTONIC, &now);
             uint32_t now_ms = (uint32_t)(now.tv_sec * 1000 + now.tv_nsec / 1000000);
@@ -2125,6 +2715,75 @@ void y1_bt_set_enabled(bool enable)
 {
     y1_bt_init();
     bt_set_target_enabled(enable);
+}
+
+void y1_bt_set_receiver_mode(bool enable)
+{
+    y1_bt_init();
+    if (enable == bt_receiver_mode)
+        return;
+
+    if (enable) {
+        receiver_previous_bt_enabled = bt_is_target_enabled();
+        bt_autoconnect_attempted = false;
+        bt_receiver_mode = true;
+        y1_audio_receiver_mode_set(true);
+        y1_bt_set_enabled(true);
+        if (acl_handle != 0xFFFF)
+            y1_bt_disconnect();
+    } else {
+        bt_receiver_mode = false;
+        bt_autoconnect_attempted = false;
+        y1_audio_receiver_set_active(false, a2dp_sample_rate());
+        y1_audio_receiver_mode_set(false);
+        y1_bt_disconnect();
+        y1_bt_set_enabled(receiver_previous_bt_enabled);
+    }
+}
+
+bool y1_bt_is_receiver_mode(void)
+{
+    return bt_receiver_mode;
+}
+
+uint8_t y1_bt_receiver_get_play_status(void)
+{
+    pthread_mutex_lock(&bt_mtx);
+    uint8_t status = receiver_play_status;
+    pthread_mutex_unlock(&bt_mtx);
+    return bt_receiver_mode ? status : 0;
+}
+
+uint32_t y1_bt_receiver_art_generation(void)
+{
+    pthread_mutex_lock(&bt_mtx);
+    uint32_t generation = receiver_art_generation;
+    pthread_mutex_unlock(&bt_mtx);
+    return generation;
+}
+
+void y1_bt_get_receiver_metadata(char *title, size_t title_size,
+                                 char *artist, size_t artist_size,
+                                 char *album, size_t album_size)
+{
+    if (!bt_receiver_mode) {
+        if (title && title_size > 0)
+            title[0] = '\0';
+        if (artist && artist_size > 0)
+            artist[0] = '\0';
+        if (album && album_size > 0)
+            album[0] = '\0';
+        return;
+    }
+
+    pthread_mutex_lock(&bt_mtx);
+    copy_receiver_attribute(title, title_size, receiver_title,
+                            strlen(receiver_title));
+    copy_receiver_attribute(artist, artist_size, receiver_artist,
+                            strlen(receiver_artist));
+    copy_receiver_attribute(album, album_size, receiver_album,
+                            strlen(receiver_album));
+    pthread_mutex_unlock(&bt_mtx);
 }
 
 bool y1_bt_is_enabled(void)

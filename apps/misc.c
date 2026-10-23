@@ -850,6 +850,13 @@ long default_event_handler_ex(long event, void (*callback)(void *), void *parame
         /* multimedia keys on keyboards, headsets */
         case BUTTON_MULTIMEDIA_PLAYPAUSE:
         {
+#if defined(INNIOASIS_Y1)
+            if (y1_bt_is_receiver_mode())
+            {
+                y1_bt_receiver_send_control(Y1_BT_RECEIVER_PLAY_PAUSE);
+                return event;
+            }
+#endif
             int status = audio_status();
             if (status & AUDIO_STATUS_PLAY)
             {
@@ -868,23 +875,33 @@ long default_event_handler_ex(long event, void (*callback)(void *), void *parame
             return event;
         }
         case BUTTON_MULTIMEDIA_NEXT:
+#if defined(INNIOASIS_Y1)
+            if (y1_bt_is_receiver_mode())
+            {
+                y1_bt_receiver_send_control(Y1_BT_RECEIVER_NEXT);
+                return event;
+            }
+#endif
             audio_next();
             return event;
         case BUTTON_MULTIMEDIA_PREV:
+#if defined(INNIOASIS_Y1)
+            if (y1_bt_is_receiver_mode())
+            {
+                y1_bt_receiver_send_control(Y1_BT_RECEIVER_PREVIOUS);
+                return event;
+            }
+#endif
             audio_prev();
             return event;
-        case BUTTON_MULTIMEDIA_STOP:
-            list_stop_handler();
-            return event;
-        case BUTTON_MULTIMEDIA_VOLUME_UP:
-        case BUTTON_MULTIMEDIA_VOLUME_UP|BUTTON_REPEAT:
-            adjust_volume(1);
-            return event;
-        case BUTTON_MULTIMEDIA_VOLUME_DOWN:
-        case BUTTON_MULTIMEDIA_VOLUME_DOWN|BUTTON_REPEAT:
-            adjust_volume(-1);
-            return event;
         case BUTTON_MULTIMEDIA_FFWD:
+#if defined(INNIOASIS_Y1)
+            if (y1_bt_is_receiver_mode())
+            {
+                y1_bt_receiver_send_control(Y1_BT_RECEIVER_SEEK_FORWARD);
+                return event;
+            }
+#endif
         {
             struct mp3entry *id3 = audio_current_track();
             if (id3 && (audio_status() & AUDIO_STATUS_PLAY))
@@ -898,6 +915,13 @@ long default_event_handler_ex(long event, void (*callback)(void *), void *parame
             return event;
         }
         case BUTTON_MULTIMEDIA_REW:
+#if defined(INNIOASIS_Y1)
+            if (y1_bt_is_receiver_mode())
+            {
+                y1_bt_receiver_send_control(Y1_BT_RECEIVER_SEEK_BACKWARD);
+                return event;
+            }
+#endif
         {
             struct mp3entry *id3 = audio_current_track();
             if (id3 && (audio_status() & AUDIO_STATUS_PLAY))
@@ -910,6 +934,27 @@ long default_event_handler_ex(long event, void (*callback)(void *), void *parame
             }
             return event;
         }
+        case BUTTON_MULTIMEDIA_STOP:
+            list_stop_handler();
+            return event;
+        case BUTTON_MULTIMEDIA_VOLUME_UP:
+        case BUTTON_MULTIMEDIA_VOLUME_UP|BUTTON_REPEAT:
+#if defined(INNIOASIS_Y1)
+            if (y1_bt_is_receiver_mode() &&
+                global_settings.bt_receiver_full_volume)
+                return event;
+#endif
+            adjust_volume(1);
+            return event;
+        case BUTTON_MULTIMEDIA_VOLUME_DOWN:
+        case BUTTON_MULTIMEDIA_VOLUME_DOWN|BUTTON_REPEAT:
+#if defined(INNIOASIS_Y1)
+            if (y1_bt_is_receiver_mode() &&
+                global_settings.bt_receiver_full_volume)
+                return event;
+#endif
+            adjust_volume(-1);
+            return event;
         case BUTTON_MULTIMEDIA_KEYLOCK:
         {
 #if !defined(HAS_BUTTON_HOLD)

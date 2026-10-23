@@ -66,7 +66,10 @@ enum {
     GO_TO_SYSTEM_SCREEN,
     GO_TO_SHORTCUTMENU,
 #ifdef HAVE_TAGCACHE
-    GO_TO_PICTUREFLOW
+    GO_TO_PICTUREFLOW,
+#endif
+#if defined(INNIOASIS_Y1)
+    GO_TO_BT_RECEIVER
 #endif
 };
 #ifndef PLUGIN

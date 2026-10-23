@@ -37,11 +37,13 @@
 #include "pcm.h"
 #include "pcm_sampr.h"
 #include "pcm-internal.h"
+#include "settings.h"
 #include "pcm_mixer.h"
 #include "pcm_sink.h"
 #include "pcm_sw_volume.h"
 #include "audiohw.h"
 #include "bt-y1.h"
+#include "pcm-eac.h"
 #include "y1-log.h"
 
 #define SET_SPEAKER_OFF          0x400443a2
@@ -74,6 +76,29 @@ static bool y1_cpu_powerdown_enabled = true;
 static int wakelock_fd = -1;
 static volatile sig_atomic_t dma_stopped = 1;
 static volatile sig_atomic_t dma_locked = 0;
+#define Y1_BT_PCM_RING_FRAMES 8192
+static int16_t bt_pcm_ring[Y1_BT_PCM_RING_FRAMES * 2];
+static size_t bt_pcm_ring_read;
+static size_t bt_pcm_ring_write;
+static volatile bool bt_receiver_active;
+static volatile bool bt_receiver_mode_power_hold;
+static pthread_mutex_t bt_pcm_mtx = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t pcm_mtx = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t pcm_cond = PTHREAD_COND_INITIALIZER;
+
+static void sink_set_freq(uint16_t freq);
+static bool y1_set_deep_idle(bool enable);
+static void y1_audio_set_output_enabled(bool enable);
+static int vol_cb_to_hp_idx(int vol_cb);
+static int vol_cb_to_sw_remainder(int vol_cb, int hp_idx);
+
+static bool y1_audio_receiver_is_active(void)
+{
+    pthread_mutex_lock(&bt_pcm_mtx);
+    bool active = bt_receiver_active;
+    pthread_mutex_unlock(&bt_pcm_mtx);
+    return active;
+}
 
 static void y1_play_wake_lock(bool hold)
 {
@@ -101,7 +126,100 @@ static void y1_audio_clocks(int on)
 }
 static int pending_vol_l = 0;
 static int pending_vol_r = 0;
-static void sink_set_freq(uint16_t freq);
+
+void y1_audio_receiver_set_active(bool active, unsigned long sample_rate)
+{
+    if (active && !y1_bt_is_receiver_mode())
+        return;
+
+    pthread_mutex_lock(&bt_pcm_mtx);
+    if (bt_receiver_active == active) {
+        pthread_mutex_unlock(&bt_pcm_mtx);
+        return;
+    }
+    bt_receiver_active = active;
+    bt_pcm_ring_read = 0;
+    bt_pcm_ring_write = 0;
+    pthread_mutex_unlock(&bt_pcm_mtx);
+
+    if (active) {
+        y1_set_deep_idle(false);
+        y1_play_wake_lock(true);
+        sink_set_freq((uint16_t)sample_rate);
+        y1_audio_set_output_enabled(true);
+        if (global_settings.bt_receiver_full_volume)
+            audiohw_set_volume(60, 60);
+    } else if (dma_stopped != 0) {
+        y1_audio_set_output_enabled(false);
+        if (!bt_receiver_mode_power_hold) {
+            y1_play_wake_lock(false);
+            y1_set_deep_idle(true);
+        }
+    }
+
+    pthread_mutex_lock(&pcm_mtx);
+    pthread_cond_signal(&pcm_cond);
+    pthread_mutex_unlock(&pcm_mtx);
+}
+
+void y1_audio_receiver_mode_set(bool enabled)
+{
+    bt_receiver_mode_power_hold = enabled;
+    if (enabled) {
+        y1_set_deep_idle(false);
+        y1_play_wake_lock(true);
+    } else if (!y1_audio_receiver_is_active()) {
+        y1_play_wake_lock(false);
+        y1_set_deep_idle(true);
+    }
+}
+
+size_t y1_audio_receiver_write(const int16_t *samples, size_t frames)
+{
+    if (!samples || !y1_bt_is_receiver_mode())
+        return 0;
+
+    size_t written = 0;
+    pthread_mutex_lock(&bt_pcm_mtx);
+    while (bt_receiver_active && written < frames) {
+        size_t next = (bt_pcm_ring_write + 1) % Y1_BT_PCM_RING_FRAMES;
+        if (next == bt_pcm_ring_read)
+            break;
+        bt_pcm_ring[bt_pcm_ring_write * 2] = samples[written * 2];
+        bt_pcm_ring[bt_pcm_ring_write * 2 + 1] = samples[written * 2 + 1];
+        bt_pcm_ring_write = next;
+        written++;
+    }
+    pthread_mutex_unlock(&bt_pcm_mtx);
+    return written;
+}
+
+static int16_t y1_receiver_apply_volume(int16_t sample, int volume_cb)
+{
+    static const int32_t gain_q15[] = {
+        29204, 32768, 36766, 41259, 46286, 51970, 58270, 65381
+    };
+
+    if (volume_cb <= -740)
+        return 0;
+
+    int hp_idx = vol_cb_to_hp_idx(volume_cb);
+    int sw_cb = vol_cb_to_sw_remainder(volume_cb, hp_idx);
+    if (sw_cb <= -740)
+        return 0;
+    if (sw_cb < -10)
+        sw_cb = -10;
+    else if (sw_cb > 60)
+        sw_cb = 60;
+
+    int32_t scaled = ((int32_t)sample *
+                      gain_q15[(sw_cb + 10) / 10]) >> 15;
+    if (scaled > INT16_MAX)
+        scaled = INT16_MAX;
+    else if (scaled < INT16_MIN)
+        scaled = INT16_MIN;
+    return (int16_t)scaled;
+}
 
 /* MT6323 AUDTOP_CON5 (0x70a): HPL bits [14:12], HPR bits [10:8], 0..7.
  * 2 dB/step, index 7 = +14 dB. Low bits 0x0014 keep the HP path powered.
@@ -299,7 +417,8 @@ static void y1_audio_set_output_enabled(bool enable)
     set_anareg(eac_fd, 0x4000, 1, 1);
     ioctl(eac_fd, SET_HEADPHONE_ON, 3);
 
-    if (dma_stopped == 0 && dma_locked == 0)
+    if ((dma_stopped == 0 && dma_locked == 0) ||
+        y1_audio_receiver_is_active())
         set_afereg(eac_fd, 0x10, 1 << 1, 1 << 1);
 }
 
@@ -307,6 +426,9 @@ void audiohw_set_volume(int vol_l, int vol_r)
 {
     /* vol_l / vol_r are centibels (-740 to +60), 1 dB UI steps. Analog HP
      * PGA is the coarse control; PCM only supplies the 1 dB remainder. */
+    if (y1_bt_is_receiver_mode() && global_settings.bt_receiver_full_volume)
+        vol_l = vol_r = 60;
+
     int idx_l = vol_cb_to_hp_idx(vol_l);
     int idx_r = vol_cb_to_hp_idx(vol_r);
     int sw_l = vol_cb_to_sw_remainder(vol_l, idx_l);
@@ -325,8 +447,6 @@ void audiohw_set_volume(int vol_l, int vol_r)
     apply_hp_analog_gain(idx_l, idx_r);
 }
 static pthread_t pcm_thread;
-static pthread_mutex_t pcm_mtx = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t pcm_cond = PTHREAD_COND_INITIALIZER;
 
 static volatile bool pcm_thread_exit = false;
 
@@ -340,7 +460,8 @@ static void *pcm_worker(void *arg)
     while (!pcm_thread_exit)
     {
         pthread_mutex_lock(&pcm_mtx);
-        while ((dma_stopped == 1 || dma_locked == 1) && !pcm_thread_exit)
+        while ((dma_stopped == 1 || dma_locked == 1) &&
+               !y1_audio_receiver_is_active() && !pcm_thread_exit)
         {
             pthread_cond_wait(&pcm_cond, &pcm_mtx);
         }
@@ -348,6 +469,57 @@ static void *pcm_worker(void *arg)
 
         if (pcm_thread_exit)
             break;
+
+        if (y1_audio_receiver_is_active())
+        {
+            int16_t samples[512 * 2];
+            size_t frames = 0;
+            pthread_mutex_lock(&bt_pcm_mtx);
+            while (frames < 512 && bt_pcm_ring_read != bt_pcm_ring_write) {
+                samples[frames * 2] = bt_pcm_ring[bt_pcm_ring_read * 2];
+                samples[frames * 2 + 1] = bt_pcm_ring[bt_pcm_ring_read * 2 + 1];
+                bt_pcm_ring_read = (bt_pcm_ring_read + 1) %
+                                   Y1_BT_PCM_RING_FRAMES;
+                frames++;
+            }
+            pthread_mutex_unlock(&bt_pcm_mtx);
+
+            if (frames == 0) {
+                usleep(2000);
+                continue;
+            }
+
+            int volume_l = pending_vol_l;
+            int volume_r = pending_vol_r;
+            if (y1_bt_is_receiver_mode() &&
+                !global_settings.bt_receiver_full_volume) {
+                for (size_t i = 0; i < frames; i++) {
+                    samples[i * 2] =
+                        y1_receiver_apply_volume(samples[i * 2], volume_l);
+                    samples[i * 2 + 1] =
+                        y1_receiver_apply_volume(samples[i * 2 + 1],
+                                                 volume_r);
+                }
+            }
+
+            size_t offset = 0;
+            size_t bytes = frames * 2 * sizeof(int16_t);
+            while (offset < bytes && y1_audio_receiver_is_active() &&
+                   eac_fd >= 0) {
+                ssize_t result = write(eac_fd,
+                                       (const uint8_t *)samples + offset,
+                                       bytes - offset);
+                if (result > 0)
+                    offset += (size_t)result;
+                else if (result < 0 && errno == EINTR)
+                    continue;
+                else if (result < 0 && errno == EAGAIN)
+                    usleep(1000);
+                else
+                    break;
+            }
+            continue;
+        }
 
         if (pcm_size == 0)
         {

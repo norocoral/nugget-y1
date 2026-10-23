@@ -18058,3 +18058,115 @@
     *: "Text Crossfade"
   </voice>
 </phrase>
+<phrase>
+  id: LANG_BLUETOOTH_RECEIVER
+  desc: Y1 top-level main menu item
+  user: core
+  <source>
+    *: "Bluetooth Receiver"
+  </source>
+  <dest>
+    *: "Bluetooth Receiver"
+  </dest>
+  <voice>
+    *: "Bluetooth Receiver"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_BT_RECEIVER_NOW_PLAYING
+  desc: Y1 Bluetooth Receiver menu item
+  user: core
+  <source>
+    *: "Now Playing"
+  </source>
+  <dest>
+    *: "Now Playing"
+  </dest>
+  <voice>
+    *: "Now Playing"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_BT_RECEIVER_SETTINGS
+  desc: Y1 Bluetooth Receiver settings submenu
+  user: core
+  <source>
+    *: "Settings"
+  </source>
+  <dest>
+    *: "Settings"
+  </dest>
+  <voice>
+    *: "Settings"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_BT_RECEIVER_QUIT
+  desc: Y1 Bluetooth Receiver quit menu item
+  user: core
+  <source>
+    *: "Quit"
+  </source>
+  <dest>
+    *: "Quit"
+  </dest>
+  <voice>
+    *: "Quit"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_BT_RECEIVER_QUIT_CONFIRM
+  desc: confirm exiting Bluetooth Receiver
+  user: core
+  <source>
+    *: "Quit Bluetooth Receiver?"
+  </source>
+  <dest>
+    *: "Quit Bluetooth Receiver?"
+  </dest>
+  <voice>
+    *: "Quit Bluetooth Receiver?"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_BT_RECEIVER_AUTO_START
+  desc: Bluetooth Receiver setting
+  user: core
+  <source>
+    *: "Turn On Automatically"
+  </source>
+  <dest>
+    *: "Turn On Automatically"
+  </dest>
+  <voice>
+    *: "Turn on automatically"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_BT_RECEIVER_AUTO_CONNECT
+  desc: Bluetooth Receiver setting
+  user: core
+  <source>
+    *: "Connect Automatically"
+  </source>
+  <dest>
+    *: "Connect Automatically"
+  </dest>
+  <voice>
+    *: "Connect automatically"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_BT_RECEIVER_FULL_VOLUME
+  desc: Bluetooth Receiver setting
+  user: core
+  <source>
+    *: "Full Volume Mode"
+  </source>
+  <dest>
+    *: "Full Volume Mode"
+  </dest>
+  <voice>
+    *: "Full volume mode"
+  </voice>
+</phrase>

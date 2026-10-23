@@ -18,6 +18,7 @@
 #include <stddef.h>
 
 #define Y1_BT_MAX_DEVICES 16
+#define Y1_BT_RECEIVER_ART_PATH "/mnt/sdcard/.rockbox/albumart/bt-receiver.jpg"
 
 enum y1_bt_state {
     Y1_BT_STATE_OFF = 0,
@@ -42,9 +43,20 @@ struct y1_bt_device {
     int     volume;    /* Remembered volume for this specific device */
 };
 
+enum y1_bt_receiver_command {
+    Y1_BT_RECEIVER_PLAY_PAUSE,
+    Y1_BT_RECEIVER_NEXT,
+    Y1_BT_RECEIVER_PREVIOUS,
+    Y1_BT_RECEIVER_SEEK_FORWARD,
+    Y1_BT_RECEIVER_SEEK_BACKWARD
+};
+
 void y1_bt_init(void);
 void y1_bt_set_enabled(bool enable);
 bool y1_bt_is_enabled(void);
+void y1_bt_set_receiver_mode(bool enable);
+bool y1_bt_is_receiver_mode(void);
+bool y1_bt_receiver_send_control(enum y1_bt_receiver_command command);
 enum y1_bt_state y1_bt_get_state(void);
 const char *y1_bt_get_status_str(void);
 const char *y1_bt_get_connected_name(void);
@@ -61,6 +73,8 @@ void y1_bt_disconnect(void);
 void y1_bt_forget_device(const uint8_t bdaddr[6]);
 
 bool y1_bt_a2dp_is_streaming(void);
+uint8_t y1_bt_receiver_get_play_status(void);
+uint32_t y1_bt_receiver_art_generation(void);
 void y1_bt_a2dp_write_pcm(const void *buf, size_t bytes, unsigned long sampr);
 
 void y1_bt_audio_disconnect_hook(void);
@@ -70,5 +84,8 @@ int  y1_bt_get_active_device_volume(void);
 void y1_bt_update_metadata(const char *title, const char *artist,
                            const char *album, uint32_t duration_ms,
                            uint32_t position_ms, uint8_t play_status);
+void y1_bt_get_receiver_metadata(char *title, size_t title_size,
+                                 char *artist, size_t artist_size,
+                                 char *album, size_t album_size);
 
 #endif /* _BT_Y1_H_ */
