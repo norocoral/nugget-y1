@@ -27,6 +27,7 @@
 #include "sysfs.h"
 #include "settings.h"
 #include "powermgmt.h"
+#include "power.h"
 #include "y1-log.h"
 
 #ifndef KEY_HEADSETHOOK
@@ -53,7 +54,7 @@ static bool mfb_waiting_5s = false;
 static long mfb_hold_2s_tick = 0;
 static long mfb_last_pmic_check = 0;
 
-/* Physical Play/Pause 10-second hold to shut down */
+/* Physical Play/Pause 10-second hold forces immediate system poweroff. */
 static bool phys_play_is_down = false;
 static long phys_play_press_tick = 0;
 static bool phys_play_poweroff_fired = false;
@@ -96,14 +97,14 @@ static void y1_mfb_tick(void)
 {
     long now = current_tick;
 
-    /* Physical Play/Pause held for 10 seconds -> shut down device */
+    /* This tick task runs independently of UI actions, including in HOLD. */
     if (phys_play_is_down && !phys_play_poweroff_fired)
     {
-        if (TIME_AFTER(now, phys_play_press_tick + (10 * HZ)))
+        if (TIME_AFTER(now, phys_play_press_tick + 10 * HZ))
         {
             phys_play_poweroff_fired = true;
-            y1_kmsg_log("[button-y1] Play/Pause held 10s -> sys_poweroff()\n");
-            sys_poweroff();
+            y1_kmsg_log("[button-y1] Play/Pause held 10s -> forced poweroff\n");
+            power_off();
         }
     }
 

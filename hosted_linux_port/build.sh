@@ -274,25 +274,44 @@ rm -f \
     "$ROOTFS_DIR"/lib/libpthread* \
     "$ROOTFS_DIR"/lib/librt*
 
+# Remove stale temporary or duplicate libraries left in the persistent rootfs.
+find "$ROOTFS_DIR/lib" -mindepth 1 -maxdepth 1 -type f -delete
+
 for lib in ld-linux-armhf.so.3 libc.so.6; do
-    if [[ ! -f "$ROOTFS_DIR/lib/$lib" ]]; then
-        if [[ -d /usr/arm-linux-gnueabihf/lib ]]; then
-            LIB_SOURCE="$(
-                find /usr/arm-linux-gnueabihf/lib \
-                    -name "$lib" -type f -print -quit 2>/dev/null || true
-            )"
-
-            if [[ -n "$LIB_SOURCE" ]]; then
-                cp -L "$LIB_SOURCE" "$ROOTFS_DIR/lib/$lib"
-            fi
-        fi
+    LIB_SOURCE=""
+    if [[ -d /usr/arm-linux-gnueabihf/lib ]]; then
+        LIB_SOURCE="$(
+            find /usr/arm-linux-gnueabihf/lib \
+                -name "$lib" -type f -print -quit 2>/dev/null || true
+        )"
     fi
 
-    if [[ -f "$ROOTFS_DIR/lib/$lib" ]]; then
-        "$STRIP" --strip-unneeded "$ROOTFS_DIR/lib/$lib" 2>/dev/null || true
-    else
-        echo "[!] Warning: $lib was not found in the cross-toolchain libraries."
+    if [[ -z "$LIB_SOURCE" || ! -s "$LIB_SOURCE" ]]; then
+        echo "[!] Required ARM runtime library not found or empty: $lib"
+        exit 1
     fi
+
+    LIB_TMP="$ROOTFS_DIR/lib/$lib.tmp.$$"
+    cp -L "$LIB_SOURCE" "$LIB_TMP"
+    if [[ ! -s "$LIB_TMP" ]]; then
+        echo "[!] Failed to copy ARM runtime library: $lib"
+        rm -f "$LIB_TMP"
+        exit 1
+    fi
+
+    if ! "$STRIP" --strip-unneeded "$LIB_TMP"; then
+        echo "[!] Failed to strip ARM runtime library: $lib"
+        rm -f "$LIB_TMP"
+        exit 1
+    fi
+
+    if [[ ! -s "$LIB_TMP" ]]; then
+        echo "[!] Stripping produced an empty ARM runtime library: $lib"
+        rm -f "$LIB_TMP"
+        exit 1
+    fi
+
+    mv -f "$LIB_TMP" "$ROOTFS_DIR/lib/$lib"
 done
 
 # ---------------------------------------------------------------------------
@@ -458,6 +477,13 @@ fi
 
 BOOT_SIZE="$(stat -c%s "$SCRIPT_DIR/boot_rockbox.img")"
 
+if ((BOOT_SIZE > MAX_BOOT_SIZE)); then
+    OVER=$((BOOT_SIZE - MAX_BOOT_SIZE))
+    echo "[!] ERROR: Boot image exceeds the 6 MiB partition limit by $OVER bytes."
+    echo "    Refusing to report this image as flashable."
+    exit 1
+fi
+
 echo
 echo "=========================================================="
 echo " BUILD COMPLETE!"
@@ -466,13 +492,7 @@ echo "Flashable Boot Image: $SCRIPT_DIR/boot_rockbox.img"
 echo "Boot Image Size:      $BOOT_SIZE bytes"
 echo "SD Card Assets:       $SCRIPT_DIR/rockbox_sdcard.zip"
 echo "Partition Limit:      $MAX_BOOT_SIZE bytes (6 MiB)"
-
-if ((BOOT_SIZE <= MAX_BOOT_SIZE)); then
-    REMAINING=$((MAX_BOOT_SIZE - BOOT_SIZE))
-    echo "[+] SIZE CHECK PASSED: $REMAINING bytes remaining."
-else
-    OVER=$((BOOT_SIZE - MAX_BOOT_SIZE))
-    echo "[!] WARNING: Boot image exceeds partition limit by $OVER bytes."
-fi
+REMAINING=$((MAX_BOOT_SIZE - BOOT_SIZE))
+echo "[+] SIZE CHECK PASSED: $REMAINING bytes remaining."
 
 echo "=========================================================="

@@ -176,6 +176,8 @@ void lcd_init_device(void)
 
     init_rgb565_lut();
 
+    ioctl(fb_fd, MTKFB_POWERON);
+
     /* Unblank the display hardware */
     ioctl(fb_fd, FBIOBLANK, VESA_NO_BLANKING);
 
@@ -187,6 +189,8 @@ void lcd_init_device(void)
         klog("[lcd-y1] ERROR: mmap framebuffer failed!\n");
         return;
     }
+
+    redraw_hw();
 
     /* Preserve boot splash in mapped_fb until first Rockbox lcd_update() */
     framebuffer = FBADDR(0, 0);
