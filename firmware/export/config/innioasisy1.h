@@ -86,5 +86,3 @@
 #define HAVE_HOTSWAP
 #define MULTIDRIVE_DIR "/mnt/extsd"
 #define BOOTDIR "/.rockbox"
-
-
