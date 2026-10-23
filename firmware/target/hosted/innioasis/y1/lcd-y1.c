@@ -69,6 +69,12 @@ static bool lut_inited = false;
 static uint32_t sw_backbuf[480 * 360] __attribute__((aligned(64)));
 static bool y1_lowpower_refresh;
 static bool y1_internal_aod_refresh;
+#if LCD_DEPTH == 16
+static fb_data navigation_old_frame[LCD_WIDTH * LCD_HEIGHT];
+static long navigation_fade_start;
+static bool navigation_fade_active;
+static unsigned navigation_fade_alpha;
+#endif
 
 fb_data *framebuffer = NULL; /* global variable referenced by lcd-memframe / lcd-target.h */
 
@@ -292,6 +298,48 @@ void lcd_update(void)
     y1_lowpower_refresh = false;
 }
 
+#if LCD_DEPTH == 16
+static long navigation_fade_duration(void)
+{
+    long duration = (HZ * 30 + 999) / 1000;
+    return duration > 0 ? duration : 1;
+}
+
+void lcd_navigation_fade_capture(void)
+{
+    if (!global_settings.navigation_fade)
+    {
+        navigation_fade_active = false;
+        return;
+    }
+    if (navigation_fade_active || !framebuffer)
+        return;
+
+    fb_data *src = FBADDR(0, 0);
+    if (!src)
+        return;
+
+    memcpy(navigation_old_frame, src, sizeof(navigation_old_frame));
+    navigation_fade_start = current_tick;
+    navigation_fade_alpha = 0;
+    navigation_fade_active = true;
+}
+
+static uint16_t navigation_blend_pixel(uint16_t old_pixel,
+                                       uint16_t new_pixel)
+{
+    unsigned a = navigation_fade_alpha;
+    unsigned inv_a = 256 - a;
+    unsigned red = (((old_pixel >> 11) & 0x1f) * inv_a +
+                    ((new_pixel >> 11) & 0x1f) * a) >> 8;
+    unsigned green = (((old_pixel >> 5) & 0x3f) * inv_a +
+                      ((new_pixel >> 5) & 0x3f) * a) >> 8;
+    unsigned blue = ((old_pixel & 0x1f) * inv_a +
+                     (new_pixel & 0x1f) * a) >> 8;
+    return (red << 11) | (green << 5) | blue;
+}
+#endif
+
 void lcd_update_rect(int x, int y, int width, int height)
 {
     if (fb_fd < 0 || !mapped_fb) return;
@@ -304,6 +352,37 @@ void lcd_update_rect(int x, int y, int width, int height)
         init_rgb565_lut();
     }
 
+#if LCD_DEPTH == 16
+    bool blend_navigation = navigation_fade_active;
+    if (blend_navigation)
+    {
+        if (!global_settings.navigation_fade)
+        {
+            navigation_fade_active = false;
+            blend_navigation = false;
+        }
+        else
+        {
+            long duration = navigation_fade_duration();
+            long elapsed = current_tick - navigation_fade_start;
+            if (elapsed >= duration)
+            {
+                navigation_fade_alpha = 256;
+            }
+            else
+                navigation_fade_alpha = (unsigned)(elapsed * 256 / duration);
+
+            x = 0;
+            y = 0;
+            width = y1_resolution_mode == 1 ? 320 : LCD_WIDTH;
+            height = y1_resolution_mode == 1 ? 240 : LCD_HEIGHT;
+        }
+    }
+#else
+    const bool blend_navigation = false;
+#endif
+
+redraw_navigation_fade:
     if (!y1_internal_aod_refresh) {
         int screen_width = y1_resolution_mode == 1 ? 320 : LCD_WIDTH;
         int screen_height = y1_resolution_mode == 1 ? 240 : LCD_HEIGHT;
@@ -378,10 +457,25 @@ void lcd_update_rect(int x, int y, int width, int height)
                 uint32_t *drow2 = &sw_backbuf[(dy + 2) * 480];
 
                 for (int sx = 0, dx = 0; sx < 320; sx += 2, dx += 3) {
-                    uint32_t t0 = rgb565_lut[(uint16_t)srow0[sx]];
-                    uint32_t t1 = rgb565_lut[(uint16_t)srow0[sx + 1]];
-                    uint32_t b0 = rgb565_lut[(uint16_t)srow1[sx]];
-                    uint32_t b1 = rgb565_lut[(uint16_t)srow1[sx + 1]];
+                    uint16_t p_t0 = (uint16_t)srow0[sx];
+                    uint16_t p_t1 = (uint16_t)srow0[sx + 1];
+                    uint16_t p_b0 = (uint16_t)srow1[sx];
+                    uint16_t p_b1 = (uint16_t)srow1[sx + 1];
+                    if (blend_navigation && navigation_fade_alpha < 256)
+                    {
+                        p_t0 = navigation_blend_pixel(
+                            (uint16_t)navigation_old_frame[sy * LCD_WIDTH + sx], p_t0);
+                        p_t1 = navigation_blend_pixel(
+                            (uint16_t)navigation_old_frame[sy * LCD_WIDTH + sx + 1], p_t1);
+                        p_b0 = navigation_blend_pixel(
+                            (uint16_t)navigation_old_frame[(sy + 1) * LCD_WIDTH + sx], p_b0);
+                        p_b1 = navigation_blend_pixel(
+                            (uint16_t)navigation_old_frame[(sy + 1) * LCD_WIDTH + sx + 1], p_b1);
+                    }
+                    uint32_t t0 = rgb565_lut[p_t0];
+                    uint32_t t1 = rgb565_lut[p_t1];
+                    uint32_t b0 = rgb565_lut[p_b0];
+                    uint32_t b1 = rgb565_lut[p_b1];
 
                     uint32_t tm = avg_xrgb8888(t0, t1);
                     uint32_t bm = avg_xrgb8888(b0, b1);
@@ -424,6 +518,17 @@ void lcd_update_rect(int x, int y, int width, int height)
                     uint16_t t1 = (uint16_t)srow0[sx + 1];
                     uint16_t b0 = (uint16_t)srow1[sx];
                     uint16_t b1 = (uint16_t)srow1[sx + 1];
+                    if (blend_navigation && navigation_fade_alpha < 256)
+                    {
+                        t0 = navigation_blend_pixel(
+                            (uint16_t)navigation_old_frame[sy * LCD_WIDTH + sx], t0);
+                        t1 = navigation_blend_pixel(
+                            (uint16_t)navigation_old_frame[sy * LCD_WIDTH + sx + 1], t1);
+                        b0 = navigation_blend_pixel(
+                            (uint16_t)navigation_old_frame[(sy + 1) * LCD_WIDTH + sx], b0);
+                        b1 = navigation_blend_pixel(
+                            (uint16_t)navigation_old_frame[(sy + 1) * LCD_WIDTH + sx + 1], b1);
+                    }
 
                     uint16_t tm = avg_rgb565(t0, t1);
                     uint16_t bm = avg_rgb565(b0, b1);
@@ -446,6 +551,22 @@ void lcd_update_rect(int x, int y, int width, int height)
             }
         }
         redraw_hw();
+#if LCD_DEPTH == 16
+        if (navigation_fade_active)
+        {
+            sleep(1);
+            long duration = navigation_fade_duration();
+            long elapsed = current_tick - navigation_fade_start;
+            if (elapsed < duration)
+                navigation_fade_alpha = (unsigned)(elapsed * 256 / duration);
+            else
+            {
+                navigation_fade_alpha = 256;
+                navigation_fade_active = false;
+            }
+            goto redraw_navigation_fade;
+        }
+#endif
         return;
     }
 
@@ -462,7 +583,12 @@ void lcd_update_rect(int x, int y, int width, int height)
             const fb_data *src_row = src_base + r * LCD_WIDTH + x;
             uint32_t *dst_row = &sw_backbuf[r * 480 + x];
             for (int c = 0; c < width; c++) {
-                dst_row[c] = rgb565_lut[(uint16_t)src_row[c]];
+                uint16_t pixel = (uint16_t)src_row[c];
+                if (blend_navigation && navigation_fade_alpha < 256)
+                    pixel = navigation_blend_pixel(
+                        (uint16_t)navigation_old_frame[r * LCD_WIDTH + x + c],
+                        pixel);
+                dst_row[c] = rgb565_lut[pixel];
             }
         }
         /* Burst-copy from cached backbuffer to hardware framebuffer to prevent tearing */
@@ -482,11 +608,36 @@ void lcd_update_rect(int x, int y, int width, int height)
         for (int r = y; r < y + height; r++) {
             const fb_data *src_row = src_base + r * LCD_WIDTH + x;
             uint8_t *dst_row = mapped_fb + r * stride + x * sizeof(fb_data);
-            memcpy(dst_row, src_row, width * sizeof(fb_data));
+            if (blend_navigation && navigation_fade_alpha < 256)
+            {
+                uint16_t *dst = (uint16_t *)dst_row;
+                for (int c = 0; c < width; c++)
+                    dst[c] = navigation_blend_pixel(
+                        (uint16_t)navigation_old_frame[r * LCD_WIDTH + x + c],
+                        (uint16_t)src_row[c]);
+            }
+            else
+                memcpy(dst_row, src_row, width * sizeof(fb_data));
         }
     }
 
     redraw_hw();
+#if LCD_DEPTH == 16
+    if (navigation_fade_active)
+    {
+        sleep(1);
+        long duration = navigation_fade_duration();
+        long elapsed = current_tick - navigation_fade_start;
+        if (elapsed < duration)
+            navigation_fade_alpha = (unsigned)(elapsed * 256 / duration);
+        else
+        {
+            navigation_fade_alpha = 256;
+            navigation_fade_active = false;
+        }
+        goto redraw_navigation_fade;
+    }
+#endif
 }
 
 #ifdef HAVE_LCD_SHUTDOWN

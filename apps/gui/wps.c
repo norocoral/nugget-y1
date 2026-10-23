@@ -836,6 +836,10 @@ long gui_wps_show(void)
 
         if (exit)
         {
+#if defined(INNIOASIS_Y1) && LCD_DEPTH == 16
+            if (global_settings.navigation_fade)
+                lcd_navigation_fade_capture();
+#endif
             return do_wps_exit(button, bookmark);
         }
 

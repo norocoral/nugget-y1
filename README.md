@@ -81,6 +81,11 @@ Same as iPod 6G, with some differences:
 
 ---
 
+## Credits
+https://github.com/nuxcodes/rockpod
+
+---
+
 ## License
 
 Built on the open-source [Rockbox](https://www.rockbox.org) project under the GNU General Public License v2 (GPL-2.0).

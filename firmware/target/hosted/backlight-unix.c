@@ -23,6 +23,7 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <errno.h>
 #include <stdbool.h>
 #include <unistd.h>
 #include <string.h>
@@ -175,6 +176,12 @@ bool y1_aod_timeout_expired(void)
 void y1_aod_activity_notify(void)
 {
     y1_aod_last_activity_tick = current_tick;
+}
+
+void y1_aod_user_wake(void)
+{
+    y1_aod_activity_notify();
+    y1_aod_pause_state = Y1_AOD_PAUSE_IDLE;
 }
 
 void y1_aod_timeout_setting_changed(int choice)
@@ -546,10 +553,26 @@ void lcd_sleep(void)
 #endif
 
     /* Suspend to RAM until a key wakes the kernel. Playback never reaches here. */
-    if (!sysfs_set_string("/sys/power/state", "mem"))
-        y1_log("Y1: failed to request suspend via /sys/power/state\n");
-    if (!sysfs_set_string("/sys/power/state", "on"))
-        y1_log("Y1: failed to restore /sys/power/state after wake\n");
+    int fd = open("/sys/power/state", O_WRONLY | O_CLOEXEC);
+    if (fd < 0) {
+        y1_log("Y1: failed to open /sys/power/state for suspend\n");
+        return;
+    }
+
+    ssize_t written;
+    do {
+        written = write(fd, "mem", 3);
+    } while (written < 0 && errno == EINTR);
+    int write_error = written < 0 ? errno : (written != 3 ? EIO : 0);
+    int close_result = close(fd);
+    int close_error = close_result < 0 ? errno : 0;
+    if (written != 3 || close_result < 0) {
+        char message[96];
+        snprintf(message, sizeof(message),
+                 "Y1: suspend request failed (write=%d, errno=%d)\n",
+                 (int)written, write_error ? write_error : close_error);
+        y1_log(message);
+    }
 }
 #else
 void lcd_awake(void)

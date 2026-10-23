@@ -25,6 +25,7 @@
 #include "button.h"
 #include "string.h"
 #include "settings.h"
+#include "lcd.h"
 #include "kernel.h"
 #include "system.h"
 
@@ -39,6 +40,7 @@
 #include "viewport.h"
 #include "appevents.h"
 #include "statusbar-skinned.h"
+#include "skin_engine/skin_albumart_color.h"
 #include "rbunicode.h"
 
 /* The minimum number of pending button events in queue before starting
@@ -145,6 +147,28 @@ static bool scroll_abc_get_initial(struct gui_synclist *lists, int item,
     return true;
 }
 
+static bool scroll_abc_is_numbered_item(struct gui_synclist *lists, int item)
+{
+    char name[128];
+    list_get_name *get_name = lists == abc_name_owner && abc_name_callback ?
+                              abc_name_callback :
+                              lists->callback_get_item_name;
+    const char *text;
+
+    if (!get_name || item < 0 || item >= lists->nb_items)
+        return false;
+
+    text = get_name(item, lists->data, name, sizeof(name));
+    if (!text || *text < '0' || *text > '9')
+        return false;
+
+    while (*text >= '0' && *text <= '9')
+        text++;
+
+    return *text == '\0' || *text == '.' || *text == ':' ||
+           *text == ' ' || *text == '-';
+}
+
 static bool scroll_abc_move(struct gui_synclist *lists, int direction,
                             bool allow_wrap)
 {
@@ -152,6 +176,33 @@ static bool scroll_abc_move(struct gui_synclist *lists, int direction,
     char initial[5];
     char candidate_initial[5];
     int count = lists->nb_items;
+
+    if (count <= 0)
+        return false;
+
+    if (scroll_abc_is_numbered_item(lists, 0) &&
+        scroll_abc_is_numbered_item(lists, lists->selected_item))
+    {
+        int increment = count <= 100 ? 10 :
+                        count <= 500 ? 20 :
+                        count <= 2000 ? 50 : 100;
+        long target = (long)lists->selected_item + direction * increment;
+
+        if (allow_wrap)
+            target = (target % count + count) % count;
+        else if (target < 0)
+            target = 0;
+        else if (target >= count)
+            target = count - 1;
+
+        gui_synclist_select_item(lists, (int)target);
+        snprintf(scroll_abc_overlay, sizeof(scroll_abc_overlay), "%ld",
+                 target + 1);
+        scroll_abc_overlay_tick = current_tick;
+        scroll_abc_overlay_visible = true;
+        scroll_abc_overlay_owner = lists;
+        return true;
+    }
 
     if (!scroll_abc_get_initial(lists, lists->selected_item, &current,
                                 initial))
@@ -846,6 +897,13 @@ bool gui_synclist_do_button(struct gui_synclist * lists, int *actionptr)
     int action = *actionptr;
     static bool pgleft_allow_cancel = false;
 
+#if defined(INNIOASIS_Y1) && LCD_DEPTH == 16
+    if (global_settings.navigation_fade &&
+        (action == ACTION_STD_OK || action == ACTION_STD_CANCEL ||
+         action == ACTION_STD_MENU || action == ACTION_STD_QUICKSCREEN))
+        lcd_navigation_fade_capture();
+#endif
+
 #if defined(INNIOASIS_Y1) && defined(HAVE_LCD_COLOR)
     if (action == ACTION_NONE && scroll_abc_overlay_visible &&
         lists == scroll_abc_overlay_owner &&
@@ -1068,6 +1126,14 @@ int list_do_action_timeout(struct gui_synclist *lists, int timeout)
 {
     add_event_ex(GUI_EVENT_NEED_UI_UPDATE, true, _lists_uiviewport_update_callback, NULL);
     current_lists = lists;
+#if defined(HAVE_ALBUMART) && defined(HAVE_LCD_COLOR)
+    if (dynamic_colors_fading() || dynamic_colors_pending())
+    {
+        int fade_timeout = MAX(1, HZ / 20);
+        if (timeout > fade_timeout || timeout == TIMEOUT_BLOCK)
+            timeout = fade_timeout;
+    }
+#endif
     if(lists->scheduled_talk_tick)
     {
         long delay = lists->scheduled_talk_tick -current_tick +1;

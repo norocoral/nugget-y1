@@ -196,6 +196,10 @@ struct gradient_config {
 struct skin_viewport {
     struct viewport vp;   /* The LCD viewport struct */
     struct frame_buffer_t framebuf; /* holds reference to current framebuffer */
+#if defined(HAVE_ALBUMART) && defined(HAVE_LCD_COLOR)
+    unsigned dc_orig_fg;
+    unsigned dc_orig_bg;
+#endif
     OFFSETTYPE(char*) label;
     int16_t parsed_fontid;
     char hidden_flags;

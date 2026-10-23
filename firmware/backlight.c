@@ -922,6 +922,13 @@ void backlight_set_on_button_hold(int index)
 #ifdef HAVE_LCD_SLEEP_SETTING
 void lcd_set_sleep_after_backlight_off(int timeout_seconds)
 {
+#if defined(INNIOASIS_Y1)
+    if (timeout_seconds < 0) {
+        /* The Y1 must enter suspend after the display turns off. */
+        timeout_seconds = 5;
+        global_settings.lcd_sleep_after_backlight_off = timeout_seconds;
+    }
+#endif
     lcd_sleep_timeout = HZ * timeout_seconds;
 
     if (is_backlight_on(true))

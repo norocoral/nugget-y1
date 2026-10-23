@@ -109,6 +109,9 @@ gui/viewport.c
 gui/skin_engine/skin_backdrops.c
 gui/skin_engine/skin_display.c
 gui/skin_engine/skin_engine.c
+#if defined(HAVE_ALBUMART) && defined(HAVE_LCD_COLOR)
+gui/skin_engine/skin_albumart_color.c
+#endif
 gui/skin_engine/skin_parser.c
 gui/skin_engine/skin_render.c
 gui/skin_engine/skin_tokens.c

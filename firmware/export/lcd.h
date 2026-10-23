@@ -255,6 +255,9 @@ extern bool lcd_putsxy_scroll_func(int x, int y, const unsigned char *string,
 
 /* update a fraction of the screen */
 extern void lcd_update_rect(int x, int y, int width, int height);
+#if defined(INNIOASIS_Y1) && LCD_DEPTH == 16
+extern void lcd_navigation_fade_capture(void);
+#endif
 
 #ifdef HAVE_REMOTE_LCD
     extern void lcd_remote_update(void);

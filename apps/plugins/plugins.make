@@ -28,6 +28,13 @@ else
 PLUGINS_SRC = $(call preprocess, $(APPSDIR)/plugins/SOURCES)
 endif
 endif # if SELECTED_PLUGINS_SRC
+
+ifeq ($(MODELNAME),innioasisy1)
+Y1_GAME_PLUGIN_NAMES := $(shell perl -ne 'print "$$1 " if /^([^,]+),games\s*$$/' $(APPSDIR)/plugins/CATEGORIES)
+Y1_EXCLUDED_PLUGIN_NAMES := $(Y1_GAME_PLUGIN_NAMES) chip8 rockboy zxbox puzzles sdl
+PLUGINS_SRC := $(foreach src,$(PLUGINS_SRC),$(if $(filter $(basename $(notdir $(src))),$(Y1_EXCLUDED_PLUGIN_NAMES)),,$(src)))
+endif
+
 OTHER_SRC += $(PLUGINS_SRC)
 ROCKS1 := $(PLUGINS_SRC:.c=.rock)
 ROCKS1 := $(call full_path_subst,$(ROOTDIR)/%,$(BUILDDIR)/%,$(ROCKS1))
@@ -70,6 +77,10 @@ else
 PLUGINSUBDIRS := $(call preprocess, $(APPSDIR)/plugins/SUBDIRS)
 endif
 endif # if SELECTED_PLUGINS_SUBDIRS
+
+ifeq ($(MODELNAME),innioasisy1)
+PLUGINSUBDIRS := $(foreach dir,$(PLUGINSUBDIRS),$(if $(filter $(notdir $(dir)),$(Y1_EXCLUDED_PLUGIN_NAMES)),,$(dir)))
+endif
 
 PLUGIN_LIBS := $(PLUGINLIB) $(PLUGINBITMAPLIB) $(SETJMPLIB) $(FIXEDPOINTLIB)
 

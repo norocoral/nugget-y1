@@ -38,6 +38,9 @@
 #include "skin_buffer.h"
 #include "statusbar-skinned.h"
 #include "wps_internals.h"
+#if defined(HAVE_ALBUMART) && defined(HAVE_LCD_COLOR)
+#include "skin_albumart_color.h"
+#endif
 
 #define FAILSAFENAME "rockbox_failsafe"
 
@@ -138,6 +141,9 @@ static void gui_skin_reset(struct gui_skin *skin)
 void gui_sync_skin_init(void)
 {
     int j;
+#if defined(HAVE_ALBUMART) && defined(HAVE_LCD_COLOR)
+    dynamic_colors_init();
+#endif
     for(j=0; j<SKINNABLE_SCREENS_COUNT; j++)
     {
         FOR_NB_SCREENS(i)
@@ -174,6 +180,9 @@ void settings_apply_skins(void)
         audio_stop();
 
     bool first_run = skin_backdrop_init();
+#if defined(HAVE_ALBUMART) && defined(HAVE_LCD_COLOR)
+    dynamic_colors_save_theme();
+#endif
 
     if (!first_run)
     {

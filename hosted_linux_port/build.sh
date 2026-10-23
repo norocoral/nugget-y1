@@ -48,7 +48,18 @@ SPLASH_DIR="$SCRIPT_DIR/splash"
 STOCK_BOOT="${STOCK_BOOT:-$WORKSPACE_ROOT/!stock_rom/boot.img}"
 
 CROSS_COMPILE="${CROSS_COMPILE:-arm-linux-gnueabihf-}"
-CC="${CROSS_COMPILE}gcc"
+
+# Use ccache only when installed.
+if command -v ccache >/dev/null 2>&1; then
+    export CCACHE_DIR="${CCACHE_DIR:-$HOME/.cache/ccache}"
+    export CCACHE_MAXSIZE="${CCACHE_MAXSIZE:-5G}"
+    export CCACHE_COMPILERCHECK=content
+
+    CC=(ccache "${CROSS_COMPILE}gcc")
+else
+    CC=("${CROSS_COMPILE}gcc")
+fi
+
 STRIP="${CROSS_COMPILE}strip"
 
 MAX_BOOT_SIZE=6291456 # 6 MiB
@@ -108,8 +119,13 @@ if [[ ! -f "$ROCKBOX_SRC/tools/configure" ]]; then
     exit 1
 fi
 
-if ! command -v "$CC" >/dev/null 2>&1; then
-    echo "[!] Cross-compiler not found: $CC"
+if ! command -v "${CROSS_COMPILE}gcc" >/dev/null 2>&1; then
+    echo "[!] Cross-compiler not found: ${CROSS_COMPILE}gcc"
+    exit 1
+fi
+
+if [[ "$CC" == "ccache "* ]] && ! command -v ccache >/dev/null 2>&1; then
+    echo "[!] ccache was selected but is not installed."
     exit 1
 fi
 
@@ -157,12 +173,12 @@ done
 
 echo "[*] Compiling native utilities with parallel jobs..."
 
-"$CC" -O2 -Wall \
+"${CC[@]}" -O2 -Wall \
     "$SCRIPT_DIR/initramfs/init.c" \
     -o "$ROOTFS_DIR/init" &
 INIT_PID=$!
 
-"$CC" -O2 \
+"${CC[@]}" -O2 \
     "$SCRIPT_DIR/audio/unmute_eac.c" \
     -o "$ROOTFS_DIR/bin/unmute_eac" &
 AUDIO_PID=$!

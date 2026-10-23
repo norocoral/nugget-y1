@@ -35,6 +35,7 @@
 #include "statusbar-skinned.h"
 #include "debug.h"
 #include "font.h"
+#include "skin_engine/skin_albumart_color.h"
 #include "icon.h"
 #include "icons.h"
 #include "option_select.h"
@@ -192,6 +193,22 @@ void sb_skin_update(enum screen_type screen, bool force)
     int i = screen;
     if (!data->wps_loaded)
         return;
+#if defined(HAVE_ALBUMART) && defined(HAVE_LCD_COLOR)
+    {
+        static bool sb_was_fading[NB_SCREENS] = { false };
+        bool sb_fading = dynamic_colors_fading() || dynamic_colors_pending();
+        if (sb_fading)
+        {
+            force = true;
+            sb_was_fading[i] = true;
+        }
+        else if (sb_was_fading[i])
+        {
+            force = true;
+            sb_was_fading[i] = false;
+        }
+    }
+#endif
     if (TIME_AFTER(current_tick, next_update[i]) || force ||
         force_waiting[i])
     {

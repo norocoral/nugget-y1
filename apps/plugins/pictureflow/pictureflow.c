@@ -236,8 +236,8 @@ typedef fb_data pix_t;
 #ifdef HAVE_LCD_COLOR
 static inline pix_t theme_brightness(int level)
 {
-    int bg = rb->global_settings->bg_color;
-    int fg = rb->global_settings->fg_color;
+    int bg = rb->dynamic_colors_resolve(rb->global_settings->bg_color);
+    int fg = rb->dynamic_colors_resolve(rb->global_settings->fg_color);
 
     level = MAX(0, MIN(level, 255));
     return LCD_RGBPACK(
@@ -248,8 +248,8 @@ static inline pix_t theme_brightness(int level)
         (RGB_UNPACK_BLUE(bg) * (255 - level) +
          RGB_UNPACK_BLUE(fg) * level) / 255);
 }
-#define PF_THEME_BG rb->global_settings->bg_color
-#define PF_THEME_FG rb->global_settings->fg_color
+#define PF_THEME_BG rb->dynamic_colors_resolve(rb->global_settings->bg_color)
+#define PF_THEME_FG rb->dynamic_colors_resolve(rb->global_settings->fg_color)
 #undef G_BRIGHT
 #define G_BRIGHT(y) theme_brightness(y)
 #else
@@ -281,7 +281,7 @@ static inline pix_t theme_brightness(int level)
 #define DISPLAY_LEFT_R (PFREAL_HALF - LCD_WIDTH * PFREAL_HALF)
 #define MAXSLIDE_LEFT_R (PFREAL_HALF - DISPLAY_WIDTH * PFREAL_HALF)
 
-#define SLIDE_CACHE_SIZE 64 /* probably more than can be loaded */
+#define SLIDE_CACHE_SIZE 100
 
 #define MAX_SLIDES_COUNT 10
 
@@ -335,8 +335,12 @@ struct pf_config_t
 
      bool resize;
      bool show_fps;
+     bool show_statusbar;
 
      bool update_albumart;
+     int scroll_speed;
+     int transition_speed;
+     bool text_crossfade;
 };
 
 struct pf_index_t {
@@ -542,7 +546,12 @@ static struct configdata config[] =
     { TYPE_ENUM, 0, 2, { .int_p = &pf_cfg.year_sort_order }, "year order",
       year_sort_order_conf },
     { TYPE_BOOL, 0, 1, { .bool_p = &pf_cfg.show_year }, "show year", NULL },
-    { TYPE_BOOL, 0, 1, { .bool_p = &pf_cfg.update_albumart }, "update albumart", NULL }
+    { TYPE_BOOL, 0, 1, { .bool_p = &pf_cfg.update_albumart }, "update albumart", NULL },
+    { TYPE_BOOL, 0, 1, { .bool_p = &pf_cfg.show_statusbar }, "show statusbar", NULL },
+    { TYPE_INT, 100, 400, { .int_p = &pf_cfg.scroll_speed }, "scroll speed", NULL },
+    { TYPE_INT, 100, 400, { .int_p = &pf_cfg.transition_speed }, "transition speed",
+      NULL },
+    { TYPE_BOOL, 0, 1, { .bool_p = &pf_cfg.text_crossfade }, "text crossfade", NULL }
 };
 
 #define CONFIG_NUM_ITEMS (sizeof(config) / sizeof(struct configdata))
@@ -550,6 +559,9 @@ static struct configdata config[] =
 /** below we allocate the memory we want to use **/
 
 static pix_t *buffer; /* for now it always points to the lcd framebuffer */
+#ifdef HAVE_LCD_COLOR
+static pix_t pf_fade_bg;
+#endif
 static uint8_t reflect_table[REFLECT_HEIGHT];
 static struct slide_data center_slide;
 static struct slide_data left_slides[MAX_SLIDES_COUNT];
@@ -721,6 +733,7 @@ static void config_set_defaults(struct pf_config_t *cfg)
      cfg->num_slides = 4;
      cfg->zoom = 100;
      cfg->show_fps = false;
+     cfg->show_statusbar = true;
      cfg->auto_wps = 0;
      cfg->last_album = 0;
      cfg->backlight_mode = 0;
@@ -732,6 +745,9 @@ static void config_set_defaults(struct pf_config_t *cfg)
      cfg->year_sort_order = ASCENDING;
      cfg->show_year = false;
      cfg->update_albumart = false;
+     cfg->scroll_speed = 200;
+     cfg->transition_speed = 200;
+     cfg->text_crossfade = true;
 }
 
 static inline PFreal fmul(PFreal a, PFreal b)
@@ -1946,22 +1962,14 @@ static int pf_tcs_retrieve_track_title(int string_index, int disc_num, int track
     if (!track_title)
         track_title = tcs.result;
 
-    int max_len = rb->strlen(track_title) + 10;
+    int max_len = rb->strlen(track_title) + 1;
     if (!track_buffer_avail(max_len))
         return 0;
 
-    if (track_num > 0)
-    {
-        if (disc_num > 0)
-            str_len = rb->snprintf(pf_tracks.names + string_index, max_len,
-                "%d.%02d: %s", disc_num, track_num, track_title);
-        else
-            str_len = rb->snprintf(pf_tracks.names + string_index, max_len,
-                "%d: %s", track_num, track_title);
-    }
-    else
-        str_len = rb->snprintf(pf_tracks.names + string_index, max_len,
-            "%s", track_title);
+    (void)disc_num;
+    (void)track_num;
+    str_len = rb->snprintf(pf_tracks.names + string_index, max_len, "%s",
+                           track_title);
     return str_len;
 }
 
@@ -2385,7 +2393,11 @@ static int create_empty_slide(bool force)
  */
 static void thread(void)
 {
+#if defined(INNIOASIS_Y1)
+    const long sleep_time = HZ;
+#else
     long sleep_time = 5 * HZ;
+#endif
     struct queue_event ev;
     while (1) {
         rb->queue_wait_w_tmo(&thread_q, &ev, sleep_time);
@@ -2983,6 +2995,14 @@ static void recalc_offsets(void)
  */
 static inline pix_t fade_color(pix_t c, unsigned a)
 {
+#ifdef HAVE_LCD_COLOR
+    a = MIN(a, 256);
+    int inv_a = 256 - a;
+    return LCD_RGBPACK(
+        (FB_UNPACK_RED(c) * a + FB_UNPACK_RED(pf_fade_bg) * inv_a) >> 8,
+        (FB_UNPACK_GREEN(c) * a + FB_UNPACK_GREEN(pf_fade_bg) * inv_a) >> 8,
+        (FB_UNPACK_BLUE(c) * a + FB_UNPACK_BLUE(pf_fade_bg) * inv_a) >> 8);
+#else
 #if (LCD_PIXELFORMAT == RGB565SWAPPED)
     unsigned int result;
     c = swap16(c);
@@ -3012,6 +3032,7 @@ static inline pix_t fade_color(pix_t c, unsigned a)
 #else
     unsigned val = c;
     return MULUQ(val, a) >> 8;
+#endif
 #endif
 }
 
@@ -3356,6 +3377,12 @@ static void show_next_slide(void)
 */
 static void render_all_slides(void)
 {
+#ifdef HAVE_LCD_COLOR
+    pf_fade_bg = LCD_RGBPACK(
+        RGB_UNPACK_RED(PF_THEME_BG),
+        RGB_UNPACK_GREEN(PF_THEME_BG),
+        RGB_UNPACK_BLUE(PF_THEME_BG));
+#endif
     mylcd_set_background(PF_THEME_BG);
     /* TODO: Optimizes this by e.g. invalidating rects */
     mylcd_clear_display();
@@ -3428,7 +3455,9 @@ static void update_scroll_animation(void)
         fi = fmin(fi, max);
 
         int ia = IANGLE_MAX * (fi - max / 2) / (max * 2);
-        speed = 512 + 16384 * (PFREAL_ONE + fsin(ia)) / PFREAL_ONE;
+        int accel = 16384 * (PFREAL_ONE + fsin(ia)) / PFREAL_ONE;
+        speed = 512 * pf_cfg.transition_speed / 100
+              + accel * pf_cfg.scroll_speed / 100;
     }
 
     slide_frame += speed * step;
@@ -3562,7 +3591,11 @@ static int display_settings_menu(void)
                         ID2P(LANG_CENTRE_MARGIN),
                         ID2P(LANG_NUMBER_OF_SLIDES),
                         ID2P(LANG_ZOOM),
-                        ID2P(LANG_RESIZE_COVERS));
+                        ID2P(LANG_RESIZE_COVERS),
+                        ID2P(LANG_COVER_FLOW_STATUSBAR),
+                        ID2P(LANG_SCROLL_SPEED),
+                        ID2P(LANG_COVER_FLOW_TRANSITION_SPEED),
+                        ID2P(LANG_COVER_FLOW_TEXT_CROSSFADE));
 
     static const struct opt_items backlight_options[] = {
         { STR(LANG_ALWAYS_ON) },
@@ -3628,6 +3661,31 @@ static int display_settings_menu(void)
                 configfile_save(CONFIG_FILE, config,
                                 CONFIG_NUM_ITEMS, CONFIG_VERSION);
                 return -3; /* re-init */
+            case 7:
+                old_val = pf_cfg.show_statusbar;
+                rb->set_bool(rb->str(LANG_COVER_FLOW_STATUSBAR),
+                              &pf_cfg.show_statusbar);
+                if (old_val != pf_cfg.show_statusbar)
+                {
+                    configfile_save(CONFIG_FILE, config,
+                                    CONFIG_NUM_ITEMS, CONFIG_VERSION);
+                    return -3;
+                }
+                break;
+            case 8:
+                rb->set_int(rb->str(LANG_SCROLL_SPEED), "%", 1,
+                            &pf_cfg.scroll_speed,
+                            NULL, 25, 100, 400, NULL);
+                break;
+            case 9:
+                rb->set_int(rb->str(LANG_COVER_FLOW_TRANSITION_SPEED), "%", 1,
+                            &pf_cfg.transition_speed,
+                            NULL, 25, 100, 400, NULL);
+                break;
+            case 10:
+                rb->set_bool(rb->str(LANG_COVER_FLOW_TEXT_CROSSFADE),
+                             &pf_cfg.text_crossfade);
+                break;
             case MENU_ATTACHED_USB:
                 return PLUGIN_USB_CONNECTED;
         }
@@ -3644,7 +3702,7 @@ static int settings_menu(void)
     int selection = 0;
     int old_val, result;
 
-    MENUITEM_STRINGLIST(settings_menu, "PictureFlow Settings", NULL,
+    MENUITEM_STRINGLIST(settings_menu, ID2P(LANG_COVER_FLOW_SETTINGS), NULL,
                         ID2P(LANG_SHOW_ALBUM_TITLE),
                         ID2P(LANG_SHOW_YEAR_IN_ALBUM_TITLE),
                         ID2P(LANG_YEAR_SORT_ORDER),
@@ -3730,7 +3788,7 @@ static int main_menu(void)
     rb->lcd_set_foreground(PF_THEME_FG);
 #endif
 
-    MENUITEM_STRINGLIST(main_menu, "PictureFlow", NULL,
+    MENUITEM_STRINGLIST(main_menu, ID2P(LANG_PICTUREFLOW), NULL,
                         ID2P(LANG_SORT_ALBUMS_BY),
                         ID2P(LANG_SHOW_TRACKS_WHILE_BROWSING),
                         ID2P(LANG_GOTO_LAST_ALBUM),
@@ -4023,10 +4081,12 @@ static bool show_track_list(void)
 {
     mylcd_clear_display();
     if ( center_slide.slide_index != pf_tracks.cur_idx ) {
+#ifndef INNIOASIS_Y1
 #ifdef HAVE_TC_RAMCACHE
         if (!rb->tagcache_is_in_ram())
 #endif
             show_track_list_loading();
+#endif
         create_track_index(center_slide.slide_index);
         if (pf_tracks.count == 0)
         {
@@ -4421,11 +4481,11 @@ static void draw_album_text(void)
         if (step < 0) c = 255-c;
         if (c > 128 ) { /* half way to next slide .. still not perfect! */
             albumtxt_index = center_index+step;
-            c = (c-128)*2;
+            c = pf_cfg.text_crossfade ? (c-128)*2 : 255;
         }
         else {
             albumtxt_index = center_index;
-            c = (128-c)*2;
+            c = pf_cfg.text_crossfade ? (128-c)*2 : 255;
         }
     }
     else {
@@ -4510,6 +4570,13 @@ static bool init(void)
 
     config_set_defaults(&pf_cfg); /* must appear before configfile_save */
     configfile_load(CONFIG_FILE, config, CONFIG_NUM_ITEMS, CONFIG_VERSION);
+    rb->viewportmanager_theme_enable(SCREEN_MAIN, pf_cfg.show_statusbar, NULL);
+    statusbar_theme_enabled = true;
+    rb->sb_set_persistent_title(pf_cfg.show_statusbar ?
+                                rb->str(LANG_PICTUREFLOW) : NULL,
+                                Icon_NOICON, SCREEN_MAIN);
+    struct viewport *vp_main = rb->lcd_set_viewport(NULL);
+    lcd_fb = vp_main->buffer->fb_ptr;
 
     if(pf_cfg.backlight_mode == 0)
         backlight_ignore_timeout(); /* restore in cleanup */
@@ -5002,7 +5069,6 @@ static int pictureflow_main(void)
 
 enum plugin_status plugin_start(const void *parameter)
 {
-    struct viewport *vp_main;
     int ret;
     const char *file = parameter;
     bool file_id3 = (parameter && (((char *) parameter)[0] == '/'));
@@ -5013,11 +5079,6 @@ enum plugin_status plugin_start(const void *parameter)
         return PLUGIN_OK;
     }
     atexit(cleanup);
-
-    rb->viewportmanager_theme_enable(SCREEN_MAIN, true, NULL);
-    statusbar_theme_enabled = true;
-    vp_main = rb->lcd_set_viewport(NULL);
-    lcd_fb = vp_main->buffer->fb_ptr;
 
     if (init())
     {

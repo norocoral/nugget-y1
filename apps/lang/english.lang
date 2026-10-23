@@ -514,13 +514,13 @@
   desc: Main menu item and context menu title
   user: core
   <source>
-    *: "PictureFlow"
+    *: "Cover Flow"
   </source>
   <dest>
-    *: "PictureFlow"
+    *: "Cover Flow"
   </dest>
   <voice>
-    *: "PictureFlow"
+    *: "Cover Flow"
   </voice>
 </phrase>
 <phrase>
@@ -17860,5 +17860,201 @@
   </dest>
   <voice>
     *: "Go to Album"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_DYNAMIC_COLORS
+  desc: theme setting for album-art-derived colors
+  user: core
+  <source>
+    *: "Dynamic Colors"
+  </source>
+  <dest>
+    *: "Dynamic Colors"
+  </dest>
+  <voice>
+    *: "Dynamic Colors"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_DYNAMIC_COLOR_MODE
+  desc: display setting for album-art-derived color mode
+  user: core
+  <source>
+    *: "Color Mode"
+  </source>
+  <dest>
+    *: "Color Mode"
+  </dest>
+  <voice>
+    *: "Color Mode"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_DYNAMIC_COLOR_MODE_DYNAMIC
+  desc: dynamic color mode choice
+  user: core
+  <source>
+    *: "Dynamic"
+  </source>
+  <dest>
+    *: "Dynamic"
+  </dest>
+  <voice>
+    *: "Dynamic"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_DYNAMIC_COLOR_MODE_LIGHT
+  desc: dynamic color mode choice
+  user: core
+  <source>
+    *: "Light"
+  </source>
+  <dest>
+    *: "Light"
+  </dest>
+  <voice>
+    *: "Light"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_DYNAMIC_COLOR_MODE_DARK
+  desc: dynamic color mode choice
+  user: core
+  <source>
+    *: "Dark"
+  </source>
+  <dest>
+    *: "Dark"
+  </dest>
+  <voice>
+    *: "Dark"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_COLOR_SATURATION
+  desc: dynamic color saturation setting
+  user: core
+  <source>
+    *: "Saturation"
+  </source>
+  <dest>
+    *: "Saturation"
+  </dest>
+  <voice>
+    *: "Saturation"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_COLOR_CONTRAST
+  desc: dynamic color contrast setting
+  user: core
+  <source>
+    *: "Contrast"
+  </source>
+  <dest>
+    *: "Contrast"
+  </dest>
+  <voice>
+    *: "Contrast"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_COLOR_DAY_START
+  desc: start of the light/day period for automatic colors
+  user: core
+  <source>
+    *: "Day Start Hour"
+  </source>
+  <dest>
+    *: "Day Start Hour"
+  </dest>
+  <voice>
+    *: "Day Start Hour"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_COLOR_NIGHT_START
+  desc: start of the dark/night period for automatic colors
+  user: core
+  <source>
+    *: "Night Start Hour"
+  </source>
+  <dest>
+    *: "Night Start Hour"
+  </dest>
+  <voice>
+    *: "Night Start Hour"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_NAVIGATION_FADE
+  desc: enable a short screen crossfade when changing views
+  user: core
+  <source>
+    *: "Navigation Fade"
+  </source>
+  <dest>
+    *: "Navigation Fade"
+  </dest>
+  <voice>
+    *: "Navigation Fade"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_COVER_FLOW_SETTINGS
+  desc: settings menu title for Cover Flow
+  user: core
+  <source>
+    *: "Cover Flow Settings"
+  </source>
+  <dest>
+    *: "Cover Flow Settings"
+  </dest>
+  <voice>
+    *: "Cover Flow Settings"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_COVER_FLOW_STATUSBAR
+  desc: Cover Flow display option
+  user: core
+  <source>
+    *: "Show Status Bar"
+  </source>
+  <dest>
+    *: "Show Status Bar"
+  </dest>
+  <voice>
+    *: "Show Status Bar"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_COVER_FLOW_TRANSITION_SPEED
+  desc: Cover Flow display option
+  user: core
+  <source>
+    *: "Transition Speed"
+  </source>
+  <dest>
+    *: "Transition Speed"
+  </dest>
+  <voice>
+    *: "Transition Speed"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_COVER_FLOW_TEXT_CROSSFADE
+  desc: Cover Flow display option
+  user: core
+  <source>
+    *: "Text Crossfade"
+  </source>
+  <dest>
+    *: "Text Crossfade"
+  </dest>
+  <voice>
+    *: "Text Crossfade"
   </voice>
 </phrase>

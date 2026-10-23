@@ -17372,6 +17372,20 @@
   </voice>
 </phrase>
 <phrase>
+  id: LANG_Y1_LOGGING
+  desc: in Settings -> Nugget -> Device
+  user: core
+  <source>
+    *: "Diagnostic Logging"
+  </source>
+  <dest>
+    *: "진단 로그"
+  </dest>
+  <voice>
+    *: "진단 로그"
+  </voice>
+</phrase>
+<phrase>
   id: LANG_Y1_HEADPHONE_REMOTE
   desc: in Settings -> Nugget -> Device
   user: core
@@ -17540,6 +17554,34 @@
   </voice>
 </phrase>
 <phrase>
+  id: LANG_Y1_BT_REMOVE_PAIRED
+  desc: in Settings -> Bluetooth
+  user: core
+  <source>
+    *: "Remove Paired Device..."
+  </source>
+  <dest>
+    *: "페어링된 기기 삭제..."
+  </dest>
+  <voice>
+    *: "페어링된 기기 삭제"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_BT_REMOVE_CONFIRM
+  desc: confirmation prompt when removing a paired Bluetooth device
+  user: core
+  <source>
+    *: "Remove this paired device?"
+  </source>
+  <dest>
+    *: "이 페어링된 기기를 삭제할까요?"
+  </dest>
+  <voice>
+    *: "이 페어링된 기기를 삭제할까요?"
+  </voice>
+</phrase>
+<phrase>
   id: LANG_Y1_BT_SEARCH_DEVICES
   desc: in Settings -> Bluetooth
   user: core
@@ -17649,5 +17691,215 @@
   </dest>
   <voice>
     *: "중요한 이벤트에서 AOD 표시"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_PICTUREFLOW
+  desc: Main menu item and context menu title
+  user: core
+  <source>
+    *: "Cover Flow"
+  </source>
+  <dest>
+    *: "커버 플로우"
+  </dest>
+  <voice>
+    *: "커버 플로우"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_DYNAMIC_COLORS
+  desc: theme setting for album-art-derived colors
+  user: core
+  <source>
+    *: "Dynamic Colors"
+  </source>
+  <dest>
+    *: "동적 색상"
+  </dest>
+  <voice>
+    *: "동적 색상"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_DYNAMIC_COLOR_MODE
+  desc: display setting for album-art-derived color mode
+  user: core
+  <source>
+    *: "Color Mode"
+  </source>
+  <dest>
+    *: "색상 모드"
+  </dest>
+  <voice>
+    *: "색상 모드"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_DYNAMIC_COLOR_MODE_DYNAMIC
+  desc: dynamic color mode choice
+  user: core
+  <source>
+    *: "Dynamic"
+  </source>
+  <dest>
+    *: "동적"
+  </dest>
+  <voice>
+    *: "동적"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_DYNAMIC_COLOR_MODE_LIGHT
+  desc: dynamic color mode choice
+  user: core
+  <source>
+    *: "Light"
+  </source>
+  <dest>
+    *: "밝게"
+  </dest>
+  <voice>
+    *: "밝게"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_DYNAMIC_COLOR_MODE_DARK
+  desc: dynamic color mode choice
+  user: core
+  <source>
+    *: "Dark"
+  </source>
+  <dest>
+    *: "어둡게"
+  </dest>
+  <voice>
+    *: "어둡게"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_COLOR_SATURATION
+  desc: dynamic color saturation setting
+  user: core
+  <source>
+    *: "Saturation"
+  </source>
+  <dest>
+    *: "채도"
+  </dest>
+  <voice>
+    *: "채도"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_COLOR_CONTRAST
+  desc: dynamic color contrast setting
+  user: core
+  <source>
+    *: "Contrast"
+  </source>
+  <dest>
+    *: "대비"
+  </dest>
+  <voice>
+    *: "대비"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_COLOR_DAY_START
+  desc: start of the light/day period for automatic colors
+  user: core
+  <source>
+    *: "Day Start Hour"
+  </source>
+  <dest>
+    *: "주간 시작 시간"
+  </dest>
+  <voice>
+    *: "주간 시작 시간"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_COLOR_NIGHT_START
+  desc: start of the dark/night period for automatic colors
+  user: core
+  <source>
+    *: "Night Start Hour"
+  </source>
+  <dest>
+    *: "야간 시작 시간"
+  </dest>
+  <voice>
+    *: "야간 시작 시간"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_NAVIGATION_FADE
+  desc: enable a short screen crossfade when changing views
+  user: core
+  <source>
+    *: "Navigation Fade"
+  </source>
+  <dest>
+    *: "화면 전환 페이드"
+  </dest>
+  <voice>
+    *: "화면 전환 페이드"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_COVER_FLOW_SETTINGS
+  desc: settings menu title for Cover Flow
+  user: core
+  <source>
+    *: "Cover Flow Settings"
+  </source>
+  <dest>
+    *: "커버 플로우 설정"
+  </dest>
+  <voice>
+    *: "커버 플로우 설정"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_COVER_FLOW_STATUSBAR
+  desc: Cover Flow display option
+  user: core
+  <source>
+    *: "Show Status Bar"
+  </source>
+  <dest>
+    *: "상태 표시줄 표시"
+  </dest>
+  <voice>
+    *: "상태 표시줄 표시"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_COVER_FLOW_TRANSITION_SPEED
+  desc: Cover Flow display option
+  user: core
+  <source>
+    *: "Transition Speed"
+  </source>
+  <dest>
+    *: "전환 속도"
+  </dest>
+  <voice>
+    *: "전환 속도"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_COVER_FLOW_TEXT_CROSSFADE
+  desc: Cover Flow display option
+  user: core
+  <source>
+    *: "Text Crossfade"
+  </source>
+  <dest>
+    *: "텍스트 크로스페이드"
+  </dest>
+  <voice>
+    *: "텍스트 크로스페이드"
   </voice>
 </phrase>

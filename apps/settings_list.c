@@ -2364,6 +2364,28 @@ const struct settings_list settings[] = {
 #ifdef HAVE_LCD_COLOR
     TEXT_SETTING(F_THEMESETTING|F_NEEDAPPLY, colors_file, "filetype colours", "-",
                      THEME_DIR "/", ".colours"),
+#if defined(INNIOASIS_Y1) && LCD_DEPTH == 16
+    OFFON_SETTING(0, navigation_fade, LANG_NAVIGATION_FADE, true,
+                  "navigation fade", NULL),
+#endif
+#ifdef HAVE_ALBUMART
+    OFFON_SETTING(0, dynamic_colors, LANG_DYNAMIC_COLORS, true,
+                  "dynamic colors", NULL),
+    CHOICE_SETTING(0, dynamic_color_mode, LANG_DYNAMIC_COLOR_MODE,
+                   DYNAMIC_COLOR_MODE_AUTO, "dynamic color mode",
+                   "auto,dynamic,light,dark", NULL, 4,
+                   ID2P(LANG_AUTO), ID2P(LANG_DYNAMIC_COLOR_MODE_DYNAMIC),
+                   ID2P(LANG_DYNAMIC_COLOR_MODE_LIGHT),
+                   ID2P(LANG_DYNAMIC_COLOR_MODE_DARK)),
+    INT_SETTING(0, dynamic_color_saturation, LANG_COLOR_SATURATION, 100,
+                "dynamic color saturation", UNIT_INT, 0, 200, 10, NULL, NULL, NULL),
+    INT_SETTING(0, dynamic_color_contrast, LANG_COLOR_CONTRAST, 100,
+                "dynamic color contrast", UNIT_INT, 0, 200, 10, NULL, NULL, NULL),
+    INT_SETTING(0, dynamic_color_day_start, LANG_COLOR_DAY_START, 7,
+                "dynamic color day start", UNIT_INT, 0, 23, 1, NULL, NULL, NULL),
+    INT_SETTING(0, dynamic_color_night_start, LANG_COLOR_NIGHT_START, 19,
+                "dynamic color night start", UNIT_INT, 0, 23, 1, NULL, NULL, NULL),
+#endif
 #endif
 #ifdef HAVE_BUTTON_LIGHT
     TABLE_SETTING_LIST(F_TIME_SETTING | F_ALLOW_ARBITRARY_VALS,

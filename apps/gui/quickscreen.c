@@ -24,6 +24,7 @@
 #include "misc.h"
 #include "action.h"
 #include "settings.h"
+#include "lcd.h"
 #include "settings_list.h"
 #include "lang.h"
 #include "viewport.h"
@@ -497,6 +498,10 @@ static void quickscreen_main(struct quickscreen * qs)
     /* Notify that we're exiting this screen */
     cond_talk_ids_fq(VOICE_OK);
 
+#if defined(INNIOASIS_Y1) && LCD_DEPTH == 16
+    if (global_settings.navigation_fade)
+        lcd_navigation_fade_capture();
+#endif
     cleanup(qs);
 }
 

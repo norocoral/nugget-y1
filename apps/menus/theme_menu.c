@@ -412,6 +412,25 @@ MENUITEM_SETTING(cursor_style, &global_settings.cursor_style, NULL);
 #if LCD_DEPTH > 1
 MENUITEM_SETTING(sep_menu, &global_settings.list_separator_height, NULL);
 #endif
+#if defined(INNIOASIS_Y1) && LCD_DEPTH == 16
+MENUITEM_SETTING(navigation_fade_setting, &global_settings.navigation_fade, NULL);
+#endif
+#if defined(HAVE_LCD_COLOR) && defined(HAVE_ALBUMART)
+MENUITEM_SETTING(dynamic_colors_enabled, &global_settings.dynamic_colors, NULL);
+MENUITEM_SETTING(dynamic_colors_mode, &global_settings.dynamic_color_mode, NULL);
+MENUITEM_SETTING(dynamic_colors_saturation,
+                 &global_settings.dynamic_color_saturation, NULL);
+MENUITEM_SETTING(dynamic_colors_contrast,
+                 &global_settings.dynamic_color_contrast, NULL);
+MENUITEM_SETTING(dynamic_colors_day_start,
+                 &global_settings.dynamic_color_day_start, NULL);
+MENUITEM_SETTING(dynamic_colors_night_start,
+                 &global_settings.dynamic_color_night_start, NULL);
+MAKE_MENU(dynamic_colors_menu, ID2P(LANG_DYNAMIC_COLORS), NULL, Icon_NOICON,
+          &dynamic_colors_enabled, &dynamic_colors_mode,
+          &dynamic_colors_saturation, &dynamic_colors_contrast,
+          &dynamic_colors_day_start, &dynamic_colors_night_start);
+#endif
 
 MAKE_MENU(theme_menu, ID2P(LANG_THEME_MENU),
             NULL, Icon_Wps,
@@ -448,5 +467,11 @@ MAKE_MENU(theme_menu, ID2P(LANG_THEME_MENU),
 #endif
 #ifdef HAVE_LCD_COLOR
             &colors_settings,
+#if defined(INNIOASIS_Y1) && LCD_DEPTH == 16
+            &navigation_fade_setting,
+#endif
+#if defined(HAVE_ALBUMART)
+            &dynamic_colors_menu,
+#endif
 #endif
 );

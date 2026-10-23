@@ -32,6 +32,7 @@
 #include "debug.h"
 #include "viewport.h"
 #include "debug.h"
+#include "skin_engine/skin_albumart_color.h"
 
 #ifdef HAVE_REMOTE_LCD
 #define MAX_LINES (LCD_SCROLLABLE_LINES + LCD_REMOTE_SCROLLABLE_LINES)
@@ -312,12 +313,13 @@ static void style_line(struct screen *display,
         int sep_height = MIN(line->separator_height, height);
         display->set_drawmode(DRMODE_FG);
 #ifdef HAVE_LCD_COLOR
-        display->set_foreground(global_settings.list_separator_color);
+        display->set_foreground(
+            dynamic_colors_resolve(global_settings.list_separator_color));
 #endif
         display->fillrect(x, y + height - sep_height, width, sep_height);
         bar_height -= sep_height;
 #ifdef HAVE_LCD_COLOR
-        display->set_foreground(global_settings.fg_color);
+        display->set_foreground(dynamic_colors_resolve(global_settings.fg_color));
 #endif
     }
 
@@ -338,14 +340,14 @@ static void style_line(struct screen *display,
         case STYLE_GRADIENT:
             display->set_drawmode(DRMODE_FG);
             display->gradient_fillrect_part(x, y, width, bar_height,
-                                            line->line_color,
-                                            line->line_end_color,
+                                            dynamic_colors_resolve(line->line_color),
+                                            dynamic_colors_resolve(line->line_end_color),
                                             height*line->nlines,
                                             height*line->line);
             break;
         case STYLE_COLORBAR:
             /*display->set_drawmode(DRMODE_FG);*/
-            display->set_foreground(line->line_color);
+            display->set_foreground(dynamic_colors_resolve(line->line_color));
             /*display->fillrect(x, y, width - x, bar_height);*/
             /* Fall through */
 #endif
@@ -368,12 +370,12 @@ static void style_line(struct screen *display,
         if (style & STYLE_COLORED)
         {
             if (style & STYLE_INVERT)
-                display->set_background(line->text_color);
+                display->set_background(dynamic_colors_resolve(line->text_color));
             else
-                display->set_foreground(line->text_color);
+                display->set_foreground(dynamic_colors_resolve(line->text_color));
         }
         else if (style & (STYLE_GRADIENT|STYLE_COLORBAR))
-            display->set_foreground(line->text_color);
+            display->set_foreground(dynamic_colors_resolve(line->text_color));
     }
 #endif
 }

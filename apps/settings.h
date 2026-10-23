@@ -143,6 +143,15 @@ enum
     AA_PREFER_EMBEDDED,
     AA_PREFER_IMAGE_FILE
 };
+
+#ifdef HAVE_LCD_COLOR
+enum dynamic_color_mode {
+    DYNAMIC_COLOR_MODE_AUTO,
+    DYNAMIC_COLOR_MODE_DYNAMIC,
+    DYNAMIC_COLOR_MODE_LIGHT,
+    DYNAMIC_COLOR_MODE_DARK
+};
+#endif
 #endif
 
 enum
@@ -641,6 +650,9 @@ struct user_settings
     int lss_color; /* background color for the selector or start color for the gradient */
     int lse_color; /* end color for the selector gradient */
     int lst_color; /* color of the text for the selector */
+#if defined(INNIOASIS_Y1) && LCD_DEPTH == 16
+    bool navigation_fade;
+#endif
     unsigned char colors_file[MAX_FILENAME+1];
 #endif
 
@@ -658,6 +670,14 @@ struct user_settings
     int show_queue_options; /* how and whether to display options to queue tracks */
 #ifdef HAVE_ALBUMART
     int album_art; /* switch off album art display or choose preferred source */
+#ifdef HAVE_LCD_COLOR
+    bool dynamic_colors;
+    int dynamic_color_mode;
+    int dynamic_color_saturation;
+    int dynamic_color_contrast;
+    int dynamic_color_day_start;
+    int dynamic_color_night_start;
+#endif
 #endif
     bool rewind_across_tracks;
 

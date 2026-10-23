@@ -49,6 +49,7 @@
 #include "language.h"
 #include "statusbar-skinned.h"
 #include "panic.h"
+#include "gui/skin_engine/skin_albumart_color.h"
 
 #if CONFIG_CHARGING
 #include "power.h"
@@ -70,6 +71,11 @@
 #if defined(IRIVER_H100_SERIES) || defined(IRIVER_H300_SERIES)
 #include "system-iriver.h"
 #endif
+
+static unsigned int plugin_dynamic_colors_resolve(unsigned int color)
+{
+    return dynamic_colors_resolve(color);
+}
 
 #define WRAPPER(_x_) _x_ ## _wrapper
 
@@ -892,6 +898,7 @@ static const struct plugin_api rockbox_api = {
 
     /* new stuff at the end, sort into place next time
        the API gets incompatible */
+    plugin_dynamic_colors_resolve,
 };
 
 static int plugin_buffer_handle;

@@ -39,6 +39,9 @@
 #include "splash.h"
 #include "settings.h"
 #include "misc.h"
+#if defined(INNIOASIS_Y1) && LCD_DEPTH == 16 && !defined(BOOTLOADER)
+#include "lcd.h"
+#endif
 
 #ifdef HAVE_TOUCHSCREEN
 #include "statusbar-skinned.h"
@@ -1296,6 +1299,8 @@ static int get_action_worker(action_last_t *last, action_cur_t *cur)
 #endif
                 /* Center button pressed (or double-clicked): wake screen and unlock keys */
 #if defined(INNIOASIS_Y1)
+                extern void y1_aod_user_wake(void);
+                y1_aod_user_wake();
                 if (y1_is_display_power_saving()) {
                     y1_set_display_power_saving(false);
                 }
@@ -1511,6 +1516,22 @@ int get_action(int context, int timeout)
 #endif
 
     action = do_backlight(&action_last, &current, action);
+
+#if defined(INNIOASIS_Y1) && LCD_DEPTH == 16 && !defined(BOOTLOADER)
+    if (global_settings.navigation_fade &&
+        (action == ACTION_STD_OK || action == ACTION_STD_CANCEL ||
+         action == ACTION_STD_MENU || action == ACTION_STD_QUICKSCREEN ||
+         action == ACTION_STD_CONTEXT || action == ACTION_STD_HOTKEY ||
+         action == ACTION_WPS_BROWSE || action == ACTION_WPS_CONTEXT ||
+         action == ACTION_WPS_QUICKSCREEN || action == ACTION_WPS_MENU ||
+         action == ACTION_WPS_VIEW_PLAYLIST ||
+         action == ACTION_WPS_LIST_BOOKMARKS ||
+         action == ACTION_WPS_CREATE_BOOKMARK ||
+         action == ACTION_WPS_ID3SCREEN || action == ACTION_WPS_PITCHSCREEN ||
+         action == ACTION_WPS_HOTKEY || action == ACTION_TREE_WPS ||
+         action == ACTION_TREE_STOP))
+        lcd_navigation_fade_capture();
+#endif
 
     return action;
 }

@@ -42,6 +42,7 @@
 #include "debug.h"
 #include "line.h"
 #include "fixedpoint.h"
+#include "skin_engine/skin_albumart_color.h"
 
 #define ICON_PADDING 1
 #define ICON_PADDING_S "1"
@@ -216,6 +217,14 @@ void list_draw(struct screen *display, struct gui_synclist *list)
     else
         callback_draw_item = _default_listdraw_fn;
 
+    dynamic_colors_check_extraction(-1);
+#ifdef HAVE_LCD_COLOR
+    if (display->screen_type == SCREEN_MAIN)
+    {
+        parent->fg_pattern = dynamic_colors_resolve(global_settings.fg_color);
+        parent->bg_pattern = dynamic_colors_resolve(global_settings.bg_color);
+    }
+#endif
     struct viewport * last_vp = display->set_viewport(parent);
     display->clear_viewport();
     if (!list->scroll_all)
@@ -402,16 +411,16 @@ void list_draw(struct screen *display, struct gui_synclist *list)
             {
                 /* Display colour line selector */
                 style = STYLE_COLORBAR;
-                linedes.text_color = global_settings.lst_color;
-                linedes.line_color = global_settings.lss_color;
+                linedes.text_color = dynamic_colors_resolve(global_settings.lst_color);
+                linedes.line_color = dynamic_colors_resolve(global_settings.lss_color);
             }
             else if (list->cursor_style == SYNCLIST_CURSOR_GRADIENT)
             {
                 /* Display gradient line selector */
                 style = STYLE_GRADIENT;
-                linedes.text_color = global_settings.lst_color;
-                linedes.line_color = global_settings.lss_color;
-                linedes.line_end_color = global_settings.lse_color;
+                linedes.text_color = dynamic_colors_resolve(global_settings.lst_color);
+                linedes.line_color = dynamic_colors_resolve(global_settings.lss_color);
+                linedes.line_end_color = dynamic_colors_resolve(global_settings.lse_color);
             }
 #endif
             is_selected = true;
