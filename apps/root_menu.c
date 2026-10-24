@@ -467,7 +467,7 @@ static int load_bmarks(void* param)
 static int pictureflow_screen(void *param)
 {
     (void)param;
-    int ret = plugin_load(PLUGIN_APPS_DIR "/pictureflow.rock", NULL);
+    int ret = plugin_load(PLUGIN_DEMOS_DIR "/pictureflow.rock", NULL);
 
     if (ret == PLUGIN_USB_CONNECTED || ret == PLUGIN_ERROR)
         return GO_TO_ROOT;
@@ -641,11 +641,11 @@ MENUITEM_RETURNVALUE(system_menu_, ID2P(LANG_SYSTEM), GO_TO_SYSTEM_SCREEN,
                      NULL, Icon_System_menu);
 #ifdef HAVE_TAGCACHE
 MENUITEM_RETURNVALUE(pictureflow_menu_item, ID2P(LANG_PICTUREFLOW),
-                     GO_TO_PICTUREFLOW, NULL, Icon_Plugin);
+                     GO_TO_PICTUREFLOW, NULL, Icon_Submenu_Entered);
 #endif
 #if defined(INNIOASIS_Y1)
 MENUITEM_RETURNVALUE(bt_receiver_menu_item, ID2P(LANG_BLUETOOTH_RECEIVER),
-                     GO_TO_BT_RECEIVER, NULL, Icon_Plugin);
+                     GO_TO_BT_RECEIVER, NULL, Icon_Radio_screen);
 #endif
 
 struct menu_item_ex root_menu_;
@@ -653,30 +653,28 @@ static struct menu_callback_with_desc root_menu_desc = {
         item_callback, ID2P(LANG_ROCKBOX_TITLE), Icon_Rockbox };
 
 static struct menu_table menu_table[] = {
-    /* Order here represents the default ordering */
-    { "bookmarks", &bookmarks },
-    { "files", &file_browser },
+    /* Order here represents the user's custom ordering */
 #ifdef HAVE_TAGCACHE
+    { "pictureflow", &pictureflow_menu_item },
     { "database", &db_browser },
 #endif
-    { "wps", &wps_item },
-    { "settings", &menu_ },
-#ifdef HAVE_RECORDING
-    { "recording", &rec },
+    { "playlists", &playlists },
+    { "shortcuts", &shortcut_menu },
+    { "bookmarks", &bookmarks },
+#if defined(INNIOASIS_Y1)
+    { "bluetooth_receiver", &bt_receiver_menu_item },
 #endif
 #if CONFIG_TUNER
     { "radio", &fm },
 #endif
-    { "playlists", &playlists },
+#ifdef HAVE_RECORDING
+    { "recording", &rec },
+#endif
+    { "files", &file_browser },
     { "plugins", &rocks_browser },
+    { "settings", &menu_ },
     { "system_menu", &system_menu_ },
-    { "shortcuts", &shortcut_menu },
-#ifdef HAVE_TAGCACHE
-    { "pictureflow", &pictureflow_menu_item },
-#endif
-#if defined(INNIOASIS_Y1)
-    { "bluetooth_receiver", &bt_receiver_menu_item },
-#endif
+    { "wps", &wps_item },
 };
 #define MAX_MENU_ITEMS (sizeof(menu_table) / sizeof(struct menu_table))
 static struct menu_item_ex *root_menu__[MAX_MENU_ITEMS];
