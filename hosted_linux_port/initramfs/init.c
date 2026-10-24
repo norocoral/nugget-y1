@@ -8,7 +8,8 @@
  *  - Multi-partition physical MicroSD mounting at boot
  *  - USB Mass Storage & LUN initialization for PC music transfer (Windows/Mac/Linux)
  *  - Click wheel touch scanning activation (/proc/tpd_keys_enable)
- *  - Optional diagnostic logging to /mnt/sdcard/y1_debug.txt and /dev/kmsg
+ *  - Optional event, CPU-process, and battery diagnostics to /mnt/sdcard/y1_debug.txt
+ *    and /dev/kmsg
  *  - Hardware Framebuffer unblanking & visual splash verification
  *  - Execution of /rockbox with error recovery
  */
@@ -40,6 +41,7 @@ static char active_sd_dev[64] = {0};
 static char active_ext_dev[64] = {0};
 static char early_log_buf[8192];
 static size_t early_log_len;
+static void log_line(const char *msg);
 
 static int logging_enabled_from_config(void)
 {
@@ -58,6 +60,271 @@ static int logging_enabled_from_config(void)
     }
     fclose(fp);
     return enabled;
+}
+
+static int read_text_file(const char *path, char *buffer, size_t size)
+{
+    if (size == 0)
+        return 0;
+
+    FILE *fp = fopen(path, "r");
+    if (!fp) {
+        buffer[0] = '\0';
+        return 0;
+    }
+
+    int ok = fgets(buffer, size, fp) != NULL;
+    fclose(fp);
+    if (!ok) {
+        buffer[0] = '\0';
+        return 0;
+    }
+
+    buffer[strcspn(buffer, "\r\n")] = '\0';
+    return 1;
+}
+
+struct process_cpu_sample {
+    int pid;
+    unsigned long long ticks;
+    char name[32];
+};
+
+#define MAX_DIAGNOSTIC_PROCESSES 512
+#define TOP_DIAGNOSTIC_PROCESSES 5
+
+static size_t sample_process_cpu(struct process_cpu_sample *samples,
+                                size_t max_samples)
+{
+    DIR *proc = opendir("/proc");
+    if (!proc)
+        return 0;
+
+    size_t count = 0;
+    struct dirent *entry;
+    while (count < max_samples && (entry = readdir(proc)) != NULL) {
+        char *end = NULL;
+        long pid = strtol(entry->d_name, &end, 10);
+        if (!entry->d_name[0] || !end || *end || pid <= 0)
+            continue;
+
+        char path[64];
+        snprintf(path, sizeof(path), "/proc/%ld/stat", pid);
+        FILE *fp = fopen(path, "r");
+        if (!fp)
+            continue;
+
+        char line[1024];
+        if (!fgets(line, sizeof(line), fp)) {
+            fclose(fp);
+            continue;
+        }
+        fclose(fp);
+
+        char *name_start = strchr(line, '(');
+        char *name_end = strrchr(line, ')');
+        if (!name_start || !name_end || name_end <= name_start)
+            continue;
+
+        size_t name_len = (size_t)(name_end - name_start - 1);
+        if (name_len >= sizeof(samples[count].name))
+            name_len = sizeof(samples[count].name) - 1;
+        memcpy(samples[count].name, name_start + 1, name_len);
+        samples[count].name[name_len] = '\0';
+
+        char *cursor = name_end + 1;
+        while (*cursor == ' ')
+            cursor++;
+
+        unsigned long long user_ticks = 0;
+        unsigned long long system_ticks = 0;
+        int field = 3;
+        char *saveptr = NULL;
+        char *token = strtok_r(cursor, " ", &saveptr);
+        while (token && field <= 15) {
+            if (field == 14)
+                user_ticks = strtoull(token, NULL, 10);
+            else if (field == 15)
+                system_ticks = strtoull(token, NULL, 10);
+            token = strtok_r(NULL, " ", &saveptr);
+            field++;
+        }
+        if (field <= 15)
+            continue;
+
+        samples[count].pid = (int)pid;
+        samples[count].ticks = user_ticks + system_ticks;
+        count++;
+    }
+
+    closedir(proc);
+    return count;
+}
+
+static int previous_process_sample(const struct process_cpu_sample *samples,
+                                   size_t count, int pid,
+                                   unsigned long long *ticks)
+{
+    for (size_t i = 0; i < count; i++) {
+        if (samples[i].pid == pid) {
+            *ticks = samples[i].ticks;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void log_battery_diagnostics(void)
+{
+    DIR *supplies = opendir("/sys/class/power_supply");
+    if (!supplies) {
+        log_line("[diag] Battery telemetry unavailable: no power_supply sysfs\n");
+        return;
+    }
+
+    struct dirent *entry;
+    int found_battery = 0;
+    while ((entry = readdir(supplies)) != NULL) {
+        if (entry->d_name[0] == '.')
+            continue;
+
+        char path[320];
+        char type[32];
+        snprintf(path, sizeof(path), "/sys/class/power_supply/%s/type",
+                 entry->d_name);
+        if (!read_text_file(path, type, sizeof(type)) ||
+            strcmp(type, "Battery") != 0)
+            continue;
+
+        char capacity[32] = "n/a";
+        char voltage[32] = "n/a";
+        char current[32] = "n/a";
+        char temperature[32] = "n/a";
+        char status[32] = "n/a";
+        snprintf(path, sizeof(path), "/sys/class/power_supply/%s/capacity",
+                 entry->d_name);
+        read_text_file(path, capacity, sizeof(capacity));
+        snprintf(path, sizeof(path), "/sys/class/power_supply/%s/voltage_now",
+                 entry->d_name);
+        read_text_file(path, voltage, sizeof(voltage));
+        snprintf(path, sizeof(path), "/sys/class/power_supply/%s/current_now",
+                 entry->d_name);
+        read_text_file(path, current, sizeof(current));
+        snprintf(path, sizeof(path), "/sys/class/power_supply/%s/temp",
+                 entry->d_name);
+        read_text_file(path, temperature, sizeof(temperature));
+        snprintf(path, sizeof(path), "/sys/class/power_supply/%s/status",
+                 entry->d_name);
+        read_text_file(path, status, sizeof(status));
+
+        char message[256];
+        snprintf(message, sizeof(message),
+                 "[diag] battery=%s%% voltage_now=%s_uV current_now=%s_uA "
+                 "temp_raw=%s status=%s\n",
+                 capacity, voltage, current, temperature, status);
+        log_line(message);
+        found_battery = 1;
+    }
+    closedir(supplies);
+
+    if (!found_battery)
+        log_line("[diag] Battery telemetry unavailable: battery supply not found\n");
+
+    char cpu_freq[32] = "n/a";
+    char load[96] = "n/a";
+    read_text_file(
+        "/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq",
+        cpu_freq, sizeof(cpu_freq));
+    read_text_file("/proc/loadavg", load, sizeof(load));
+    char message[192];
+    snprintf(message, sizeof(message),
+             "[diag] cpu0_freq=%s_kHz loadavg=%s\n", cpu_freq, load);
+    log_line(message);
+}
+
+static void diagnostic_monitor(void)
+{
+    struct process_cpu_sample previous[MAX_DIAGNOSTIC_PROCESSES];
+    struct process_cpu_sample current[MAX_DIAGNOSTIC_PROCESSES];
+    size_t previous_count = sample_process_cpu(previous,
+                                                MAX_DIAGNOSTIC_PROCESSES);
+    long ticks_per_second = sysconf(_SC_CLK_TCK);
+    if (ticks_per_second <= 0)
+        ticks_per_second = 100;
+
+    while (1) {
+        if (!logging_enabled_from_config()) {
+            sleep(300);
+            continue;
+        }
+
+        sleep(60);
+        if (!logging_enabled_from_config())
+            continue;
+
+        size_t current_count = sample_process_cpu(current,
+                                                  MAX_DIAGNOSTIC_PROCESSES);
+        log_battery_diagnostics();
+
+        struct process_cpu_sample top[TOP_DIAGNOSTIC_PROCESSES] = {0};
+        unsigned long long top_delta[TOP_DIAGNOSTIC_PROCESSES] = {0};
+        for (size_t i = 0; i < current_count; i++) {
+            unsigned long long old_ticks;
+            if (!previous_process_sample(previous, previous_count,
+                                         current[i].pid, &old_ticks) ||
+                current[i].ticks < old_ticks)
+                continue;
+
+            unsigned long long delta = current[i].ticks - old_ticks;
+            for (size_t rank = 0; rank < TOP_DIAGNOSTIC_PROCESSES; rank++) {
+                if (delta <= top_delta[rank])
+                    continue;
+                for (size_t move = TOP_DIAGNOSTIC_PROCESSES - 1;
+                     move > rank; move--) {
+                    top_delta[move] = top_delta[move - 1];
+                    top[move] = top[move - 1];
+                }
+                top_delta[rank] = delta;
+                top[rank] = current[i];
+                break;
+            }
+        }
+
+        for (size_t i = 0; i < TOP_DIAGNOSTIC_PROCESSES; i++) {
+            if (top_delta[i] == 0)
+                continue;
+            unsigned long long cpu_hundredths =
+                top_delta[i] * 10000ULL /
+                ((unsigned long long)ticks_per_second * 60ULL);
+            char message[160];
+            snprintf(message, sizeof(message),
+                     "[diag] top_cpu_%zu pid=%d name=%s usage=%llu.%02llu%% "
+                     "over_60s\n",
+                     i + 1, top[i].pid, top[i].name,
+                     cpu_hundredths / 100, cpu_hundredths % 100);
+            log_line(message);
+        }
+
+        memcpy(previous, current,
+               current_count * sizeof(struct process_cpu_sample));
+        previous_count = current_count;
+    }
+}
+
+static void start_diagnostic_monitor(void)
+{
+    if (!logging_enabled_from_config())
+        return;
+
+    pid_t monitor_pid = fork();
+    if (monitor_pid == 0) {
+        diagnostic_monitor();
+        _exit(0);
+    }
+    if (monitor_pid < 0)
+        log_line("[diag] Failed to start telemetry monitor\n");
+    else
+        log_line("[diag] CPU and battery telemetry enabled (60-second interval)\n");
 }
 
 static void log_line(const char *msg)
@@ -925,6 +1192,7 @@ int main(int argc, char *argv[])
 
     /* 7. Apply aggressive battery and power saving optimizations */
     optimize_power_and_battery();
+    start_diagnostic_monitor();
 
     /* 8. Hardware initialization, Bluetooth WMT/STP subsystem, & USB Gadget */
     enable_touch_keys();

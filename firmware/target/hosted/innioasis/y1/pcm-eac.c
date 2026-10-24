@@ -82,6 +82,7 @@ static size_t bt_pcm_ring_read;
 static size_t bt_pcm_ring_write;
 static volatile bool bt_receiver_active;
 static volatile bool bt_receiver_mode_power_hold;
+static long bt_receiver_last_pcm_tick;
 static pthread_mutex_t bt_pcm_mtx = PTHREAD_MUTEX_INITIALIZER;
 static pthread_mutex_t pcm_mtx = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t pcm_cond = PTHREAD_COND_INITIALIZER;
@@ -140,13 +141,13 @@ void y1_audio_receiver_set_active(bool active, unsigned long sample_rate)
     bt_receiver_active = active;
     bt_pcm_ring_read = 0;
     bt_pcm_ring_write = 0;
+    bt_receiver_last_pcm_tick = current_tick;
     pthread_mutex_unlock(&bt_pcm_mtx);
 
     if (active) {
         y1_set_deep_idle(false);
         y1_play_wake_lock(true);
         sink_set_freq((uint16_t)sample_rate);
-        y1_audio_set_output_enabled(true);
         if (global_settings.bt_receiver_full_volume)
             audiohw_set_volume(60, 60);
     } else if (dma_stopped != 0) {
@@ -190,6 +191,8 @@ size_t y1_audio_receiver_write(const int16_t *samples, size_t frames)
         bt_pcm_ring_write = next;
         written++;
     }
+    if (frames > 0)
+        bt_receiver_last_pcm_tick = current_tick;
     pthread_mutex_unlock(&bt_pcm_mtx);
     return written;
 }
@@ -485,7 +488,24 @@ static void *pcm_worker(void *arg)
             pthread_mutex_unlock(&bt_pcm_mtx);
 
             if (frames == 0) {
-                usleep(2000);
+                pthread_mutex_lock(&bt_pcm_mtx);
+                long last_pcm_tick = bt_receiver_last_pcm_tick;
+                pthread_mutex_unlock(&bt_pcm_mtx);
+                if (audio_output_enabled &&
+                    !TIME_BEFORE(current_tick,
+                                 last_pcm_tick + MAX(HZ / 2, 1)))
+                    y1_audio_set_output_enabled(false);
+                usleep(20000);
+                continue;
+            }
+
+            if (!y1_audio_receiver_is_active())
+                continue;
+
+            if (!audio_output_enabled)
+                y1_audio_set_output_enabled(true);
+            if (!y1_audio_receiver_is_active()) {
+                y1_audio_set_output_enabled(false);
                 continue;
             }
 
