@@ -17176,6 +17176,74 @@
   </voice>
 </phrase>
 <phrase>
+  id: LANG_RECORDING_SCREEN
+  desc: in the theme menu: browse recording screen skins
+  user: core
+  <source>
+    *: none
+    recording: "Recording Screen"
+  </source>
+  <dest>
+    *: none
+    recording: "녹음 화면"
+  </dest>
+  <voice>
+    *: none
+    recording: "녹음 화면"
+  </voice>
+</phrase>
+<phrase>
+  id: VOICE_EXT_WRS
+  desc: spoken only, for file extension
+  user: core
+  <source>
+    *: none
+    recording: ""
+  </source>
+  <dest>
+    *: none
+    recording: ""
+  </dest>
+  <voice>
+    *: none
+    recording: "녹음 화면 스킨"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_REMOTE_RECORDING_SCREEN
+  desc: in the theme menu: browse remote recording screen skins
+  user: core
+  <source>
+    *: none
+    recording_remote: "Remote Recording Screen"
+  </source>
+  <dest>
+    *: none
+    recording_remote: "원격 녹음 화면"
+  </dest>
+  <voice>
+    *: none
+    recording_remote: "원격 녹음 화면"
+  </voice>
+</phrase>
+<phrase>
+  id: VOICE_EXT_RWRS
+  desc: spoken only, for file extension
+  user: core
+  <source>
+    *: none
+    recording_remote: ""
+  </source>
+  <dest>
+    *: none
+    recording_remote: ""
+  </dest>
+  <voice>
+    *: none
+    recording_remote: "원격 녹음 화면 스킨"
+  </voice>
+</phrase>
+<phrase>
   id: LANG_Y1_SCREEN_RESOLUTION
   desc: in Settings -> Nugget -> Device
   user: core
@@ -17680,6 +17748,34 @@
   </voice>
 </phrase>
 <phrase>
+  id: LANG_GOTO_ARTIST
+  desc: WPS context menu action to browse the current track's artist in the database
+  user: core
+  <source>
+    *: "Go to Artist"
+  </source>
+  <dest>
+    *: "아티스트로 이동"
+  </dest>
+  <voice>
+    *: "아티스트로 이동"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_GOTO_ALBUM
+  desc: WPS context menu action to browse the current track's album in the database
+  user: core
+  <source>
+    *: "Go to Album"
+  </source>
+  <dest>
+    *: "앨범으로 이동"
+  </dest>
+  <voice>
+    *: "앨범으로 이동"
+  </voice>
+</phrase>
+<phrase>
   id: LANG_Y1_AOD_IMPORTANT_EVENTS
   desc: in Settings -> Nugget -> Device
   user: core
@@ -18013,5 +18109,61 @@
   </dest>
   <voice>
     *: "최대 음량 모드"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_MIC_SOURCE
+  desc: Microphone Source setting
+  user: core
+  <source>
+    *: "Microphone Source"
+  </source>
+  <dest>
+    *: "마이크 입력 소스"
+  </dest>
+  <voice>
+    *: "마이크 입력 소스"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_MIC_INTERNAL
+  desc: Built-in internal microphone
+  user: core
+  <source>
+    *: "Built-in Mic"
+  </source>
+  <dest>
+    *: "내장 마이크"
+  </dest>
+  <voice>
+    *: "내장 마이크"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_MIC_HEADPHONE
+  desc: Wired headphone headset microphone
+  user: core
+  <source>
+    *: "Headphone Mic"
+  </source>
+  <dest>
+    *: "유선 이어폰 마이크"
+  </dest>
+  <voice>
+    *: "유선 이어폰 마이크"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_MIC_BLUETOOTH
+  desc: Bluetooth handset microphone
+  user: core
+  <source>
+    *: "Bluetooth Mic"
+  </source>
+  <dest>
+    *: "블루투스 마이크"
+  </dest>
+  <voice>
+    *: "블루투스 마이크"
   </voice>
 </phrase>

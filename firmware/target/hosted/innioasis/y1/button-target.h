@@ -45,6 +45,8 @@ bool button_handle_key_event(int keycode, int value, bool is_accdet);
 bool button_center_wakeup_available(void);
 void y1_mfb_init(void);
 bool headphones_inserted(void);
+bool headphones_has_mic(void);
+int  y1_headphones_raw_state(void);
 int y1_read_pmic_reg(uint32_t offset);
 void y1_write_pmic_reg(uint32_t offset, uint32_t val, uint32_t mask);
 

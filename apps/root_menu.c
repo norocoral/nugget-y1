@@ -641,7 +641,7 @@ MENUITEM_RETURNVALUE(system_menu_, ID2P(LANG_SYSTEM), GO_TO_SYSTEM_SCREEN,
                      NULL, Icon_System_menu);
 #ifdef HAVE_TAGCACHE
 MENUITEM_RETURNVALUE(pictureflow_menu_item, ID2P(LANG_PICTUREFLOW),
-                     GO_TO_PICTUREFLOW, NULL, Icon_Submenu_Entered);
+                     GO_TO_PICTUREFLOW, NULL, Icon_Rockbox);
 #endif
 #if defined(INNIOASIS_Y1)
 MENUITEM_RETURNVALUE(bt_receiver_menu_item, ID2P(LANG_BLUETOOTH_RECEIVER),
@@ -729,7 +729,7 @@ void root_menu_load_from_cfg(void* setting, char *value)
     unsigned int menu_item_count = 0, i;
     bool main_menu_added = false;
 
-    if (*value == '-')
+    if (!value || *value == '-')
     {
         root_menu_set_default(setting, NULL);
         return;
@@ -770,21 +770,36 @@ void root_menu_load_from_cfg(void* setting, char *value)
 char* root_menu_write_to_cfg(void* setting, char*buf, int buf_len)
 {
     (void)setting;
-    unsigned i, written, j;
+    unsigned i, j;
+    int written;
+    char *orig_buf = buf;
+
+    if (!buf || buf_len <= 0)
+        return buf;
+
+    buf[0] = '\0';
     for (i = 0; i < MENU_GET_COUNT(root_menu_.flags); i++)
     {
         for (j=0; j<MAX_MENU_ITEMS; j++)
         {
             if (menu_table[j].item == root_menu__[i])
             {
+                if (buf_len <= 1)
+                    return orig_buf;
+
                 written = snprintf(buf, buf_len, "%s, ", menu_table[j].string);
+                if (written < 0 || written >= buf_len)
+                {
+                    buf[buf_len - 1] = '\0';
+                    return orig_buf;
+                }
                 buf_len -= written;
                 buf += written;
                 break;
             }
         }
     }
-    return buf;
+    return orig_buf;
 }
 
 void root_menu_set_default(void* setting, void* defaultval)

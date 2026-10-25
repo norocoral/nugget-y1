@@ -376,6 +376,24 @@ while IFS= read -r -d '' object; do
     fi
 done < <(find "$BUILD_DIR" -type f -name '*.o' -print0)
 
+# Ensure genlang-features stays in sync with features to avoid missing LANG_ defines
+if [[ -f "$BUILD_DIR/apps/features" ]]; then
+    tr '\n' ':' < "$BUILD_DIR/apps/features" > "$BUILD_DIR/apps/genlang-features.tmp"
+    if [[ ! -f "$BUILD_DIR/apps/genlang-features" ]] || ! cmp -s "$BUILD_DIR/apps/genlang-features.tmp" "$BUILD_DIR/apps/genlang-features"; then
+        echo "[*] Syncing genlang-features with updated device capabilities..."
+        mv -f "$BUILD_DIR/apps/genlang-features.tmp" "$BUILD_DIR/apps/genlang-features"
+        rm -f "$BUILD_DIR/lang/lang.h" "$BUILD_DIR/lang/lang_core.c" "$BUILD_DIR/lang_enum.h" "$BUILD_DIR/apps/lang/"*.lng "$BUILD_DIR/apps/lang/"*.vstrings
+    else
+        rm -f "$BUILD_DIR/apps/genlang-features.tmp"
+    fi
+fi
+
+# Ensure lang.h is generated BEFORE parallel object compilation to prevent race conditions
+if [[ ! -f "$BUILD_DIR/lang/lang.h" ]]; then
+    echo "[*] Generating language header before parallel compilation..."
+    make -j1 "$BUILD_DIR/lang/lang.h"
+fi
+
 echo "[*] Building Rockbox with $JOBS parallel jobs..."
 make -j"$JOBS"
 

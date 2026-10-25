@@ -145,6 +145,11 @@ extern int (*tuner_get)(int setting);
 #include "stfm1000.h"
 #endif
 
+/* MediaTek MT6572 / Innioasis Y1 Tuner */
+#if (CONFIG_TUNER & INNIOASIS_Y1_TUNER)
+#include "tuner-y1.h"
+#endif
+
 #if defined(SIMULATOR)
 #undef tuner_set
 int tuner_set(int setting, int value);

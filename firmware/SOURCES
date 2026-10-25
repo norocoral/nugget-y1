@@ -318,6 +318,9 @@ target/hosted/alsa-controls.c
 #else
 target/hosted/innioasis/y1/pcm-eac.c
 #endif
+#if CONFIG_TUNER
+target/hosted/innioasis/y1/tuner-y1.c
+#endif
 #endif
 
 /* Common */

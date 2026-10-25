@@ -121,6 +121,7 @@ static void y1_trigger_mfb_action(int action_setting)
         snprintf(kbuf, sizeof(kbuf), "[button-y1] MFB trigger action=%d -> 0x%08x\n", action_setting, btn);
         y1_kmsg_log(kbuf);
         button_queue_post(btn, 0);
+        button_queue_post(btn | BUTTON_REL, 0);
     }
 }
 
@@ -151,7 +152,8 @@ static void y1_mfb_tick(void)
             {
                 /* Released before 5s: trigger the 2s hold action now */
                 mfb_waiting_5s = false;
-                y1_write_pmic_reg(0x0786, 0x0200, 0xffff);
+                y1_write_pmic_reg(0x0786, 0x0180, 0xffff);
+                y1_write_pmic_reg(0x0788, 0x0180, 0xffff);
                 y1_trigger_mfb_action(global_settings.mfb_hold_2s);
             }
             else if (TIME_AFTER(now, mfb_hold_2s_tick + (3 * HZ) + (HZ / 5)))
@@ -159,7 +161,8 @@ static void y1_mfb_tick(void)
                 /* Held continuously for 5s total (~1.8s kernel + 3.2s continued): trigger 5s action */
                 mfb_waiting_5s = false;
                 mfb_hold_5s_fired = true;
-                y1_write_pmic_reg(0x0786, 0x0200, 0xffff);
+                y1_write_pmic_reg(0x0786, 0x0180, 0xffff);
+                y1_write_pmic_reg(0x0788, 0x0180, 0xffff);
                 y1_trigger_mfb_action(global_settings.mfb_hold_5s);
             }
         }
@@ -187,8 +190,8 @@ static void y1_mfb_tick(void)
     }
     else if (mfb_click_count > 0)
     {
-        /* Multi-click detection window (550 ms to account for kernel multi_key_detection polling) */
-        if (TIME_AFTER(now, mfb_last_release_tick + (HZ * 55 / 100)))
+        /* Multi-click detection window (400 ms for responsive fast multi-clicks) */
+        if (TIME_AFTER(now, mfb_last_release_tick + (HZ * 40 / 100)))
         {
             int clicks = mfb_click_count;
             mfb_click_count = 0;
@@ -278,8 +281,10 @@ bool button_handle_key_event(int keycode, int value, bool is_accdet)
 
     long now = current_tick;
 
-    /* Keep ACCDET_DEBOUNCE0 (0x0786) responsive (15.6ms instead of 62.5ms) for fast multi-clicks */
-    y1_write_pmic_reg(0x0786, 0x0200, 0xffff);
+    /* Keep ACCDET_DEBOUNCE0 (0x0786 - press) and ACCDET_DEBOUNCE1 (0x0788 - release)
+     * responsive (11.7ms instead of 62.5ms - 125ms) so rapid multi-clicks are reliably detected */
+    y1_write_pmic_reg(0x0786, 0x0180, 0xffff);
+    y1_write_pmic_reg(0x0788, 0x0180, 0xffff);
 
     if (is_mfb_long)
     {
@@ -342,6 +347,17 @@ bool button_handle_key_event(int keycode, int value, bool is_accdet)
                 }
             }
         }
+        else
+        {
+            /* Rapid pulse where UP arrived without prior down: count as click */
+            mfb_click_count++;
+            mfb_last_release_tick = now;
+            if (mfb_click_count >= 3)
+            {
+                mfb_click_count = 0;
+                y1_trigger_mfb_action(global_settings.mfb_triple_click);
+            }
+        }
     }
 
     return true;
@@ -351,6 +367,8 @@ void y1_mfb_init(void)
 {
     static bool inited = false;
     if (!inited) {
+        y1_write_pmic_reg(0x0786, 0x0180, 0xffff);
+        y1_write_pmic_reg(0x0788, 0x0180, 0xffff);
         tick_add_task(y1_mfb_tick);
         inited = true;
     }
@@ -429,10 +447,23 @@ int button_map(int keycode)
     return mapped;
 }
 
+static int y1_h2w_raw_state = -1;
+
+bool headphones_has_mic(void)
+{
+    headphones_inserted();
+    return (y1_h2w_raw_state == 1);
+}
+
+int y1_headphones_raw_state(void)
+{
+    headphones_inserted();
+    return y1_h2w_raw_state;
+}
+
 bool headphones_inserted(void)
 {
     static bool cached_state = true;
-    static int last_raw_state = -1;
     static long last_check_tick = 0;
     static int h2w_fd = -1;
     long now = current_tick;
@@ -455,11 +486,12 @@ bool headphones_inserted(void)
             buf[len] = '\0';
             int state = 0;
             if (sscanf(buf, "%d", &state) == 1) {
-                if (state != last_raw_state) {
-                    last_raw_state = state;
-                    /* When 4-pole headset (state == 1) is inserted, reduce button press debounce to 15.6ms */
+                if (state != y1_h2w_raw_state) {
+                    y1_h2w_raw_state = state;
+                    /* When 4-pole headset (state == 1) is inserted, configure press & release debounces to 11.7ms */
                     if (state == 1) {
-                        y1_write_pmic_reg(0x0786, 0x0200, 0xffff);
+                        y1_write_pmic_reg(0x0786, 0x0180, 0xffff);
+                        y1_write_pmic_reg(0x0788, 0x0180, 0xffff);
                     }
                     char kbuf[80];
                     snprintf(kbuf, sizeof(kbuf), "[button-y1] h2w state=%d\n", state);

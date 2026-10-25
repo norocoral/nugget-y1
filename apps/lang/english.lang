@@ -18170,3 +18170,59 @@
     *: "Full volume mode"
   </voice>
 </phrase>
+<phrase>
+  id: LANG_Y1_MIC_SOURCE
+  desc: Microphone Source setting
+  user: core
+  <source>
+    *: "Microphone Source"
+  </source>
+  <dest>
+    *: "Microphone Source"
+  </dest>
+  <voice>
+    *: "Microphone source"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_MIC_INTERNAL
+  desc: Built-in internal microphone
+  user: core
+  <source>
+    *: "Built-in Mic"
+  </source>
+  <dest>
+    *: "Built-in Mic"
+  </dest>
+  <voice>
+    *: "Built-in mic"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_MIC_HEADPHONE
+  desc: Wired headphone headset microphone
+  user: core
+  <source>
+    *: "Headphone Mic"
+  </source>
+  <dest>
+    *: "Headphone Mic"
+  </dest>
+  <voice>
+    *: "Headphone mic"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_MIC_BLUETOOTH
+  desc: Bluetooth handset microphone
+  user: core
+  <source>
+    *: "Bluetooth Mic"
+  </source>
+  <dest>
+    *: "Bluetooth Mic"
+  </dest>
+  <voice>
+    *: "Bluetooth mic"
+  </voice>
+</phrase>

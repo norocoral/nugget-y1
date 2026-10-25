@@ -25,7 +25,7 @@ static struct menu_table *menu_table;
 static int menu_item_count;
 
 #define MAX_ITEM_NAME 64
-#define MAX_ITEMS 16
+#define MAX_ITEMS 32
 struct items
 {
     unsigned char *name;
@@ -40,10 +40,19 @@ static const char * menu_get_name(int selected_item, void * data,
                                    char * buffer, size_t buffer_len)
 {
     (void)data;
-    unsigned char *p = menu_items[selected_item].name;
-    int id = P2ID(p);
+    if (selected_item < 0 || selected_item >= MAX_ITEMS)
+        return "";
 
-    rb->snprintf(buffer, buffer_len, "%s: %s", (id != -1) ? rb->str(id) : p,
+    unsigned char *p = menu_items[selected_item].name;
+    if (!p)
+        return "";
+
+    int id = P2ID(p);
+    const char *name = (id != -1) ? (const char *)rb->str(id) : (const char *)p;
+    if (!name)
+        name = "";
+
+    rb->snprintf(buffer, buffer_len, "%s: %s", name,
                  menu_items[selected_item].enabled ?
                  rb->str(LANG_ON) : rb->str(LANG_OFF));
 
@@ -69,7 +78,7 @@ static unsigned char *item_name(int n)
 
 void load_from_cfg(void)
 {
-    char config_str[128];
+    char config_str[512];
     char *token, *save;
     int done = 0;
     int i = 0;
@@ -80,7 +89,7 @@ void load_from_cfg(void)
 
     token = rb->strtok_r(config_str, ", ", &save);
 
-    while (token)
+    while (token && done < MAX_ITEMS)
     {
         for (i = 0, found = false; i < menu_item_count; i++)
         {
@@ -90,7 +99,7 @@ void load_from_cfg(void)
         if (found)
         {
             menu_items[done].name = item_name(i);
-            rb->strcpy(menu_items[done].string, token);
+            rb->strlcpy(menu_items[done].string, token, sizeof(menu_items[done].string));
             menu_items[done].enabled = true;
             done++;
         }
@@ -99,7 +108,7 @@ void load_from_cfg(void)
 
     if (done < menu_item_count)
     {
-        for (i = 0; i < menu_item_count; i++)
+        for (i = 0; i < menu_item_count && done < MAX_ITEMS; i++)
         {
             found = false;
             for (int j = 0; !found && j < done; j++)
@@ -110,7 +119,7 @@ void load_from_cfg(void)
             if (!found)
             {
                 menu_items[done].name = item_name(i);
-                rb->strcpy(menu_items[done].string, menu_table[i].string);
+                rb->strlcpy(menu_items[done].string, menu_table[i].string, sizeof(menu_items[done].string));
                 menu_items[done].enabled = false;
                 done++;
             }
@@ -120,7 +129,7 @@ void load_from_cfg(void)
 
 static void save_to_cfg(void)
 {
-    char out[128];
+    char out[512];
     int i, j = 0;
 
     out[0] = '\0';
@@ -128,7 +137,17 @@ static void save_to_cfg(void)
     {
         if (menu_items[i].enabled)
         {
-            j += rb->snprintf(&out[j],sizeof(out) - j, "%s, ", menu_items[i].string);
+            if (sizeof(out) > (size_t)j + 1)
+            {
+                int written = rb->snprintf(&out[j], sizeof(out) - j, "%s, ", menu_items[i].string);
+                if (written > 0)
+                {
+                    if ((size_t)written >= sizeof(out) - j)
+                        j = sizeof(out) - 1;
+                    else
+                        j += written;
+                }
+            }
         }
     }
 
@@ -156,7 +175,14 @@ static void swap_items(int a, int b)
 static int menu_speak_item(int selected_item, void *data)
 {
     (void) data;
-    int id = P2ID(menu_items[selected_item].name);
+    if (selected_item < 0 || selected_item >= MAX_ITEMS)
+        return 0;
+
+    unsigned char *p = menu_items[selected_item].name;
+    if (!p)
+        return 0;
+
+    int id = P2ID(p);
 
     if (id != -1)
     {
@@ -181,6 +207,8 @@ enum plugin_status plugin_start(const void* parameter)
     int ret = PLUGIN_OK;
 
     menu_table = rb->root_menu_get_options(&menu_item_count);
+    if (menu_item_count > MAX_ITEMS)
+        menu_item_count = MAX_ITEMS;
     load_from_cfg();
 
     rb->gui_synclist_init(&list, menu_get_name, NULL, false, 1, NULL);

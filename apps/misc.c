@@ -1568,7 +1568,7 @@ void format_sound_value_ex(char *buf, size_t buf_sz, int snd, int val, bool skin
     unsigned int d = av - i*factor;
 
     snprintf(buf, buf_sz, "%s%u%.*s%.*u%s%s", physval < 0 ? "-" : &" "[skin_token],
-             i, numdec, ".", numdec, d, &" "[skin_token], skin_token ? "" : unit);
+             i, numdec, ".", numdec, d, &" "[skin_token], skin_token ? "" : (unit ? unit : ""));
 }
 
 /* format a sound value as "-1.05 dB", or " 1.05 dB" */

@@ -16,6 +16,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stddef.h>
+#include <sys/types.h>
 
 #define Y1_BT_MAX_DEVICES 16
 #define Y1_BT_RECEIVER_ART_PATH "/mnt/sdcard/.rockbox/albumart/bt-receiver.jpg"
@@ -87,5 +88,12 @@ void y1_bt_update_metadata(const char *title, const char *artist,
 void y1_bt_get_receiver_metadata(char *title, size_t title_size,
                                  char *artist, size_t artist_size,
                                  char *album, size_t album_size);
+
+#ifdef HAVE_RECORDING
+bool y1_bt_is_connected(void);
+void y1_bt_start_mic(void);
+void y1_bt_stop_mic(void);
+ssize_t y1_bt_read_mic_pcm(void *out_buf, size_t max_bytes);
+#endif
 
 #endif /* _BT_Y1_H_ */

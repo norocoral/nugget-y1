@@ -445,10 +445,12 @@ static void make_device_nodes(void)
         }
     }
 
-    /* MediaTek WMT / STP / Bluetooth character device nodes */
+    /* MediaTek WMT / STP / Bluetooth / FM character device nodes */
     if (access("/dev/stpwmt", F_OK) != 0)  mknod("/dev/stpwmt",  S_IFCHR | 0666, makedev(190, 0));
     if (access("/dev/stpgps", F_OK) != 0)  mknod("/dev/stpgps",  S_IFCHR | 0666, makedev(191, 0));
     if (access("/dev/stpbt",  F_OK) != 0)  mknod("/dev/stpbt",   S_IFCHR | 0666, makedev(192, 0));
+    if (access("/dev/fm",     F_OK) != 0)  mknod("/dev/fm",      S_IFCHR | 0666, makedev(193, 0));
+    if (access("/dev/stpfm",  F_OK) != 0)  mknod("/dev/stpfm",   S_IFCHR | 0666, makedev(193, 0));
     if (access("/dev/wmtWifi", F_OK) != 0) mknod("/dev/wmtWifi", S_IFCHR | 0666, makedev(153, 0));
     if (access("/dev/urandom", F_OK) != 0) mknod("/dev/urandom", S_IFCHR | 0666, makedev(1, 9));
 

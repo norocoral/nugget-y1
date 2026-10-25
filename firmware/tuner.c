@@ -97,6 +97,12 @@ void tuner_init(void)
                         stfm1000_get,
                         stfm1000_init())
     #endif
+    #if (CONFIG_TUNER & INNIOASIS_Y1_TUNER)
+        TUNER_TYPE_CASE(INNIOASIS_Y1_TUNER,
+                        y1_tuner_set,
+                        y1_tuner_get,
+                        y1_tuner_init())
+    #endif
     }
 }
 

@@ -377,6 +377,8 @@ void do_setting_from_menu(const struct menu_item_ex *temp,
         return;
     }
     const struct settings_list *setting = find_setting(temp->variable);
+    if (!setting)
+        return;
 
     if ((temp->flags&MENU_TYPE_MASK) == MT_SETTING_W_TEXT)
         title = temp->callback_and_desc->desc;

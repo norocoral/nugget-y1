@@ -162,6 +162,13 @@ static bool avdtp_discover_sent = false;
 static bool avdtp_opening_media = false;
 static volatile bool a2dp_streaming = false;
 static volatile bool in_sniff_mode = false;
+#define Y1_BT_MIC_RING_FRAMES 4096
+static int16_t bt_mic_pcm_ring[Y1_BT_MIC_RING_FRAMES * 2];
+static size_t bt_mic_ring_read = 0;
+static size_t bt_mic_ring_write = 0;
+static pthread_mutex_t bt_mic_mtx = PTHREAD_MUTEX_INITIALIZER;
+static uint16_t sco_handle = 0xFFFF;
+static volatile bool sco_recording_active = false;
 static uint32_t last_pcm_time_ms = 0;
 static bool avrcp_play_notify_pending = false;
 static uint8_t avrcp_play_notify_label = 0;
@@ -391,6 +398,12 @@ static unsigned long pcm_resample_target_rate;
 
 static void reset_bt_session(void)
 {
+    sco_handle = 0xFFFF;
+    sco_recording_active = false;
+    pthread_mutex_lock(&bt_mic_mtx);
+    bt_mic_ring_read = 0;
+    bt_mic_ring_write = 0;
+    pthread_mutex_unlock(&bt_mic_mtx);
     acl_handle = 0xFFFF;
     memset(active_bdaddr, 0, sizeof(active_bdaddr));
     connected_name[0] = '\0';
@@ -478,6 +491,30 @@ static unsigned long a2dp_sample_rate(void)
         case 0x80: return 16000;
         default:   return 44100;
     }
+}
+
+static void handle_sco_packet(const uint8_t *pkt, size_t len)
+{
+    if (len <= 4)
+        return;
+    uint8_t dlen = pkt[3];
+    if (dlen == 0 || (size_t)(4 + dlen) > len)
+        return;
+
+    const int16_t *samples = (const int16_t *)&pkt[4];
+    size_t sample_count = dlen / sizeof(int16_t);
+
+    pthread_mutex_lock(&bt_mic_mtx);
+    for (size_t i = 0; i < sample_count; i++) {
+        size_t next = (bt_mic_ring_write + 1) % Y1_BT_MIC_RING_FRAMES;
+        if (next == bt_mic_ring_read)
+            break;
+        int16_t s = samples[i];
+        bt_mic_pcm_ring[bt_mic_ring_write * 2]     = s;
+        bt_mic_pcm_ring[bt_mic_ring_write * 2 + 1] = s;
+        bt_mic_ring_write = next;
+    }
+    pthread_mutex_unlock(&bt_mic_mtx);
 }
 
 /* ============================================================================
@@ -2082,13 +2119,29 @@ static void handle_hci_event(const uint8_t *pkt, size_t len)
             break;
         }
 
-        case 0x04: /* Connection Request (Incoming from Headphone) */ {
+        case 0x04: /* Connection Request (Incoming ACL or SCO) */ {
             if (plen >= 10) {
-                uint8_t accept[7];
-                memcpy(&accept[0], &p[0], 6);
-                accept[6] = 0x00; /* Become Master (0x00) for clean A2DP streaming */
-                avdtp_initiator = false;
-                hci_send_cmd(0x0409, accept, 7); /* HCI_Accept_Connection_Request */
+                uint8_t link_type = p[9];
+                if (link_type == 0x00 || link_type == 0x02) {
+                    /* Incoming SCO / eSCO connection request */
+                    uint8_t accept[21];
+                    memcpy(&accept[0], &p[0], 6);
+                    accept[6] = 0x40; accept[7] = 0x1F; accept[8] = 0x00; accept[9] = 0x00;
+                    accept[10] = 0x40; accept[11] = 0x1F; accept[12] = 0x00; accept[13] = 0x00;
+                    accept[14] = 0xFF; accept[15] = 0xFF;
+                    accept[16] = 0x60; accept[17] = 0x00;
+                    accept[18] = 0x01;
+                    accept[19] = 0x88; accept[20] = 0x03;
+                    hci_send_cmd(0x0429, accept, 21);
+                    bt_log("[bt-y1] Accepted incoming SCO connection request\n");
+                } else {
+                    /* Incoming ACL connection request */
+                    uint8_t accept[7];
+                    memcpy(&accept[0], &p[0], 6);
+                    accept[6] = 0x00; /* Become Master (0x00) for clean A2DP streaming */
+                    avdtp_initiator = false;
+                    hci_send_cmd(0x0409, accept, 7); /* HCI_Accept_Connection_Request */
+                }
             }
             break;
         }
@@ -2144,7 +2197,31 @@ static void handle_hci_event(const uint8_t *pkt, size_t len)
             break;
         }
 
+        case 0x2C: /* Synchronous Connection Complete */ {
+            if (plen >= 17) {
+                uint8_t status = p[0];
+                if (status == 0x00) {
+                    sco_handle = ((uint16_t)p[1] | ((uint16_t)p[2] << 8)) & 0x0FFF;
+                    bt_log("[bt-y1] Synchronous Voice Connection (SCO/eSCO) active\n");
+                } else {
+                    char msg[64];
+                    snprintf(msg, sizeof(msg), "[bt-y1] SCO connection failed status=0x%02X\n", status);
+                    bt_log(msg);
+                    sco_handle = 0xFFFF;
+                }
+            }
+            break;
+        }
+
         case 0x05: /* Disconnection Complete */ {
+            if (plen >= 4) {
+                uint16_t disc_h = ((uint16_t)p[1] | ((uint16_t)p[2] << 8)) & 0x0FFF;
+                if (disc_h == sco_handle && sco_handle != 0xFFFF) {
+                    sco_handle = 0xFFFF;
+                    bt_log("[bt-y1] SCO Voice link disconnected\n");
+                    break;
+                }
+            }
             reset_bt_session();
             sbc_is_xq = false;
             pthread_mutex_lock(&bt_mtx);
@@ -2689,6 +2766,15 @@ static void *bt_worker_thread(void *arg)
                             break;
                         handle_hci_event(&rx_buf[pos], plen);
                         pos += plen;
+                    } else if (ptype == HCI_PKT_SCO) {
+                        if (pos + 4 > rx_len)
+                            break;
+                        size_t dlen = (size_t)rx_buf[pos + 3];
+                        size_t plen = 4 + dlen;
+                        if (pos + plen > rx_len)
+                            break;
+                        handle_sco_packet(&rx_buf[pos], plen);
+                        pos += plen;
                     } else if (ptype == HCI_PKT_ACL) {
                         if (pos + 5 > rx_len)
                             break;
@@ -3089,3 +3175,79 @@ void y1_bt_a2dp_write_pcm(const void *buf, size_t bytes, unsigned long sampr)
     }
     pcm_ring_w = w;
 }
+
+
+#ifdef HAVE_RECORDING
+bool y1_bt_is_connected(void)
+{
+    return (acl_handle != 0xFFFF);
+}
+
+void y1_bt_start_mic(void)
+{
+    if (acl_handle == 0xFFFF || stpbt_fd < 0)
+        return;
+
+    sco_recording_active = true;
+
+    if (sco_handle == 0xFFFF) {
+        uint8_t sco_cmd[17];
+        sco_cmd[0] = (uint8_t)(acl_handle & 0xFF);
+        sco_cmd[1] = (uint8_t)(acl_handle >> 8);
+        sco_cmd[2] = 0x40; sco_cmd[3] = 0x1F; sco_cmd[4] = 0x00; sco_cmd[5] = 0x00;
+        sco_cmd[6] = 0x40; sco_cmd[7] = 0x1F; sco_cmd[8] = 0x00; sco_cmd[9] = 0x00;
+        sco_cmd[10] = 0xFF; sco_cmd[11] = 0xFF;
+        sco_cmd[12] = 0x60; sco_cmd[13] = 0x00;
+        sco_cmd[14] = 0x01;
+        sco_cmd[15] = 0x88; sco_cmd[16] = 0x03;
+        hci_send_cmd(0x0428, sco_cmd, 17);
+        bt_log("[bt-y1] Requested SCO voice link for microphone capture\n");
+    }
+}
+
+void y1_bt_stop_mic(void)
+{
+    sco_recording_active = false;
+    if (sco_handle != 0xFFFF && stpbt_fd >= 0) {
+        uint8_t disc[3];
+        disc[0] = (uint8_t)(sco_handle & 0xFF);
+        disc[1] = (uint8_t)(sco_handle >> 8);
+        disc[2] = 0x13;
+        hci_send_cmd(0x0406, disc, 3);
+        sco_handle = 0xFFFF;
+        bt_log("[bt-y1] Closed SCO voice link\n");
+    }
+    pthread_mutex_lock(&bt_mic_mtx);
+    bt_mic_ring_read = 0;
+    bt_mic_ring_write = 0;
+    pthread_mutex_unlock(&bt_mic_mtx);
+}
+
+ssize_t y1_bt_read_mic_pcm(void *out_buf, size_t max_bytes)
+{
+    if (!out_buf || max_bytes < 4)
+        return 0;
+
+    if (sco_handle == 0xFFFF && acl_handle != 0xFFFF && !bt_receiver_mode && sco_recording_active) {
+        y1_bt_start_mic();
+    }
+
+    size_t frames_requested = max_bytes / (2 * sizeof(int16_t));
+    int16_t *dst = (int16_t *)out_buf;
+    size_t frames_read = 0;
+
+    pthread_mutex_lock(&bt_mic_mtx);
+    while (frames_read < frames_requested && bt_mic_ring_read != bt_mic_ring_write) {
+        dst[frames_read * 2]     = bt_mic_pcm_ring[bt_mic_ring_read * 2];
+        dst[frames_read * 2 + 1] = bt_mic_pcm_ring[bt_mic_ring_read * 2 + 1];
+        bt_mic_ring_read = (bt_mic_ring_read + 1) % Y1_BT_MIC_RING_FRAMES;
+        frames_read++;
+    }
+    pthread_mutex_unlock(&bt_mic_mtx);
+
+    if (frames_read > 0)
+        return (ssize_t)(frames_read * 2 * sizeof(int16_t));
+
+    return 0;
+}
+#endif
