@@ -78,7 +78,7 @@ static bool last_power = false;
 
 bool charging_state(void)
 {
-    if ((current_tick - last_tick) > HZ/2 ) {
+    if (last_tick == 0 || (current_tick - last_tick) > 5 * HZ) {
         char buf[12] = {0};
         sysfs_get_string(BATTERY_STATUS_PATH, buf, sizeof(buf));
 
@@ -111,10 +111,17 @@ int _battery_current(void)
 #if (CONFIG_BATTERY_MEASURE & PERCENTAGE_MEASURE)
 int _battery_level(void)
 {
-    int level = 0;
-    sysfs_get_int(BATTERY_LEVEL_PATH, &level);
+    static long last_lvl_tick = 0;
+    static int last_lvl = 0;
+    long now = current_tick;
 
-    return (level * BATTERY_LEVEL_SCALE_MUL) / BATTERY_LEVEL_SCALE_DIV;
+    if (last_lvl_tick == 0 || (now - last_lvl_tick) > 5 * HZ) {
+        int level = 0;
+        sysfs_get_int(BATTERY_LEVEL_PATH, &level);
+        last_lvl = (level * BATTERY_LEVEL_SCALE_MUL) / BATTERY_LEVEL_SCALE_DIV;
+        last_lvl_tick = now;
+    }
+    return last_lvl;
 }
 #endif
 
@@ -131,12 +138,20 @@ int _battery_time(void)
 
 unsigned int power_input_status(void)
 {
-    int present = 0;
-    sysfs_get_int(POWER_STATUS_PATH, &present);
+    static long last_pwr_tick = 0;
+    static unsigned int last_status = POWER_INPUT_NONE;
+    long now = current_tick;
+
+    if (last_pwr_tick == 0 || (now - last_pwr_tick) > 2 * HZ) {
+        int present = 0;
+        sysfs_get_int(POWER_STATUS_PATH, &present);
+        last_status = present ? POWER_INPUT_USB_CHARGER : POWER_INPUT_NONE;
+        last_pwr_tick = now;
 
 #ifdef FIIO_M3K_LINUX
-    usb_enable(present ? true : false);
+        usb_enable(present ? true : false);
 #endif
+    }
 
-    return present ? POWER_INPUT_USB_CHARGER : POWER_INPUT_NONE;
+    return last_status;
 }

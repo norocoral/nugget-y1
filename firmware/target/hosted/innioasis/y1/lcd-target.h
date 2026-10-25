@@ -35,5 +35,7 @@ extern void y1_backlight_idle_check(void);
 extern void y1_aod_notify_event(void);
 extern void y1_aod_activity_notify(void);
 extern bool y1_aod_timeout_expired(void);
+extern bool y1_is_backlight_active(void);
+extern bool y1_is_screen_sleeping(void);
 
 #endif /* __LCD_TARGET_H__ */

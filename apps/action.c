@@ -57,9 +57,13 @@
 #endif /* HAVE_BACKLIGHT */
 
 #if defined(INNIOASIS_Y1)
-extern bool y1_is_display_power_saving(void);
-extern void y1_set_display_power_saving(bool enable);
-#define Y1_IS_SCREEN_SLEEPING() (!is_backlight_on(false) || y1_is_display_power_saving())
+#include "innioasis/y1/y1-log.h"
+#include "innioasis/y1/lcd-target.h"
+#define Y1_IS_SCREEN_SLEEPING() y1_is_screen_sleeping()
+#ifndef BOOTLOADER
+static long last_center_click_tick = 0;
+static bool waiting_second_center_click = false;
+#endif
 #else
 #define Y1_IS_SCREEN_SLEEPING() (!is_backlight_on(false))
 #endif
@@ -792,6 +796,9 @@ static inline void do_key_lock(bool lock)
     action_last.wait_for_release = false;
     action_last.button = BUTTON_NONE | BUTTON_REL;
     button_clear_queue();
+#if defined(INNIOASIS_Y1) && !defined(BOOTLOADER)
+    waiting_second_center_click = false;
+#endif
 #if defined(HAVE_TOUCHPAD) || defined(HAVE_TOUCHSCREEN)
  /* disable touch device on keylock if std behavior or selected disable touch */
     if (!has_flag(action_last.softlock_mask, SEL_ACTION_ENABLED) ||
@@ -889,12 +896,12 @@ static inline int do_auto_softlock(action_last_t *last, action_cur_t *cur)
 
             if (has_flag(last->softlock_mask, SEL_ACTION_ALOCK_OK))
             {
-                splash(HZ/2, ID2P(LANG_ACTION_AUTOLOCK_ON));
+                splashf(HZ/2, "%s", ID2P(LANG_ACTION_AUTOLOCK_ON));
                 action = ACTION_REDRAW;
             }
             else
             {
-                splash(HZ/2, ID2P(LANG_ACTION_AUTOLOCK_OFF));
+                splashf(HZ/2, "%s", ID2P(LANG_ACTION_AUTOLOCK_OFF));
             }
         } else if (!has_flag(last->softlock_mask, SEL_ACTION_ALOCK_OK)) // always autolock, but not currently armed
         {
@@ -1044,11 +1051,11 @@ static inline void do_softlock(action_last_t *last, action_cur_t *cur)
 #endif
             if (last->keys_locked)
             {
-                splash(HZ/2, ID2P(LANG_KEYLOCK_ON));
+                splashf(HZ/2, "%s", ID2P(LANG_KEYLOCK_ON));
             }
             else
             {
-                splash(HZ/2, ID2P(LANG_KEYLOCK_OFF));
+                splashf(HZ/2, "%s", ID2P(LANG_KEYLOCK_OFF));
             }
         }
 
@@ -1229,10 +1236,6 @@ static int get_action_worker(action_last_t *last, action_cur_t *cur)
 {
 #ifdef HAVE_BACKLIGHT
     static bool center_unheld_screen = false;
-#if defined(INNIOASIS_Y1) && !defined(BOOTLOADER)
-    static long last_center_click_tick = 0;
-    static bool waiting_second_center_click = false;
-#endif
 #endif
 
 #if defined(INNIOASIS_Y1)
@@ -1260,6 +1263,11 @@ static int get_action_worker(action_last_t *last, action_cur_t *cur)
 #ifdef HAVE_BACKLIGHT
     bool bl_off = Y1_IS_SCREEN_SLEEPING();
 
+    if (center_unheld_screen)
+    {
+        bl_off = false;
+    }
+
     if (bl_off && !last->keys_locked)
     {
         last->keys_locked = true;
@@ -1283,14 +1291,17 @@ static int get_action_worker(action_last_t *last, action_cur_t *cur)
                 if (global_settings.double_click_unhold)
                 {
                     if (waiting_second_center_click &&
-                        TIME_BEFORE(current_tick, last_center_click_tick + (HZ / 2)))
+                        TIME_BEFORE(current_tick, last_center_click_tick + HZ))
                     {
                         waiting_second_center_click = false;
+                        y1_logf("[action] Center click 2: double-click confirmed! Waking screen and unHOLDing\n");
                     }
                     else
                     {
                         waiting_second_center_click = true;
                         last_center_click_tick = current_tick;
+                        y1_logf("[action] Center click 1: single click ignored, waiting up to 1s for 2nd click\n");
+                        /* Single click ignored: do NOT wake screen, do NOT unHOLD */
                         cur->action = ACTION_NONE;
                         last->button = BUTTON_NONE | BUTTON_REL;
                         return ACTION_NONE;
@@ -1320,9 +1331,9 @@ static int get_action_worker(action_last_t *last, action_cur_t *cur)
                 skin_request_update_locked(false);
 #endif
                 center_unheld_screen = true;
-                cur->action = ACTION_NONE;
+                cur->action = ACTION_REDRAW;
                 last->button = BUTTON_NONE | BUTTON_REL;
-                return ACTION_NONE;
+                return ACTION_REDRAW;
             }
             else
             {
@@ -1333,6 +1344,72 @@ static int get_action_worker(action_last_t *last, action_cur_t *cur)
                 return ACTION_NONE;
             }
         }
+#if defined(INNIOASIS_Y1) && !defined(BOOTLOADER)
+        else
+        {
+            waiting_second_center_click = false;
+
+            /* Check Advanced Key Lock exceptions while locked in HOLD mode */
+            if (has_flag(last->softlock_mask, SEL_ACTION_ENABLED))
+            {
+                if (raw_btn == BUTTON_PLAY && !is_rel && !is_rep &&
+                    has_flag(last->softlock_mask, SEL_ACTION_PLAY))
+                {
+                    cur->action = BUTTON_MULTIMEDIA_PLAYPAUSE;
+                    last->button = cur->button;
+                    return BUTTON_MULTIMEDIA_PLAYPAUSE;
+                }
+                else if (raw_btn == BUTTON_RIGHT)
+                {
+                    if (is_rep && has_flag(last->softlock_mask, SEL_ACTION_SEEK))
+                    {
+                        cur->action = BUTTON_MULTIMEDIA_FFWD;
+                        last->button = cur->button;
+                        return BUTTON_MULTIMEDIA_FFWD;
+                    }
+                    else if (!is_rel && !is_rep && has_flag(last->softlock_mask, SEL_ACTION_SKIP))
+                    {
+                        cur->action = BUTTON_MULTIMEDIA_NEXT;
+                        last->button = cur->button;
+                        return BUTTON_MULTIMEDIA_NEXT;
+                    }
+                }
+                else if (raw_btn == BUTTON_LEFT)
+                {
+                    if (is_rep && has_flag(last->softlock_mask, SEL_ACTION_SEEK))
+                    {
+                        cur->action = BUTTON_MULTIMEDIA_REW;
+                        last->button = cur->button;
+                        return BUTTON_MULTIMEDIA_REW;
+                    }
+                    else if (!is_rel && !is_rep && has_flag(last->softlock_mask, SEL_ACTION_SKIP))
+                    {
+                        cur->action = BUTTON_MULTIMEDIA_PREV;
+                        last->button = cur->button;
+                        return BUTTON_MULTIMEDIA_PREV;
+                    }
+                }
+                else if ((raw_btn == BUTTON_SCROLL_FWD || raw_btn == BUTTON_VOL_UP) &&
+                         has_flag(last->softlock_mask, SEL_ACTION_VOL))
+                {
+                    cur->action = BUTTON_MULTIMEDIA_VOLUME_UP;
+                    last->button = cur->button;
+                    return BUTTON_MULTIMEDIA_VOLUME_UP;
+                }
+                else if ((raw_btn == BUTTON_SCROLL_BACK || raw_btn == BUTTON_VOL_DOWN) &&
+                         has_flag(last->softlock_mask, SEL_ACTION_VOL))
+                {
+                    cur->action = BUTTON_MULTIMEDIA_VOLUME_DOWN;
+                    last->button = cur->button;
+                    return BUTTON_MULTIMEDIA_VOLUME_DOWN;
+                }
+            }
+            /* Non-center button locked out: swallow completely */
+            cur->action = ACTION_NONE;
+            last->button = BUTTON_NONE | BUTTON_REL;
+            return ACTION_NONE;
+        }
+#endif
     }
     else
     {

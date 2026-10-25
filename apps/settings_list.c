@@ -2802,7 +2802,7 @@ const struct settings_list settings[] = {
     OFFON_SETTING(0,
                   double_click_unhold,
                   LANG_Y1_DOUBLE_CLICK_UNHOLD,
-                  false,
+                  true,
                   "double click unhold",
                   NULL),
     OFFON_SETTING(0,

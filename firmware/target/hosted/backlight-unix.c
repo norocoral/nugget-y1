@@ -101,6 +101,7 @@ static int last_bl = -1;
 #include "cpufreq-y1.h"
 #include "lcd-target.h"
 #include "innioasis/y1/bt-y1.h"
+#include "innioasis/y1/y1-log.h"
 extern void y1_enter_hold_mode(void);
 static int bl_fd = -1;
 
@@ -124,7 +125,7 @@ static bool y1_aod_event_active;
 static bool y1_aod_event_fading;
 static long y1_aod_event_deadline;
 
-#define Y1_AOD_PAUSE_DELAY (HZ * 5)
+#define Y1_AOD_PAUSE_DELAY (HZ * 15)
 #define Y1_AOD_EVENT_DURATION (HZ * 15)
 #define Y1_AOD_FADE_DURATION (HZ * 3 / 4)
 #if HZ < 20
@@ -142,7 +143,12 @@ static void write_bl_hw(int val)
         char buf[16];
         int len = snprintf(buf, sizeof(buf), "%d\n", val);
         lseek(bl_fd, 0, SEEK_SET);
-        (void)!write(bl_fd, buf, len);
+        ssize_t w = write(bl_fd, buf, len);
+        y1_logf("[backlight-unix] write_bl_hw(%d): bl_fd=%d, written=%d (errno=%d)\n",
+                val, bl_fd, (int)w, errno);
+    } else {
+        y1_logf("[backlight-unix] write_bl_hw(%d) ERROR: failed to open %s (errno=%d)\n",
+                val, sysfs_bl_brightness ? sysfs_bl_brightness : "NULL", errno);
     }
 }
 
@@ -246,12 +252,14 @@ static bool y1_aod_update_fade(void)
 
 static void y1_aod_resume_from_off(void)
 {
+    if (!global_settings.always_on_screen || !y1_should_always_on())
+        return;
+
     last_bl = BACKLIGHT_POWER_REDUCED;
     y1_enter_hold_mode();
     y1_set_screen_off_power_mode(true);
     y1_aod_set_level(0);
     lcd_enable(true);
-    sysfs_set_int("/sys/class/leds/button-backlight/brightness", 0);
     y1_set_display_power_saving(true);
     y1_aod_start_fade(y1_aod_brightness_level());
 }
@@ -320,26 +328,26 @@ static bool y1_aod_pause_update(void)
 
 void y1_aod_notify_event(void)
 {
+    if (!global_settings.always_on_screen || !global_settings.aod_important_events)
+        return;
+    if (!y1_should_always_on())
+        return;
     y1_aod_event_pending = true;
 }
 
 static bool y1_aod_event_allowed(void)
 {
-    if (y1_aod_timeout_expired())
+    if (!global_settings.always_on_screen)
         return false;
 
-    if (global_settings.aod_wps_only &&
-        get_current_activity() != ACTIVITY_WPS)
-        return false;
-
-    if (global_settings.aod_playback_only && !y1_playback_active())
-        return false;
-
-    return true;
+    return y1_should_always_on();
 }
 
 static void y1_aod_event_wake(void)
 {
+    if (!global_settings.always_on_screen || !y1_should_always_on())
+        return;
+
     if (last_bl == BACKLIGHT_POWER_OFF)
     {
         y1_enter_hold_mode();
@@ -347,7 +355,6 @@ static void y1_aod_event_wake(void)
         lcd_enable(true);
         last_bl = BACKLIGHT_POWER_REDUCED;
         y1_aod_set_level(y1_aod_brightness_level());
-        sysfs_set_int("/sys/class/leds/button-backlight/brightness", 0);
     }
     else if (y1_aod_level == 0)
         y1_aod_set_level(y1_aod_brightness_level());
@@ -416,25 +423,56 @@ static bool y1_aod_event_update(void)
 }
 #endif
 
+#if defined(BACKLIGHT_INNIOASIS)
+bool y1_is_backlight_active(void)
+{
+    return last_bl == BACKLIGHT_POWER_ON;
+}
+
+bool y1_is_screen_sleeping(void)
+{
+    return last_bl != BACKLIGHT_POWER_ON;
+}
+#endif
+
 void backlight_hw_on(void)
 {
+    y1_logf("[backlight-unix] backlight_hw_on() called (last_bl=%d, current_brightness=%d)\n",
+            last_bl, current_brightness);
     if (last_bl != BACKLIGHT_POWER_ON) {
 #if defined(BACKLIGHT_INNIOASIS)
         if (y1_is_always_on_screen() || y1_is_display_power_saving()) {
+            y1_logf("[backlight-unix] backlight_hw_on: resetting powersave\n");
             y1_set_display_power_saving(false);
         }
         y1_set_screen_off_power_mode(false);
-#endif
-#ifdef HAVE_LCD_ENABLE
-        lcd_enable(true);
 #endif
         last_bl = BACKLIGHT_POWER_ON;
         if (sysfs_bl_power)
             sysfs_set_int(sysfs_bl_power, last_bl);
 #if defined(BACKLIGHT_INNIOASIS)
+        /* Writing 'on' to /sys/power/state wakes the kernel earlysuspend subsystem
+         * and triggers mtkfb_late_resume (DISP_PowerEnable(TRUE), DISP_PanelEnable(TRUE)) */
+        int on_fd = open("/sys/power/state", O_WRONLY | O_CLOEXEC);
+        if (on_fd >= 0) {
+            (void)!write(on_fd, "on\n", 3);
+            close(on_fd);
+            y1_logf("[backlight-unix] backlight_hw_on: wrote 'on' to /sys/power/state\n");
+        }
+#endif
+#ifdef HAVE_LCD_ENABLE
+        y1_logf("[backlight-unix] backlight_hw_on: calling lcd_enable(true)\n");
+        lcd_enable(true);
+#endif
+#if defined(BACKLIGHT_INNIOASIS)
         int hw_val = current_brightness > 0 ? (current_brightness * 255) / 100 : (DEFAULT_BRIGHTNESS_SETTING * 255) / 100;
+        y1_logf("[backlight-unix] backlight_hw_on: write_bl_hw(%d)\n", hw_val);
         write_bl_hw(hw_val);
-        sysfs_set_int("/sys/class/leds/button-backlight/brightness", 255);
+#endif
+    } else {
+        y1_logf("[backlight-unix] backlight_hw_on: last_bl already BACKLIGHT_POWER_ON, ensuring lcd_enable(true)\n");
+#ifdef HAVE_LCD_ENABLE
+        lcd_enable(true);
 #endif
     }
 }
@@ -443,6 +481,8 @@ void backlight_hw_off(void)
 {
 #if defined(BACKLIGHT_INNIOASIS)
     int target_bl = y1_should_always_on() ? BACKLIGHT_POWER_REDUCED : BACKLIGHT_POWER_OFF;
+    y1_logf("[backlight-unix] backlight_hw_off() called (last_bl=%d, target_bl=%d, should_aod=%d)\n",
+            last_bl, target_bl, (int)y1_should_always_on());
     if (last_bl != target_bl) {
         int prev_bl = last_bl;
         last_bl = target_bl;
@@ -460,20 +500,21 @@ void backlight_hw_off(void)
              * 4. Enable power saving mode on the display (1 FPS refresh rate)
              * Keep LCD panel active (do not suspend) */
 #ifdef HAVE_LCD_ENABLE
+            y1_logf("[backlight-unix] backlight_hw_off: AOD mode -> lcd_enable(true)\n");
             lcd_enable(true);
 #endif
             int hw_val = y1_aod_brightness_level();
             y1_aod_level = hw_val;
+            y1_logf("[backlight-unix] backlight_hw_off: AOD brightness write_bl_hw(%d)\n", hw_val);
             write_bl_hw(hw_val);
-            sysfs_set_int("/sys/class/leds/button-backlight/brightness", 0);
             y1_set_display_power_saving(true);
             return;
         }
         if (y1_is_display_power_saving()) {
             y1_set_display_power_saving(false);
         }
+        y1_logf("[backlight-unix] backlight_hw_off: Screen Off -> write_bl_hw(0), lcd_enable(false)\n");
         write_bl_hw(0);
-        sysfs_set_int("/sys/class/leds/button-backlight/brightness", 0);
         if (sysfs_bl_power)
             sysfs_set_int(sysfs_bl_power, last_bl);
 #ifdef HAVE_LCD_ENABLE
@@ -537,6 +578,7 @@ void backlight_hw_brightness(int brightness)
 #if defined(BACKLIGHT_INNIOASIS)
 void lcd_awake(void)
 {
+    y1_logf("[backlight-unix] lcd_awake() called\n");
     sysfs_set_string("/sys/power/state", "on");
 #ifdef HAVE_LCD_ENABLE
     lcd_enable(true);
@@ -545,6 +587,9 @@ void lcd_awake(void)
 
 void lcd_sleep(void)
 {
+    y1_logf("[backlight-unix] lcd_sleep() called (receiver=%d, should_aod=%d, playing=%d, aod_pause_state=%d)\n",
+            (int)y1_bt_is_receiver_mode(), (int)y1_should_always_on(), (int)y1_playback_active(),
+            (int)y1_aod_pause_state);
     if (y1_bt_is_receiver_mode() ||
         y1_should_always_on() || y1_playback_active() ||
         y1_aod_pause_state == Y1_AOD_PAUSE_HOLD ||
@@ -552,11 +597,15 @@ void lcd_sleep(void)
         return;
 
 #ifdef HAVE_LCD_ENABLE
+    y1_logf("[backlight-unix] lcd_sleep: calling lcd_enable(false)\n");
     lcd_enable(false);
 #endif
 
     if (!button_center_wakeup_available()) {
         y1_log("Y1: center-button wake is not enabled; remaining awake for input\n");
+#ifdef HAVE_LCD_ENABLE
+        lcd_enable(true);
+#endif
         return;
     }
 
@@ -564,9 +613,13 @@ void lcd_sleep(void)
     int fd = open("/sys/power/state", O_WRONLY | O_CLOEXEC);
     if (fd < 0) {
         y1_log("Y1: failed to open /sys/power/state for suspend\n");
+#ifdef HAVE_LCD_ENABLE
+        lcd_enable(true);
+#endif
         return;
     }
 
+    y1_logf("[backlight-unix] lcd_sleep: requesting kernel suspend ('mem' -> /sys/power/state)\n");
     ssize_t written;
     do {
         written = write(fd, "mem", 3);
@@ -574,6 +627,19 @@ void lcd_sleep(void)
     int write_error = written < 0 ? errno : (written != 3 ? EIO : 0);
     int close_result = close(fd);
     int close_error = close_result < 0 ? errno : 0;
+    y1_logf("[backlight-unix] lcd_sleep: kernel resumed from suspend! (written=%d, err=%d)\n",
+            (int)written, write_error ? write_error : close_error);
+
+    /* Writing 'on' to /sys/power/state immediately wakes MTKFB from early_suspend
+     * via mtkfb_late_resume (DISP_PowerEnable(TRUE), DISP_PanelEnable(TRUE)).
+     * Without this, the LCM hardware remains powered off after kernel suspend! */
+    int on_fd = open("/sys/power/state", O_WRONLY | O_CLOEXEC);
+    if (on_fd >= 0) {
+        (void)!write(on_fd, "on\n", 3);
+        close(on_fd);
+        y1_logf("[backlight-unix] lcd_sleep: wrote 'on' to /sys/power/state (triggers mtkfb_late_resume)\n");
+    }
+
     if (written != 3 || close_result < 0) {
         char message[96];
         snprintf(message, sizeof(message),

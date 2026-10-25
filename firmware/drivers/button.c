@@ -33,10 +33,11 @@
 #include "power.h"
 #include "powermgmt.h"
 #if defined(INNIOASIS_Y1)
-extern bool y1_is_display_power_saving(void);
+#include "innioasis/y1/y1-log.h"
+#include "innioasis/y1/lcd-target.h"
 extern bool is_keys_locked(void);
 static inline bool y1_screen_sleeping(void) {
-    return (!is_backlight_on(false) || y1_is_display_power_saving() || is_keys_locked());
+    return y1_is_screen_sleeping() || is_keys_locked();
 }
 #endif
 #if defined(HAVE_SDL)
@@ -411,7 +412,10 @@ static void button_tick(void)
                     {
                         skip_release = keypress_filter_fn(btn, data);
 #if defined(INNIOASIS_Y1)
-                        if (!y1_screen_sleeping()) {
+                        if (y1_screen_sleeping()) {
+                            y1_logf("[button] keypress btn=0x%x while sleeping (bl_on=%d, powersave=%d, locked=%d)\n",
+                                    btn, (int)is_backlight_on(false), (int)y1_is_display_power_saving(), (int)is_keys_locked());
+                        } else {
                             backlight_on();
                             buttonlight_on();
                         }

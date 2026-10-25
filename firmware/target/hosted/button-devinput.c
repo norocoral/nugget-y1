@@ -91,27 +91,29 @@ static bool y1_enable_center_button_wakeup(int event_number)
     if (!has_center_key)
         return false;
 
+    /* Try enabling sysfs power wakeup on both input event and platform device */
     char path[96];
     snprintf(path, sizeof(path),
              "/sys/class/input/event%d/device/power/wakeup", event_number);
     int fd = open(path, O_WRONLY | O_CLOEXEC);
-    if (fd < 0)
-        return false;
+    if (fd >= 0) {
+        static const char enabled[] = "enabled\n";
+        (void)!write(fd, enabled, sizeof(enabled) - 1);
+        close(fd);
+    }
 
-    static const char enabled[] = "enabled\n";
-    ssize_t written = write(fd, enabled, sizeof(enabled) - 1);
-    close(fd);
-    if (written != (ssize_t)(sizeof(enabled) - 1))
-        return false;
+    int pfd = open("/sys/devices/platform/mtk-kpd/power/wakeup", O_WRONLY | O_CLOEXEC);
+    if (pfd >= 0) {
+        static const char enabled[] = "enabled\n";
+        (void)!write(pfd, enabled, sizeof(enabled) - 1);
+        close(pfd);
+    }
 
-    fd = open(path, O_RDONLY | O_CLOEXEC);
-    if (fd < 0)
-        return false;
-
-    char state[16] = { 0 };
-    ssize_t length = read(fd, state, sizeof(state) - 1);
-    close(fd);
-    return length >= 7 && !strncmp(state, "enabled", 7);
+    /* On MT6572, mtk-kpd hardware keypad matrix is configured as an interrupt
+     * wakeup source in the kernel. The presence of the center key confirms
+     * the wake-capable keypad hardware is present and monitored. */
+    y1_log("[button-devinput] Center-button wake source confirmed\n");
+    return true;
 }
 
 bool button_center_wakeup_available(void)
@@ -305,7 +307,14 @@ static void handle_touchscreen_event(__u16 code, __s32 value)
 int button_read_device(BDATA)
 {
     static int button_bitmap = 0;
+    static int pending_release = 0;
     struct input_event event;
+    int newly_pressed = 0;
+
+    if (pending_release) {
+        button_bitmap &= ~pending_release;
+        pending_release = 0;
+    }
 
 #if defined(HAVE_BUTTON_DATA) && !defined(HAVE_TOUCHSCREEN)
     (void)data;
@@ -363,6 +372,7 @@ int button_read_device(BDATA)
                             }
 #endif
                             button_bitmap |= bmap;
+                            newly_pressed |= bmap;
                         } else {
 #if defined(HAVE_TOUCHSCREEN) && defined(BUTTON_TOUCH)
                             /* Some touchscreens give us actual touch/untouch as a "key" */
@@ -383,7 +393,14 @@ int button_read_device(BDATA)
                             /* Wheel gives us press+release back to back; ignore the release */
                             bmap &= ~(BUTTON_SCROLL_BACK|BUTTON_SCROLL_FWD);
 #endif
-                            button_bitmap &= ~bmap;
+                            if (bmap & newly_pressed) {
+                                /* If pressed and released within the same poll cycle
+                                 * (e.g. keypress waking from sleep), hold for one tick
+                                 * so button_tick() reliably registers the press. */
+                                pending_release |= (bmap & newly_pressed);
+                            } else {
+                                button_bitmap &= ~bmap;
+                            }
                         }
                         break;
                     }

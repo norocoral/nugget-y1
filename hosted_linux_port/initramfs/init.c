@@ -727,23 +727,42 @@ static void optimize_power_and_battery(void)
     write_sysfs("/proc/sys/vm/dirty_expire_centisecs", "12000\n");
     write_sysfs("/proc/sys/vm/laptop_mode", "5\n");
 
-    /* 5. Storage queue schedulers & runtime power management */
+    /* 5. Storage queue schedulers & burst-read ahead tuning */
     write_sysfs("/sys/block/mmcblk1/queue/scheduler", "noop\n");
-    write_sysfs("/sys/block/mmcblk1/queue/read_ahead_kb", "512\n");
+    write_sysfs("/sys/block/mmcblk1/queue/read_ahead_kb", "2048\n");
     write_sysfs("/sys/block/mmcblk0/queue/scheduler", "noop\n");
-    write_sysfs("/sys/block/mmcblk0/queue/read_ahead_kb", "512\n");
+    write_sysfs("/sys/block/mmcblk0/queue/read_ahead_kb", "2048\n");
     write_sysfs("/sys/devices/platform/mtk-msdc.0/power/control", "auto\n");
     write_sysfs("/sys/devices/platform/mtk-msdc.1/power/control", "auto\n");
+    write_sysfs("/sys/devices/platform/mtk-msdc.0/power/autosuspend_delay_ms", "100\n");
+    write_sysfs("/sys/devices/platform/mtk-msdc.1/power/autosuspend_delay_ms", "100\n");
     write_sysfs("/sys/block/mmcblk0/power/control", "auto\n");
     write_sysfs("/sys/block/mmcblk1/power/control", "auto\n");
+    write_sysfs("/sys/block/mmcblk0/power/autosuspend_delay_ms", "100\n");
+    write_sysfs("/sys/block/mmcblk1/power/autosuspend_delay_ms", "100\n");
     write_sysfs("/sys/devices/platform/mt_usb/power/control", "auto\n");
 
-    /* 6. Suppress kernel console wakeups / printk spam */
+    /* 6. Power-gate unused Mali-400 GPU (Rockbox uses 2D software rendering) */
+    write_sysfs("/sys/devices/platform/mt_gpu/power/control", "auto\n");
+    write_sysfs("/sys/devices/platform/mali.0/power/control", "auto\n");
+    write_sysfs("/sys/devices/platform/mt_gpu/power/autosuspend_delay_ms", "50\n");
+    write_sysfs("/sys/devices/platform/mali.0/power/autosuspend_delay_ms", "50\n");
+
+    /* 7. MediaTek Dynamic Clock Management (DCM) & Low Power Mode (LPM) */
+    write_sysfs("/proc/dcm/dcm_enable", "1\n");
+    write_sysfs("/proc/lpm/lpm_enable", "1\n");
+    write_sysfs("/proc/spm_fs/dpidle", "1\n");
+    write_sysfs("/proc/spm_fs/mcdi", "1\n");
+
+    /* 8. Suppress kernel console wakeups / printk spam */
     write_sysfs("/proc/sys/kernel/printk", "1 1 1 1\n");
 
-    /* 7. Ensure unused wireless/connectivity chips remain unpowered */
+    /* 9. Ensure unused wireless/connectivity chips remain unpowered */
     write_sysfs("/sys/class/rfkill/rfkill0/state", "0\n");
     write_sysfs("/sys/class/rfkill/rfkill1/state", "0\n");
+
+    /* 10. Enable hardware keypad wakeup in kernel sysfs */
+    write_sysfs("/sys/devices/platform/mtk-kpd/power/wakeup", "enabled\n");
 
     log_line("Battery optimizations active: CPU 598MHz/single-core, SPM idle modes enabled.\n");
 }

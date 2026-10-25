@@ -434,19 +434,23 @@ bool headphones_inserted(void)
     static bool cached_state = true;
     static int last_raw_state = -1;
     static long last_check_tick = 0;
+    static int h2w_fd = -1;
     long now = current_tick;
 
-    /* Check switch state at most 10 times per second to minimize sysfs I/O */
-    if (last_check_tick != 0 && TIME_BEFORE(now, last_check_tick + (HZ / 10)))
+    /* Check switch state at most twice per second to minimize sysfs I/O */
+    if (last_check_tick != 0 && TIME_BEFORE(now, last_check_tick + (HZ / 2)))
         return cached_state;
 
     last_check_tick = now;
 
-    int fd = open("/sys/class/switch/h2w/state", O_RDONLY | O_CLOEXEC);
-    if (fd >= 0) {
+    if (h2w_fd < 0) {
+        h2w_fd = open("/sys/class/switch/h2w/state", O_RDONLY | O_CLOEXEC);
+    }
+
+    if (h2w_fd >= 0) {
         char buf[16];
-        ssize_t len = read(fd, buf, sizeof(buf) - 1);
-        close(fd);
+        lseek(h2w_fd, 0, SEEK_SET);
+        ssize_t len = read(h2w_fd, buf, sizeof(buf) - 1);
         if (len > 0) {
             buf[len] = '\0';
             int state = 0;
@@ -463,6 +467,9 @@ bool headphones_inserted(void)
                 }
                 cached_state = (state > 0);
             }
+        } else {
+            close(h2w_fd);
+            h2w_fd = -1;
         }
     }
     return cached_state;

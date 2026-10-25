@@ -19,6 +19,7 @@
 #include "sysfs.h"
 #include "settings.h"
 #include "bt-y1.h"
+#include "y1-log.h"
 
 static int _current_cpu_mode = -1;
 static int _saved_cpu_mode = -1;
@@ -49,6 +50,7 @@ void y1_set_screen_off_power_mode(bool screen_off)
         }
         if (_saved_cpu1_online == -1)
             _saved_cpu1_online = cpu1_is_online();
+        y1_logf("[cpufreq-y1] screen-off: clamping strictly to 598 MHz single-core (lowest VCORE)\n");
         /* 598 MHz + single core while the panel is off (play or idle). */
         y1_set_cpu_mode(Y1_CPU_POWERSAVE);
         y1_set_cpu_cores_setting(1);
@@ -61,6 +63,7 @@ void y1_set_screen_off_power_mode(bool screen_off)
             int restore = _saved_cpu_mode;
             _saved_cpu_mode = -1;
             _current_cpu_mode = -1;
+            y1_logf("[cpufreq-y1] screen awake: restoring CPU mode %d\n", restore);
             y1_set_cpu_mode(restore);
         }
     }
@@ -77,6 +80,14 @@ static void write_cpu_node(int cpu, const char *node, const char *val)
     }
 }
 
+static void write_cpu_freq_bounds(int cpu, const char *min_f, const char *max_f)
+{
+    /* Always lower min first to avoid min > max conflict, then set target max, then target min */
+    write_cpu_node(cpu, "scaling_min_freq", "598000\n");
+    write_cpu_node(cpu, "scaling_max_freq", max_f);
+    write_cpu_node(cpu, "scaling_min_freq", min_f);
+}
+
 void y1_set_cpu_mode(int mode)
 {
     if (_current_cpu_mode == mode)
@@ -87,43 +98,38 @@ void y1_set_cpu_mode(int mode)
     for (int cpu = 0; cpu < 2; cpu++) {
         switch (mode) {
         case Y1_CPU_POWERSAVE:
-            /* Fixed 598 MHz (Underclock / Maximum Battery Life) */
+            /* Fixed 598 MHz (Underclock / Maximum Battery Life / Lowest VCORE 1.05V) */
+            write_cpu_freq_bounds(cpu, "598000\n", "598000\n");
             write_cpu_node(cpu, "scaling_governor", "powersave\n");
-            write_cpu_node(cpu, "scaling_min_freq", "598000\n");
-            write_cpu_node(cpu, "scaling_max_freq", "598000\n");
             write_cpu_node(cpu, "scaling_setspeed", "598000\n");
             break;
 
         case Y1_CPU_BALANCED:
             /* Fixed 1.0 GHz (Normal / Balanced) */
+            write_cpu_freq_bounds(cpu, "1001000\n", "1001000\n");
             write_cpu_node(cpu, "scaling_governor", "userspace\n");
-            write_cpu_node(cpu, "scaling_min_freq", "1001000\n");
-            write_cpu_node(cpu, "scaling_max_freq", "1001000\n");
             write_cpu_node(cpu, "scaling_setspeed", "1001000\n");
             break;
 
         case Y1_CPU_PERFORMANCE:
             /* Fixed 1.2 GHz (Stock High Performance) */
+            write_cpu_freq_bounds(cpu, "1196000\n", "1196000\n");
             write_cpu_node(cpu, "scaling_governor", "userspace\n");
-            write_cpu_node(cpu, "scaling_min_freq", "1196000\n");
-            write_cpu_node(cpu, "scaling_max_freq", "1196000\n");
             write_cpu_node(cpu, "scaling_setspeed", "1196000\n");
             break;
 
         case Y1_CPU_TURBO:
             /* Fixed 1.3 GHz (Turbo Overclock) */
+            write_cpu_freq_bounds(cpu, "1300000\n", "1300000\n");
             write_cpu_node(cpu, "scaling_governor", "performance\n");
-            write_cpu_node(cpu, "scaling_min_freq", "1300000\n");
-            write_cpu_node(cpu, "scaling_max_freq", "1300000\n");
             write_cpu_node(cpu, "scaling_setspeed", "1300000\n");
             break;
 
         case Y1_CPU_DYNAMIC:
         default:
-            /* Dynamic Scaling (Ondemand 598MHz - 1300MHz) */
+            /* Dynamic Scaling (Ondemand 598MHz - 1001MHz for optimal battery & smooth UI) */
+            write_cpu_freq_bounds(cpu, "598000\n", "1001000\n");
             write_cpu_node(cpu, "scaling_governor", "ondemand\n");
-            write_cpu_node(cpu, "scaling_min_freq", "598000\n");
-            write_cpu_node(cpu, "scaling_max_freq", "1300000\n");
             break;
         }
     }

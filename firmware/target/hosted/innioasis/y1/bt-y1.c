@@ -2638,7 +2638,7 @@ static void *bt_worker_thread(void *arg)
             struct timespec now;
             clock_gettime(CLOCK_MONOTONIC, &now);
             uint32_t now_ms = (uint32_t)(now.tv_sec * 1000 + now.tv_nsec / 1000000);
-            if (now_ms - last_pcm_time_ms >= 2000 && pcm_ring_r == pcm_ring_w) {
+            if (now_ms - last_pcm_time_ms >= 1000 && pcm_ring_r == pcm_ring_w) {
                 in_sniff_mode = true;
                 uint8_t sniff_cmd[10];
                 sniff_cmd[0] = (uint8_t)(acl_handle & 0xFF);
@@ -2652,9 +2652,26 @@ static void *bt_worker_thread(void *arg)
             }
         }
 
-        /* Poll /dev/stpbt for incoming HCI events and ACL packets */
+        /* Poll /dev/stpbt for incoming HCI events and ACL packets.
+         * Paced timeout to minimize CPU wakeups:
+         * - Active A2DP streaming: 12ms (matching ~14.5ms RTP packet durations)
+         * - Connecting / scanning / resolving: 25ms (responsive UI/discovery)
+         * - In low-power Sniff Mode: 200ms (matching 250-500ms radio sniff interval)
+         * - Disconnected / Idle: 150ms (drops idle poll from 40Hz to ~6.6Hz)
+         * - Connected but waiting to enter sniff: 50ms */
+        int timeout_ms;
+        if (req_connect || req_scan || resolving_names)
+            timeout_ms = 25;
+        else if (a2dp_streaming)
+            timeout_ms = 12;
+        else if (in_sniff_mode)
+            timeout_ms = 200;
+        else if (acl_handle == 0xFFFF)
+            timeout_ms = 150;
+        else
+            timeout_ms = 50;
+
         struct pollfd pfd = { .fd = stpbt_fd, .events = POLLIN };
-        int timeout_ms = a2dp_streaming ? 4 : (in_sniff_mode ? 100 : 25);
         int pr = poll(&pfd, 1, timeout_ms);
         if (pr > 0 && (pfd.revents & POLLIN))
         {

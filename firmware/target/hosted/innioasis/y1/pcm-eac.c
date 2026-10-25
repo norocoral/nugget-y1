@@ -303,7 +303,11 @@ static bool y1_write_power_state(const char *value)
 
 static bool y1_set_deep_idle(bool enable)
 {
-    const char *deep_idle = enable ? "1\n" : "0\n";
+    /* Keep MT6572 SPM Deep Idle enabled (1) at all times so clock PLLs and
+     * peripheral buses can power-gate when idle. During audio playback
+     * (enable=false), set cpupdn 0 so the CPU core does not enter deep powerdown
+     * (avoiding AFE DMA latency/starvation). When playback stops (enable=true),
+     * set cpupdn 1 to allow full core power-down. */
     const char *cpu_powerdown = enable ? "cpupdn 1\n" : "cpupdn 0\n";
     bool success = true;
 
@@ -314,9 +318,9 @@ static bool y1_set_deep_idle(bool enable)
             success = false;
     }
 
-    if (y1_deep_idle_enabled != enable) {
-        if (y1_write_power_state(deep_idle))
-            y1_deep_idle_enabled = enable;
+    if (!y1_deep_idle_enabled) {
+        if (y1_write_power_state("1\n"))
+            y1_deep_idle_enabled = true;
         else
             success = false;
     }
@@ -559,8 +563,9 @@ static void *pcm_worker(void *arg)
 
             while (remaining > 0 && dma_stopped == 0 && dma_locked == 0 && !pcm_thread_exit)
             {
-                /* Always write exact multiples of 4 bytes (16-bit stereo frame = 4 bytes) */
-                size_t chunk = remaining > 4096 ? 4096 : (remaining & ~3);
+                /* Stream in 16KB blocks to match the 32KB kernel EAC DMA buffer,
+                 * reducing CPU wakeup frequency from 43 Hz to ~11 Hz for deep WFI sleep. */
+                size_t chunk = remaining > 16384 ? 16384 : (remaining & ~3);
                 if (chunk == 0)
                     break;
 
