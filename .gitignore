@@ -351,3 +351,6 @@ __pycache__
 /hosted_linux_port/release/logo.bin
 logo.bin
 *.ko
+
+# vscode
+/.vscode/
