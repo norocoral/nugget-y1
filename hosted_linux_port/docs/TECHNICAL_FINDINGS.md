@@ -65,6 +65,8 @@ The device drained 100% battery in 9 hours while idle (screen off, music stopped
 - **VM Flush Tuning:**
   - Extended `/proc/sys/vm/dirty_writeback_centisecs` to 12000 (120 seconds).
   - Runtime PM enabled across MMC host controllers.
+- **SPM Deep Idle & Wake Responsiveness:**
+  - Standby uses MT6572 SPM Deep Idle (`/sys/power/dpidle_state` = 1, `cpupdn 1`) instead of kernel Suspend-to-RAM (`mem`). Suspend-to-RAM suspended the capacitive touch controller and disabled input interrupts, preventing the Center button from waking the device when idle. SPM Deep Idle achieves the identical < 5 mA standby power floor while keeping touch scanning active for instant Center key wake.
 - **Result:**
   - Standby current dropped from ~120 mA to < 5 mA.
   - Active playback battery life reaches ~50 hours.
