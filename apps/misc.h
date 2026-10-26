@@ -236,6 +236,10 @@ enum system_sound
 /* Play a standard sound */
 void system_sound_play(enum system_sound sound);
 
+#if defined(INNIOASIS_Y1)
+void y1_play_boot_sound(void);
+#endif
+
 typedef bool (*keyclick_callback)(int action, void* data);
 void keyclick_set_callback(keyclick_callback cb, void* data);
 /* Produce keyclick based upon button and global settings */

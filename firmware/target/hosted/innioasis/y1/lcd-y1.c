@@ -726,14 +726,29 @@ bool y1_display_raw_screen(const char *name)
         }
         /* Synchronize Rockbox internal 16-bit framebuffer so UI doesn't immediately overwrite with old content */
         if (fb16) {
-            for (int r = 0; r < h; r++) {
-                uint32_t *row32 = (uint32_t *)(mapped_fb + r * stride);
-                for (int c = 0; c < w; c++) {
-                    uint32_t px = row32[c];
-                    uint16_t r5 = (px >> 19) & 0x1F;
-                    uint16_t g6 = (px >> 10) & 0x3F;
-                    uint16_t b5 = (px >> 3) & 0x1F;
-                    fb16[r * LCD_WIDTH + c] = (r5 << 11) | (g6 << 5) | b5;
+            if (y1_resolution_mode == 1) {
+                for (int r = 0; r < 240; r++) {
+                    int sr = (r * 3) / 2;
+                    uint32_t *row32 = (uint32_t *)(mapped_fb + sr * stride);
+                    for (int c = 0; c < 320; c++) {
+                        int sc = (c * 3) / 2;
+                        uint32_t px = row32[sc];
+                        uint16_t r5 = (px >> 19) & 0x1F;
+                        uint16_t g6 = (px >> 10) & 0x3F;
+                        uint16_t b5 = (px >> 3) & 0x1F;
+                        fb16[r * LCD_WIDTH + c] = (r5 << 11) | (g6 << 5) | b5;
+                    }
+                }
+            } else {
+                for (int r = 0; r < h; r++) {
+                    uint32_t *row32 = (uint32_t *)(mapped_fb + r * stride);
+                    for (int c = 0; c < w; c++) {
+                        uint32_t px = row32[c];
+                        uint16_t r5 = (px >> 19) & 0x1F;
+                        uint16_t g6 = (px >> 10) & 0x3F;
+                        uint16_t b5 = (px >> 3) & 0x1F;
+                        fb16[r * LCD_WIDTH + c] = (r5 << 11) | (g6 << 5) | b5;
+                    }
                 }
             }
         }

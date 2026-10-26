@@ -114,6 +114,37 @@ void y1_apply_resolution_setting(int mode)
     settings_save();
     splash(HZ * 2, "Restart device to apply");
 }
+
+void y1_early_load_resolution(void)
+{
+    const char *paths[] = {
+        "/.rockbox/config.cfg",
+        "/mnt/sdcard/.rockbox/config.cfg",
+        "/mnt/extsd/.rockbox/config.cfg",
+        NULL
+    };
+    int mode = 0; /* Default: 0 (480x360) */
+
+    for (int i = 0; paths[i]; i++) {
+        FILE *fp = fopen(paths[i], "r");
+        if (fp) {
+            char line[128];
+            while (fgets(line, sizeof(line), fp)) {
+                if (strncmp(line, "y1 screen resolution:", 21) == 0) {
+                    const char *val = line + 21;
+                    while (*val == ' ' || *val == '\t')
+                        val++;
+                    if (strncasecmp(val, "Classic", 7) == 0 || *val == '1')
+                        mode = 1;
+                    break;
+                }
+            }
+            fclose(fp);
+            break;
+        }
+    }
+    y1_apply_resolution_setting(mode);
+}
 #endif
 
 #ifndef __PCTOOL__

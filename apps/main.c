@@ -273,11 +273,54 @@ int show_logo_boot( void )
         lcd_putsxy((LCD_WIDTH/2) - (ver_w/2), 0, version);
     lcd_bmp(&bm_rockboxlogo, (LCD_WIDTH - BMPWIDTH_rockboxlogo) / 2, 16);
 #else
-    lcd_bmp(&bm_rockboxlogo, (LCD_WIDTH - BMPWIDTH_rockboxlogo) / 2, 10);
-    if (ver_w > LCD_WIDTH)
-        lcd_putsxy(0, LCD_HEIGHT-font_h, rbversion);
+    int screen_w = screens[SCREEN_MAIN].lcdwidth;
+    int screen_h = screens[SCREEN_MAIN].lcdheight;
+    if (screen_w <= 0 || screen_h <= 0)
+    {
+        screen_w = LCD_WIDTH;
+        screen_h = LCD_HEIGHT;
+    }
+
+    if (screen_w >= bm_rockboxlogo.width)
+    {
+        int logo_x = (screen_w - bm_rockboxlogo.width) / 2;
+        int logo_y = (screen_h - bm_rockboxlogo.height - font_h) / 2;
+        if (logo_y < 10)
+            logo_y = 10;
+        lcd_bmp(&bm_rockboxlogo, logo_x, logo_y);
+    }
     else
-        lcd_putsxy((LCD_WIDTH/2) - (ver_w/2), LCD_HEIGHT-font_h, version);
+    {
+        /* Scale logo proportionally to fit screen_w (e.g. 480x149 -> 320x99 for Classic) */
+        int target_w = screen_w;
+        int target_h = (bm_rockboxlogo.height * target_w) / bm_rockboxlogo.width;
+        int target_x = 0;
+        int target_y = (screen_h - target_h - font_h) / 2;
+        if (target_y < 10)
+            target_y = 10;
+
+        fb_data scaled_row[320];
+        const fb_data *src_data = (const fb_data *)bm_rockboxlogo.data;
+        for (int dy = 0; dy < target_h; dy++)
+        {
+            int sy = (dy * bm_rockboxlogo.height) / target_h;
+            const fb_data *src_row = src_data + sy * bm_rockboxlogo.width;
+            for (int dx = 0; dx < target_w; dx++)
+            {
+                int sx = (dx * bm_rockboxlogo.width) / target_w;
+                scaled_row[dx] = src_row[sx];
+            }
+            lcd_bitmap(scaled_row, target_x, target_y + dy, target_w, 1);
+        }
+    }
+
+    int ver_x = (screen_w - ver_w) / 2;
+    if (ver_x < 0)
+        ver_x = 0;
+    int ver_y = screen_h - font_h - 4;
+    if (ver_y < 0)
+        ver_y = 0;
+    lcd_putsxy(ver_x, ver_y, version);
 #endif
     lcd_setfont(FONT_UI);
     lcd_update();
@@ -421,6 +464,10 @@ static void init(void)
     FOR_NB_SCREENS(i)
         global_status.font_id[i] = FONT_SYSFIXED;
     font_init();
+#if defined(INNIOASIS_Y1)
+    extern void y1_early_load_resolution(void);
+    y1_early_load_resolution();
+#endif
     show_logo_boot();
     button_init();
     powermgmt_init();
@@ -463,6 +510,10 @@ static void init(void)
     pcm_init();
     dsp_init();
     settings_apply(true);
+#if defined(INNIOASIS_Y1)
+    audio_init();
+    y1_play_boot_sound();
+#endif
     init_battery_tables();
 #ifdef HAVE_DIRCACHE
     init_dircache(true);
@@ -475,7 +526,9 @@ static void init(void)
     filetype_init();
     playlist_init();
     shortcuts_init();
+#if !defined(INNIOASIS_Y1)
     audio_init();
+#endif
     talk_announce_voice_invalid(); /* notify user w/ voice prompt if voice file invalid */
     settings_apply_skins();
 
