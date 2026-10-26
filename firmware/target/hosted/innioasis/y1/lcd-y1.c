@@ -670,26 +670,27 @@ void lcd_shutdown(void)
 }
 #endif
 
-void y1_display_raw_screen(const char *name)
+bool y1_display_raw_screen(const char *name)
 {
     char path[128];
     int img_fd = -1;
 
-    /* Check rootfs asset first */
-    snprintf(path, sizeof(path), "/etc/%s.raw", name);
+    /* 1. Check user custom splash on storage first */
+    snprintf(path, sizeof(path), "/.rockbox/%s.raw", name);
     img_fd = open(path, O_RDONLY | O_CLOEXEC);
 
-    /* Fallbacks on storage */
     if (img_fd < 0) {
-        snprintf(path, sizeof(path), "/.rockbox/%s.raw", name);
+        snprintf(path, sizeof(path), "/mnt/sdcard/.rockbox/%s.raw", name);
         img_fd = open(path, O_RDONLY | O_CLOEXEC);
     }
     if (img_fd < 0) {
         snprintf(path, sizeof(path), "/mnt/sdcard/%s.raw", name);
         img_fd = open(path, O_RDONLY | O_CLOEXEC);
     }
+
+    /* 2. Check built-in rootfs asset */
     if (img_fd < 0) {
-        snprintf(path, sizeof(path), "/mnt/sdcard/.rockbox/%s.raw", name);
+        snprintf(path, sizeof(path), "/etc/%s.raw", name);
         img_fd = open(path, O_RDONLY | O_CLOEXEC);
     }
 
@@ -697,7 +698,7 @@ void y1_display_raw_screen(const char *name)
         char msg[128];
         snprintf(msg, sizeof(msg), "[lcd-y1] Screen '%s.raw' not found\n", name);
         klog(msg);
-        return;
+        return false;
     }
 
     if (fb_fd < 0 || !mapped_fb) {
@@ -705,7 +706,7 @@ void y1_display_raw_screen(const char *name)
     }
     if (fb_fd < 0 || !mapped_fb) {
         close(img_fd);
-        return;
+        return false;
     }
 
     int stride = finfo.line_length ? finfo.line_length : (vinfo.xres * (vinfo.bits_per_pixel / 8));
@@ -755,4 +756,5 @@ void y1_display_raw_screen(const char *name)
     }
     close(img_fd);
     redraw_hw();
+    return true;
 }

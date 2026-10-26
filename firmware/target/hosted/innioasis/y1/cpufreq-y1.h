@@ -38,4 +38,7 @@ int y1_get_current_freq(void);
 /* Screen off power throttle: drop to 598MHz while screen is off, restore on wake */
 void y1_set_screen_off_power_mode(bool screen_off);
 
+/* Transition from boot-time maximum clock boost to user-configured CPU settings */
+void y1_boot_boost_finish(void);
+
 #endif /* _CPUFREQ_Y1_H_ */

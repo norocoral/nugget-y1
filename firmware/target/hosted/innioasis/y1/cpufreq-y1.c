@@ -24,6 +24,19 @@
 static int _current_cpu_mode = -1;
 static int _saved_cpu_mode = -1;
 static int _saved_cpu1_online = -1;
+static bool _boot_boost_active = true;
+
+void y1_boot_boost_finish(void)
+{
+    if (_boot_boost_active) {
+        _boot_boost_active = false;
+        _current_cpu_mode = -1; /* Reset cached mode so user preference applies */
+        y1_logf("[cpufreq-y1] Rockbox fully loaded; applying user CPU preferences (mode=%d, cores=%d)\n",
+                global_settings.y1_cpu_mode, global_settings.y1_cpu_cores);
+        y1_set_cpu_mode(global_settings.y1_cpu_mode);
+        y1_set_cpu_cores_setting(global_settings.y1_cpu_cores);
+    }
+}
 
 static int cpu1_is_online(void)
 {
@@ -90,6 +103,9 @@ static void write_cpu_freq_bounds(int cpu, const char *min_f, const char *max_f)
 
 void y1_set_cpu_mode(int mode)
 {
+    if (_boot_boost_active)
+        return;
+
     if (_current_cpu_mode == mode)
         return;
 
@@ -146,6 +162,9 @@ int y1_get_current_freq(void)
 
 void y1_set_cpu_cores_setting(int mode)
 {
+    if (_boot_boost_active)
+        return;
+
     /* mode 0: Dual-Core (online=1), mode 1: Single-Core (online=0) */
     int fd = open("/sys/devices/system/cpu/cpu1/online", O_WRONLY | O_CLOEXEC);
     if (fd >= 0) {

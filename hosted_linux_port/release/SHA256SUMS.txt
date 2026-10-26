@@ -1,2 +1,0 @@
-024ac8697eced2bc7a243f17177c6fcdf93705e827d81255bb9cea9fcd7fc62c  boot_rockbox.img
-6023f895075ef52bb1f718118b2a3a4bc7cedbd33a5323161338dff2c0c5e26d  rockbox_sdcard.zip

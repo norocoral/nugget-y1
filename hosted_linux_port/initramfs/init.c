@@ -416,6 +416,24 @@ static int is_mmcblk1_in_proc_partitions(void)
     return found;
 }
 
+/* Check if physical MicroSD partition 1 (mmcblk1p1) is registered in /proc/partitions */
+static int is_mmcblk1p1_in_proc_partitions(void)
+{
+    FILE *fp = fopen("/proc/partitions", "r");
+    if (!fp) return 0;
+
+    char line[128];
+    int found = 0;
+    while (fgets(line, sizeof(line), fp)) {
+        if (strstr(line, "mmcblk1p1")) {
+            found = 1;
+            break;
+        }
+    }
+    fclose(fp);
+    return found;
+}
+
 static void make_device_nodes(void)
 {
     mkdir("/dev/graphics", 0755);
@@ -539,6 +557,10 @@ static int has_sdcard_rockbox(void)
 /* Link all user folders and files from /mnt/sdcard into / so plugins and apps see / as SD root */
 static void link_sdcard_to_root(void)
 {
+    static int sdcard_linked = 0;
+    if (sdcard_linked)
+        return;
+
     DIR *d = opendir("/mnt/sdcard");
     if (!d) return;
     struct dirent *de;
@@ -560,17 +582,27 @@ static void link_sdcard_to_root(void)
         snprintf(target, sizeof(target), "/mnt/sdcard/%s", de->d_name);
         snprintf(linkname, sizeof(linkname), "/%s", de->d_name);
 
-        struct stat st;
-        if (lstat(linkname, &st) == 0) {
-            if (S_ISLNK(st.st_mode)) {
-                unlink(linkname);
-            } else {
-                continue; /* don't remove existing real directory */
+        char existing[512];
+        ssize_t len = readlink(linkname, existing, sizeof(existing) - 1);
+        if (len > 0) {
+            existing[len] = '\0';
+            if (strcmp(existing, target) == 0)
+                continue; /* Link already points to target, avoid redundant write */
+            unlink(linkname);
+        } else {
+            struct stat st;
+            if (lstat(linkname, &st) == 0) {
+                if (S_ISLNK(st.st_mode)) {
+                    unlink(linkname);
+                } else {
+                    continue; /* don't remove existing real directory */
+                }
             }
         }
         (void)!symlink(target, linkname);
     }
     closedir(d);
+    sdcard_linked = 1;
 }
 
 /* Mount physical MicroSD storage once during boot (eMMC excluded). */
@@ -696,9 +728,47 @@ static void mount_storage_at_boot(int verbose)
     }
 }
 
+static void boost_cpu_for_boot(void)
+{
+    /* 1. Power on secondary CPU core (CPU1) for fast multi-threaded boot and module loading */
+    write_sysfs("/sys/devices/system/cpu/cpu1/online", "1\n");
+    write_sysfs("/sys/devices/system/cpu/cpufreq/hotplug/cpu_num_base", "2\n");
+    write_sysfs("/sys/devices/system/cpu/cpufreq/hotplug/cpu_num_limit", "2\n");
+
+    /* 2. Boost both MT6572 Cortex-A7 cores to performance governor at maximum 1.196 GHz (1.2 GHz) */
+    write_sysfs("/sys/devices/system/cpu/cpu0/cpufreq/scaling_min_freq", "598000\n");
+    write_sysfs("/sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq", "1196000\n");
+    write_sysfs("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor", "performance\n");
+    write_sysfs("/sys/devices/system/cpu/cpu0/cpufreq/scaling_setspeed", "1196000\n");
+
+    write_sysfs("/sys/devices/system/cpu/cpu1/cpufreq/scaling_min_freq", "598000\n");
+    write_sysfs("/sys/devices/system/cpu/cpu1/cpufreq/scaling_max_freq", "1196000\n");
+    write_sysfs("/sys/devices/system/cpu/cpu1/cpufreq/scaling_governor", "performance\n");
+    write_sysfs("/sys/devices/system/cpu/cpu1/cpufreq/scaling_setspeed", "1196000\n");
+
+    log_line("Dynamic boot-time CPU clock boosted to 1.2 GHz dual-core.\n");
+}
+
+static void apply_powersave_cpu(void)
+{
+    /* Used when Rockbox exits or crashes to conserve battery while waiting */
+    write_sysfs("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor", "ondemand\n");
+    write_sysfs("/sys/devices/system/cpu/cpu0/cpufreq/scaling_min_freq", "598000\n");
+    write_sysfs("/sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq", "1001000\n");
+    write_sysfs("/sys/devices/system/cpu/cpufreq/ondemand/up_threshold", "98\n");
+    write_sysfs("/sys/devices/system/cpu/cpufreq/ondemand/sampling_down_factor", "1\n");
+    write_sysfs("/sys/devices/system/cpu/cpufreq/ondemand/sampling_rate", "100000\n");
+    write_sysfs("/sys/devices/system/cpu/cpufreq/ondemand/io_is_busy", "0\n");
+    write_sysfs("/sys/devices/system/cpu/cpufreq/ondemand/powersave_bias", "200\n");
+
+    write_sysfs("/sys/devices/system/cpu/cpu1/online", "0\n");
+    write_sysfs("/sys/devices/system/cpu/cpufreq/hotplug/cpu_num_base", "1\n");
+    write_sysfs("/sys/devices/system/cpu/cpufreq/hotplug/cpu_num_limit", "1\n");
+}
+
 static void optimize_power_and_battery(void)
 {
-    log_line("Applying aggressive OS battery and power optimizations...\n");
+    log_line("Applying OS power and storage optimizations...\n");
 
     /* 1. Enable MT6572 SPM idle modes at boot. Audio playback disables deep
      * idle temporarily because it can starve the AFE DMA path. */
@@ -706,23 +776,6 @@ static void optimize_power_and_battery(void)
     write_sysfs("/sys/power/dpidle_state", "cpupdn 1\n");
     write_sysfs("/sys/power/dpidle_state", "1\n");
     write_sysfs("/sys/power/rgidle_state", "1\n");
-
-    /* 2. CPU Frequency Scaling & Governor (ondemand with aggressive powersave bias) */
-    write_sysfs("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor", "ondemand\n");
-    write_sysfs("/sys/devices/system/cpu/cpu0/cpufreq/scaling_min_freq", "598000\n");
-    write_sysfs("/sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq", "1001000\n");
-
-    /* Tune ondemand governor parameters for maximum power saving */
-    write_sysfs("/sys/devices/system/cpu/cpufreq/ondemand/up_threshold", "98\n");
-    write_sysfs("/sys/devices/system/cpu/cpufreq/ondemand/sampling_down_factor", "1\n");
-    write_sysfs("/sys/devices/system/cpu/cpufreq/ondemand/sampling_rate", "100000\n");
-    write_sysfs("/sys/devices/system/cpu/cpufreq/ondemand/io_is_busy", "0\n");
-    write_sysfs("/sys/devices/system/cpu/cpufreq/ondemand/powersave_bias", "200\n");
-
-    /* 3. Power-gate secondary CPU core (CPU1) for pure single-core audio playback */
-    write_sysfs("/sys/devices/system/cpu/cpu1/online", "0\n");
-    write_sysfs("/sys/devices/system/cpu/cpufreq/hotplug/cpu_num_base", "1\n");
-    write_sysfs("/sys/devices/system/cpu/cpufreq/hotplug/cpu_num_limit", "1\n");
 
     /* 4. Linux Kernel VM dirty page flush tuning (avoid waking up storage bus) */
     write_sysfs("/proc/sys/vm/dirty_writeback_centisecs", "12000\n");
@@ -769,8 +822,14 @@ static void optimize_power_and_battery(void)
     log_line("Battery optimizations active: CPU 598MHz/single-core, SPM idle modes enabled.\n");
 }
 
+static char current_displayed_screen[32] = {0};
+
 static void display_screen(const char *name)
 {
+    if (name && current_displayed_screen[0] && strcmp(current_displayed_screen, name) == 0) {
+        return; /* Already displaying this exact splash screen, skip redundant FB write! */
+    }
+
     char buf[128];
     const char *devs[] = {"/dev/graphics/fb0", "/dev/fb0", NULL};
     int fd = -1;
@@ -878,6 +937,8 @@ static void display_screen(const char *name)
     }
 
     close(fd);
+    if (name)
+        snprintf(current_displayed_screen, sizeof(current_displayed_screen), "%s", name);
 }
 
 #include <sys/syscall.h>
@@ -1162,6 +1223,9 @@ int main(int argc, char *argv[])
     mkdir("/sys", 0755);
     mount("sysfs", "/sys", "sysfs", 0, NULL);
 
+    /* Boost CPU to 1.2 GHz Dual-Core immediately for maximum boot performance */
+    boost_cpu_for_boot();
+
     mkdir("/dev", 0755);
     if (mount("devtmpfs", "/dev", "devtmpfs", 0, NULL) < 0) {
         mount("tmpfs", "/dev", "tmpfs", 0, NULL);
@@ -1185,22 +1249,31 @@ int main(int argc, char *argv[])
     log_line("   Innioasis Y1 Hosted Rockbox Linux Boot       \n");
     log_line("=================================================\n");
 
-    /* 5. Wait up to 5 seconds for physical MicroSD card (mmcblk1) detection */
+    /* 5. Wait up to 5 seconds for physical MicroSD card (mmcblk1) detection with 10ms fast polling */
     log_line("Waiting up to 5s for physical MicroSD card (mmcblk1)...\n");
     int card_found = 0;
-    for (int i = 0; i < 50; i++) {
+    for (int i = 0; i < 500; i++) {
         scan_proc_partitions_and_create_nodes();
         if (is_mmcblk1_in_proc_partitions()) {
             char msg[64];
-            snprintf(msg, sizeof(msg), "Physical MicroSD detected after %d ms!\n", (i + 1) * 100);
+            snprintf(msg, sizeof(msg), "Physical MicroSD detected after %d ms!\n", (i + 1) * 10);
             log_line(msg);
-            /* Wait 200ms for kernel partition table scanner to register mmcblk1p1 */
-            usleep(200000);
-            scan_proc_partitions_and_create_nodes();
+
+            /* Fast poll for kernel partition table scanner to register mmcblk1p1 */
+            if (!is_mmcblk1p1_in_proc_partitions()) {
+                for (int p = 0; p < 20; p++) {
+                    usleep(10000); /* 10ms */
+                    scan_proc_partitions_and_create_nodes();
+                    if (is_mmcblk1p1_in_proc_partitions())
+                        break;
+                }
+            } else {
+                scan_proc_partitions_and_create_nodes();
+            }
             card_found = 1;
             break;
         }
-        usleep(100000); /* 100ms */
+        usleep(10000); /* 10ms fast poll */
     }
 
     if (!card_found) {
@@ -1229,9 +1302,13 @@ int main(int argc, char *argv[])
     while (1) {
         while (!rockbox_found) {
             if (has_sdcard_rockbox()) {
-                unlink("/.rockbox");
-                if (symlink("/mnt/sdcard/.rockbox", "/.rockbox") == 0) {
-                    log_line("Linked /.rockbox -> /mnt/sdcard/.rockbox\n");
+                char rb_link[256];
+                ssize_t rblen = readlink("/.rockbox", rb_link, sizeof(rb_link) - 1);
+                if (rblen <= 0 || strncmp(rb_link, "/mnt/sdcard/.rockbox", rblen) != 0) {
+                    unlink("/.rockbox");
+                    if (symlink("/mnt/sdcard/.rockbox", "/.rockbox") == 0) {
+                        log_line("Linked /.rockbox -> /mnt/sdcard/.rockbox\n");
+                    }
                 }
                 if (waited_for_rockbox) {
                     log_line("Rockbox installation detected. Rebooting device...\n");
@@ -1301,7 +1378,8 @@ int main(int argc, char *argv[])
         }
 
         /* Outside of Rockbox:
-         * Re-bind USB gadget so user can recover via PC */
+         * Drop CPU to powersave while waiting in recovery, re-bind USB gadget */
+        apply_powersave_cpu();
         setup_usb_gadget(active_sd_dev[0] ? active_sd_dev : NULL,
                          active_ext_dev[0] ? active_ext_dev : NULL);
 
@@ -1355,6 +1433,7 @@ int main(int argc, char *argv[])
             /* If issues resolved and not currently connected to PC, continue operation! */
             if (rb_avail && !usb_to_pc) {
                 log_line("Issues resolved! Continuing operation...\n");
+                boost_cpu_for_boot();
                 rockbox_found = 1;
                 crashed = 0;
                 sleep(1);

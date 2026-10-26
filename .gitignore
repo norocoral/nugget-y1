@@ -343,6 +343,11 @@ __pycache__
 /hosted_linux_port/release/*.zip
 /hosted_linux_port/initramfs/init
 /hosted_linux_port/initramfs/init.bin
-/hosted_linux_port/stock_unpacked/vmlinux.bin
-/hosted_linux_port/stock_unpacked/ramdisk*
-/hosted_linux_port/stock_unpacked/zImage
+
+# MediaTek proprietary binary blobs & firmware
+/hosted_linux_port/bt_blobs/
+/hosted_linux_port/stock_unpacked/
+/hosted_linux_port/logo.bin
+/hosted_linux_port/release/logo.bin
+logo.bin
+*.ko

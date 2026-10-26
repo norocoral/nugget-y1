@@ -138,6 +138,9 @@
 #ifdef HAVE_MULTIVOLUME
 #include "pathfuncs.h" /* for init_volume_names */
 #endif
+#if defined(INNIOASIS_Y1)
+#include "cpufreq-y1.h"
+#endif
 #endif
 
 #if (CONFIG_PLATFORM & PLATFORM_SDL)
@@ -251,6 +254,11 @@ int main(void)
 int show_logo_boot( void ) INIT_ATTR;
 int show_logo_boot( void )
 {
+#if defined(INNIOASIS_Y1)
+    extern bool y1_display_raw_screen(const char *name);
+    if (y1_display_raw_screen("boot"))
+        return 0;
+#endif
     unsigned char version[32];
     int font_h, ver_w;
     snprintf(version, sizeof(version), "Ver. %s", rbversion);
@@ -821,6 +829,9 @@ static void init(void)
     CHART("<settings_apply_skins");
     settings_apply_skins();
     CHART(">settings_apply_skins");
+#if defined(INNIOASIS_Y1)
+    y1_boot_boost_finish();
+#endif
 }
 
 #ifdef CPU_PP
