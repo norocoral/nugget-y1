@@ -1031,7 +1031,7 @@ static void init_bluetooth_subsystem(void)
         pfd.events = POLLIN;
 
         while (1) {
-            int pr = poll(&pfd, 1, 2000);
+            int pr = poll(&pfd, 1, -1);
             if (pr > 0 && (pfd.revents & POLLIN)) {
                 char cmd[256] = {0};
                 ssize_t rb = read(wmt_fd, cmd, 255);

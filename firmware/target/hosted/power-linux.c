@@ -144,8 +144,16 @@ unsigned int power_input_status(void)
 
     if (last_pwr_tick == 0 || (now - last_pwr_tick) > 2 * HZ) {
         int present = 0;
-        sysfs_get_int(POWER_STATUS_PATH, &present);
-        last_status = present ? POWER_INPUT_USB_CHARGER : POWER_INPUT_NONE;
+        bool ok = sysfs_get_int(POWER_STATUS_PATH, &present);
+        if (!ok || present <= 0) {
+            /* Fallback to check usb power supply node if ac doesn't exist or isn't online */
+            int usb_present = 0;
+            if (sysfs_get_int("/sys/class/power_supply/usb/online", &usb_present) && usb_present > 0)
+                present = usb_present;
+            else
+                present = 0;
+        }
+        last_status = (present > 0) ? POWER_INPUT_USB_CHARGER : POWER_INPUT_NONE;
         last_pwr_tick = now;
 
 #ifdef FIIO_M3K_LINUX

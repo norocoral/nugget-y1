@@ -459,6 +459,7 @@ void backlight_hw_on(void)
             close(on_fd);
             y1_logf("[backlight-unix] backlight_hw_on: wrote 'on' to /sys/power/state\n");
         }
+        y1_set_touch_scanning(true);
 #endif
 #ifdef HAVE_LCD_ENABLE
         y1_logf("[backlight-unix] backlight_hw_on: calling lcd_enable(true)\n");
@@ -580,6 +581,7 @@ void lcd_awake(void)
 {
     y1_logf("[backlight-unix] lcd_awake() called\n");
     sysfs_set_string("/sys/power/state", "on");
+    y1_set_touch_scanning(true);
 #ifdef HAVE_LCD_ENABLE
     lcd_enable(true);
 #endif
@@ -601,11 +603,15 @@ void lcd_sleep(void)
     lcd_enable(false);
 #endif
 
+    /* Put capacitive touch controller into sleep mode to avoid idle drain and spurious wakeups */
+    y1_set_touch_scanning(false);
+
     if (!button_center_wakeup_available()) {
         y1_log("Y1: center-button wake is not enabled; remaining awake for input\n");
 #ifdef HAVE_LCD_ENABLE
         lcd_enable(true);
 #endif
+        y1_set_touch_scanning(true);
         return;
     }
 
@@ -616,6 +622,7 @@ void lcd_sleep(void)
 #ifdef HAVE_LCD_ENABLE
         lcd_enable(true);
 #endif
+        y1_set_touch_scanning(true);
         return;
     }
 
@@ -627,18 +634,8 @@ void lcd_sleep(void)
     int write_error = written < 0 ? errno : (written != 3 ? EIO : 0);
     int close_result = close(fd);
     int close_error = close_result < 0 ? errno : 0;
-    y1_logf("[backlight-unix] lcd_sleep: kernel resumed from suspend! (written=%d, err=%d)\n",
+    y1_logf("[backlight-unix] lcd_sleep: kernel returned from suspend (written=%d, err=%d)\n",
             (int)written, write_error ? write_error : close_error);
-
-    /* Writing 'on' to /sys/power/state immediately wakes MTKFB from early_suspend
-     * via mtkfb_late_resume (DISP_PowerEnable(TRUE), DISP_PanelEnable(TRUE)).
-     * Without this, the LCM hardware remains powered off after kernel suspend! */
-    int on_fd = open("/sys/power/state", O_WRONLY | O_CLOEXEC);
-    if (on_fd >= 0) {
-        (void)!write(on_fd, "on\n", 3);
-        close(on_fd);
-        y1_logf("[backlight-unix] lcd_sleep: wrote 'on' to /sys/power/state (triggers mtkfb_late_resume)\n");
-    }
 
     if (written != 3 || close_result < 0) {
         char message[96];
@@ -646,7 +643,16 @@ void lcd_sleep(void)
                  "Y1: suspend request failed (write=%d, errno=%d)\n",
                  (int)written, write_error ? write_error : close_error);
         y1_log(message);
+        /* If suspend could not enter 'mem' (e.g. held wakelock), ensure SPM deep idle is requested */
+        sysfs_set_string("/sys/power/dpidle_state", "cpupdn 1\n");
+        sysfs_set_string("/sys/power/dpidle_state", "1\n");
     }
+
+    /* NOTE: We deliberately do NOT write 'on' to /sys/power/state here.
+     * Writing 'on' here would immediately wake MTKFB and all hardware subsystems
+     * even if suspend failed or if a background timer woke the SoC briefly.
+     * 'on' is strictly written by lcd_awake() or backlight_hw_on() when the user
+     * presses a key to turn the screen back on. */
 }
 #else
 void lcd_awake(void)

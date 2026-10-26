@@ -734,8 +734,9 @@ void root_menu_load_from_cfg(void* setting, char *value)
         root_menu_set_default(setting, NULL);
         return;
     }
+    memset(root_menu__, 0, sizeof(root_menu__));
     root_menu_.flags = MENU_HAS_DESC | MT_MENU;
-    root_menu_.submenus = (const struct menu_item_ex **)&root_menu__;
+    root_menu_.submenus = (const struct menu_item_ex **)root_menu__;
     root_menu_.callback_and_desc = &root_menu_desc;
 
     while (next && menu_item_count < MAX_MENU_ITEMS)
@@ -761,7 +762,7 @@ void root_menu_load_from_cfg(void* setting, char *value)
             }
         }
     }
-    if (!main_menu_added)
+    if (!main_menu_added && menu_item_count < MAX_MENU_ITEMS)
         root_menu__[menu_item_count++] = (struct menu_item_ex *)&menu_;
     root_menu_.flags |= MENU_ITEM_COUNT(menu_item_count);
     *(bool*)setting = true;
@@ -780,6 +781,8 @@ char* root_menu_write_to_cfg(void* setting, char*buf, int buf_len)
     buf[0] = '\0';
     for (i = 0; i < MENU_GET_COUNT(root_menu_.flags); i++)
     {
+        if (!root_menu__[i])
+            continue;
         for (j=0; j<MAX_MENU_ITEMS; j++)
         {
             if (menu_table[j].item == root_menu__[i])
@@ -807,8 +810,9 @@ void root_menu_set_default(void* setting, void* defaultval)
     unsigned i;
     (void)defaultval;
 
+    memset(root_menu__, 0, sizeof(root_menu__));
     root_menu_.flags = MENU_HAS_DESC | MT_MENU;
-    root_menu_.submenus = (const struct menu_item_ex **)&root_menu__;
+    root_menu_.submenus = (const struct menu_item_ex **)root_menu__;
     root_menu_.callback_and_desc = &root_menu_desc;
 
     for (i=0; i<MAX_MENU_ITEMS; i++)
@@ -856,10 +860,13 @@ static int item_callback(int action,
 static int get_selection(int last_screen)
 {
     int i;
-    int len = ARRAYLEN(root_menu__);
-    for(i=0; i < len; i++)
+    int count = MENU_GET_COUNT(root_menu_.flags);
+    if (count > (int)ARRAYLEN(root_menu__))
+        count = ARRAYLEN(root_menu__);
+    for(i=0; i < count; i++)
     {
-        if (((root_menu__[i]->flags&MENU_TYPE_MASK) == MT_RETURN_VALUE) &&
+        if (root_menu__[i] &&
+            ((root_menu__[i]->flags&MENU_TYPE_MASK) == MT_RETURN_VALUE) &&
             (root_menu__[i]->value == last_screen))
         {
             return i;
@@ -918,11 +925,14 @@ static int load_context_screen(int selection)
 {
     const struct menu_item_ex *context_menu = NULL;
     int retval = GO_TO_PREVIOUS;
+    if (selection < 0 || selection >= (int)MENU_GET_COUNT(root_menu_.flags) || !root_menu__[selection])
+        return GO_TO_PREVIOUS;
     push_current_activity(ACTIVITY_CONTEXTMENU);
     if ((root_menu__[selection]->flags&MENU_TYPE_MASK) == MT_RETURN_VALUE)
     {
         int item = root_menu__[selection]->value;
-        context_menu = items[item].context_menu;
+        if (item >= 0 && item < (int)ARRAYLEN(items))
+            context_menu = items[item].context_menu;
     }
     /* special cases */
     else if (root_menu__[selection] == &info_menu)
@@ -1138,6 +1148,8 @@ void root_menu(void)
             case GO_TO_ROOT:
                 if (last_screen != GO_TO_ROOT)
                     selected = get_selection(last_screen);
+                if (selected < 0 || selected >= (int)MENU_GET_COUNT(root_menu_.flags))
+                    selected = 0;
                 global_status.last_screen = GO_TO_ROOT; /* We've returned to ROOT */
                 /* When we are in the main menu we want the hardware BACK
                  * button to be handled by HOST instead of rockbox */

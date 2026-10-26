@@ -41,6 +41,10 @@
 #include "playlist.h"
 #include "misc.h"
 #include "icons.h"
+#if defined(INNIOASIS_Y1)
+#include "usb-y1.h"
+#include "splash.h"
+#endif
 
 #include "bitmaps/usblogo.h"
 
@@ -81,6 +85,9 @@ static void handle_usb_events(struct viewport *title)
     int next_update = 0;
 #endif /* STORAGE_MMC */
     int button;
+#if defined(INNIOASIS_Y1)
+    long center_press_start = 0;
+#endif
 
     /* Don't return until we get SYS_USB_DISCONNECTED */
     while(1)
@@ -100,12 +107,32 @@ static void handle_usb_events(struct viewport *title)
         {
             /* hid emits the event in get_action */
             send_event(GUI_EVENT_ACTIONUPDATE, NULL);
-            button = button_get_w_tmo(HZ/2);
+            button = button_get_w_tmo(HZ/10);
         }
         if (button == SYS_USB_DISCONNECTED)
             return;
         if (button == SYS_CHARGER_DISCONNECTED)
             reset_runtime();
+
+#if defined(INNIOASIS_Y1)
+        if (button_status() & BUTTON_SELECT)
+        {
+            if (center_press_start == 0)
+            {
+                center_press_start = current_tick;
+            }
+            else if (TIME_AFTER(current_tick, center_press_start + HZ))
+            {
+                /* Center button held for 1 second on USB screen: eject and charge only */
+                y1_usb_eject_to_charge_only();
+                return;
+            }
+        }
+        else
+        {
+            center_press_start = 0;
+        }
+#endif
 
 /* USB-MMC bridge can report activity */
 #if (CONFIG_STORAGE & STORAGE_MMC) && !defined(SIMULATOR)
@@ -307,6 +334,13 @@ void gui_usb_screen_run(bool early_usb, intptr_t seqnum)
         screens[i].backlight_on();
         viewportmanager_theme_undo(i, false);
     }
+
+#if defined(INNIOASIS_Y1)
+    if (y1_is_charge_only_mode())
+    {
+        splash(HZ, ID2P(LANG_USB_MODE_CHARGE));
+    }
+#endif
 
     pop_current_activity();
 #ifdef SIMULATOR

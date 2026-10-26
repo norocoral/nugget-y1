@@ -40,7 +40,7 @@ static const char * menu_get_name(int selected_item, void * data,
                                    char * buffer, size_t buffer_len)
 {
     (void)data;
-    if (selected_item < 0 || selected_item >= MAX_ITEMS)
+    if (selected_item < 0 || selected_item >= MAX_ITEMS || selected_item >= menu_item_count)
         return "";
 
     unsigned char *p = menu_items[selected_item].name;
@@ -48,7 +48,7 @@ static const char * menu_get_name(int selected_item, void * data,
         return "";
 
     int id = P2ID(p);
-    const char *name = (id != -1) ? (const char *)rb->str(id) : (const char *)p;
+    const char *name = (id >= 0) ? (const char *)rb->str(id) : (const char *)p;
     if (!name)
         name = "";
 
@@ -83,6 +83,8 @@ void load_from_cfg(void)
     int done = 0;
     int i = 0;
     bool found = false;
+
+    rb->memset(menu_items, 0, sizeof(menu_items));
 
     config_str[0] = '\0';
     rb->root_menu_write_to_cfg(NULL, config_str, sizeof(config_str));
@@ -156,6 +158,9 @@ static void save_to_cfg(void)
 
 static void swap_items(int a, int b)
 {
+    if (a < 0 || a >= MAX_ITEMS || b < 0 || b >= MAX_ITEMS)
+        return;
+
     unsigned char *name;
     char temp[MAX_ITEM_NAME];
     bool enabled;
@@ -175,7 +180,7 @@ static void swap_items(int a, int b)
 static int menu_speak_item(int selected_item, void *data)
 {
     (void) data;
-    if (selected_item < 0 || selected_item >= MAX_ITEMS)
+    if (selected_item < 0 || selected_item >= MAX_ITEMS || selected_item >= menu_item_count)
         return 0;
 
     unsigned char *p = menu_items[selected_item].name;
@@ -184,7 +189,7 @@ static int menu_speak_item(int selected_item, void *data)
 
     int id = P2ID(p);
 
-    if (id != -1)
+    if (id >= 0)
     {
         rb->talk_number(selected_item + 1, false);
         rb->talk_id(id, true);
@@ -234,9 +239,12 @@ enum plugin_status plugin_start(const void* parameter)
         switch (action)
         {
             case ACTION_STD_OK:
-                menu_items[cur_sel].enabled = !menu_items[cur_sel].enabled;
-                rb->gui_synclist_speak_item(&list);
-                changed = true;
+                if (cur_sel >= 0 && cur_sel < menu_item_count)
+                {
+                    menu_items[cur_sel].enabled = !menu_items[cur_sel].enabled;
+                    rb->gui_synclist_speak_item(&list);
+                    changed = true;
+                }
                 break;
             case ACTION_STD_CONTEXT:
             {
@@ -247,9 +255,9 @@ enum plugin_status plugin_start(const void* parameter)
                 switch (rb->do_menu(&menu, NULL, NULL, false))
                 {
                     case 0:
-                        if (cur_sel == 0)
+                        if (cur_sel <= 0 || cur_sel >= menu_item_count)
                         {
-                            rb->splash(HZ, ID2P(LANG_FAILED));
+                            rb->splashf(HZ, "%s", rb->str(LANG_FAILED));
                             break;
                         }
                         swap_items(cur_sel, cur_sel - 1);
@@ -257,9 +265,9 @@ enum plugin_status plugin_start(const void* parameter)
                         changed = true;
                         break;
                     case 1:
-                        if (cur_sel + 1 == menu_item_count)
+                        if (cur_sel < 0 || cur_sel + 1 >= menu_item_count)
                         {
-                            rb->splash(HZ, ID2P(LANG_FAILED));
+                            rb->splashf(HZ, "%s", rb->str(LANG_FAILED));
                             break;
                         }
                         swap_items(cur_sel, cur_sel + 1);
@@ -271,10 +279,14 @@ enum plugin_status plugin_start(const void* parameter)
                         {
                             rb->root_menu_set_default(&rb->global_settings->root_menu_customized, NULL);
                             load_from_cfg();
+                            rb->gui_synclist_set_nb_items(&list, menu_item_count);
+                            rb->gui_synclist_select_item(&list, 0);
+                            changed = true;
                         }
-                        /* fall-through */
+                        break;
                     default:
                         rb->gui_synclist_speak_item(&list);
+                        break;
                 }
                 rb->gui_synclist_set_title(&list, rb->str(LANG_MAIN_MENU), Icon_Rockbox);
                 break;

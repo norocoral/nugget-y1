@@ -506,3 +506,23 @@ bool headphones_inserted(void)
     }
     return cached_state;
 }
+
+void y1_set_touch_scanning(bool enabled)
+{
+    static int current_state = -1;
+    int target = enabled ? 1 : 0;
+    if (current_state == target)
+        return;
+    current_state = target;
+
+    int fd = open("/proc/tpd_keys_enable", O_WRONLY | O_CLOEXEC);
+    if (fd >= 0) {
+        char val = enabled ? '1' : '0';
+        (void)!write(fd, &val, 1);
+        (void)!write(fd, "\n", 1);
+        close(fd);
+        char kbuf[64];
+        snprintf(kbuf, sizeof(kbuf), "[button-y1] tpd_keys_enable=%d\n", target);
+        y1_kmsg_log(kbuf);
+    }
+}
