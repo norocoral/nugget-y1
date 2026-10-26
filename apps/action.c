@@ -63,6 +63,8 @@
 #ifndef BOOTLOADER
 static long last_center_click_tick = 0;
 static bool waiting_second_center_click = false;
+static bool right_seeking = false;
+static bool left_seeking = false;
 #endif
 #else
 #define Y1_IS_SCREEN_SLEEPING() (!is_backlight_on(false))
@@ -798,6 +800,8 @@ static inline void do_key_lock(bool lock)
     button_clear_queue();
 #if defined(INNIOASIS_Y1) && !defined(BOOTLOADER)
     waiting_second_center_click = false;
+    right_seeking = false;
+    left_seeking = false;
 #endif
 #if defined(HAVE_TOUCHPAD) || defined(HAVE_TOUCHSCREEN)
  /* disable touch device on keylock if std behavior or selected disable touch */
@@ -1352,59 +1356,136 @@ static int get_action_worker(action_last_t *last, action_cur_t *cur)
             /* Check Advanced Key Lock exceptions while locked in HOLD mode */
             if (has_flag(last->softlock_mask, SEL_ACTION_ENABLED))
             {
+                bool in_wps = ((cur->context & ~CONTEXT_LOCKED) == CONTEXT_WPS);
+
+                if (raw_btn != BUTTON_RIGHT)
+                    right_seeking = false;
+                if (raw_btn != BUTTON_LEFT)
+                    left_seeking = false;
+
                 if (raw_btn == BUTTON_PLAY && !is_rel && !is_rep &&
                     has_flag(last->softlock_mask, SEL_ACTION_PLAY))
                 {
-                    cur->action = BUTTON_MULTIMEDIA_PLAYPAUSE;
+                    cur->action = in_wps ? ACTION_WPS_PLAY : BUTTON_MULTIMEDIA_PLAYPAUSE;
                     last->button = cur->button;
-                    return BUTTON_MULTIMEDIA_PLAYPAUSE;
+                    return cur->action;
                 }
                 else if (raw_btn == BUTTON_RIGHT)
                 {
-                    if (is_rep && has_flag(last->softlock_mask, SEL_ACTION_SEEK))
+                    if (!is_rel && !is_rep)
                     {
-                        cur->action = BUTTON_MULTIMEDIA_FFWD;
+                        /* Button down: swallow initial press so holding to seek doesn't skip */
+                        right_seeking = false;
+                        cur->action = ACTION_NONE;
                         last->button = cur->button;
-                        return BUTTON_MULTIMEDIA_FFWD;
+                        return ACTION_NONE;
                     }
-                    else if (!is_rel && !is_rep && has_flag(last->softlock_mask, SEL_ACTION_SKIP))
+                    else if (is_rep)
                     {
-                        cur->action = BUTTON_MULTIMEDIA_NEXT;
-                        last->button = cur->button;
-                        return BUTTON_MULTIMEDIA_NEXT;
+                        if (has_flag(last->softlock_mask, SEL_ACTION_SEEK))
+                        {
+                            right_seeking = true;
+                            cur->action = in_wps ? ACTION_WPS_SEEKFWD : BUTTON_MULTIMEDIA_FFWD;
+                            last->button = cur->button;
+                            return cur->action;
+                        }
+                    }
+                    else if (is_rel)
+                    {
+                        if (right_seeking)
+                        {
+                            right_seeking = false;
+                            if (in_wps)
+                            {
+                                cur->action = ACTION_WPS_STOPSEEK;
+                                last->button = cur->button;
+                                return ACTION_WPS_STOPSEEK;
+                            }
+                            cur->action = ACTION_NONE;
+                            last->button = cur->button;
+                            return ACTION_NONE;
+                        }
+                        else if (has_flag(last->softlock_mask, SEL_ACTION_SKIP))
+                        {
+                            cur->action = in_wps ? ACTION_WPS_SKIPNEXT : BUTTON_MULTIMEDIA_NEXT;
+                            last->button = cur->button;
+                            return cur->action;
+                        }
                     }
                 }
                 else if (raw_btn == BUTTON_LEFT)
                 {
-                    if (is_rep && has_flag(last->softlock_mask, SEL_ACTION_SEEK))
+                    if (!is_rel && !is_rep)
                     {
-                        cur->action = BUTTON_MULTIMEDIA_REW;
+                        /* Button down: swallow initial press so holding to seek doesn't skip */
+                        left_seeking = false;
+                        cur->action = ACTION_NONE;
                         last->button = cur->button;
-                        return BUTTON_MULTIMEDIA_REW;
+                        return ACTION_NONE;
                     }
-                    else if (!is_rel && !is_rep && has_flag(last->softlock_mask, SEL_ACTION_SKIP))
+                    else if (is_rep)
                     {
-                        cur->action = BUTTON_MULTIMEDIA_PREV;
-                        last->button = cur->button;
-                        return BUTTON_MULTIMEDIA_PREV;
+                        if (has_flag(last->softlock_mask, SEL_ACTION_SEEK))
+                        {
+                            left_seeking = true;
+                            cur->action = in_wps ? ACTION_WPS_SEEKBACK : BUTTON_MULTIMEDIA_REW;
+                            last->button = cur->button;
+                            return cur->action;
+                        }
+                    }
+                    else if (is_rel)
+                    {
+                        if (left_seeking)
+                        {
+                            left_seeking = false;
+                            if (in_wps)
+                            {
+                                cur->action = ACTION_WPS_STOPSEEK;
+                                last->button = cur->button;
+                                return ACTION_WPS_STOPSEEK;
+                            }
+                            cur->action = ACTION_NONE;
+                            last->button = cur->button;
+                            return ACTION_NONE;
+                        }
+                        else if (has_flag(last->softlock_mask, SEL_ACTION_SKIP))
+                        {
+                            cur->action = in_wps ? ACTION_WPS_SKIPPREV : BUTTON_MULTIMEDIA_PREV;
+                            last->button = cur->button;
+                            return cur->action;
+                        }
                     }
                 }
                 else if ((raw_btn == BUTTON_SCROLL_FWD || raw_btn == BUTTON_VOL_UP) &&
                          has_flag(last->softlock_mask, SEL_ACTION_VOL))
                 {
-                    cur->action = BUTTON_MULTIMEDIA_VOLUME_UP;
+                    if (is_rel)
+                    {
+                        cur->action = ACTION_NONE;
+                        last->button = cur->button;
+                        return ACTION_NONE;
+                    }
+                    cur->action = in_wps ? ACTION_WPS_VOLUP : BUTTON_MULTIMEDIA_VOLUME_UP;
                     last->button = cur->button;
-                    return BUTTON_MULTIMEDIA_VOLUME_UP;
+                    return cur->action;
                 }
                 else if ((raw_btn == BUTTON_SCROLL_BACK || raw_btn == BUTTON_VOL_DOWN) &&
                          has_flag(last->softlock_mask, SEL_ACTION_VOL))
                 {
-                    cur->action = BUTTON_MULTIMEDIA_VOLUME_DOWN;
+                    if (is_rel)
+                    {
+                        cur->action = ACTION_NONE;
+                        last->button = cur->button;
+                        return ACTION_NONE;
+                    }
+                    cur->action = in_wps ? ACTION_WPS_VOLDOWN : BUTTON_MULTIMEDIA_VOLUME_DOWN;
                     last->button = cur->button;
-                    return BUTTON_MULTIMEDIA_VOLUME_DOWN;
+                    return cur->action;
                 }
             }
             /* Non-center button locked out: swallow completely */
+            right_seeking = false;
+            left_seeking = false;
             cur->action = ACTION_NONE;
             last->button = BUTTON_NONE | BUTTON_REL;
             return ACTION_NONE;
@@ -1415,6 +1496,8 @@ static int get_action_worker(action_last_t *last, action_cur_t *cur)
     {
 #if defined(INNIOASIS_Y1) && !defined(BOOTLOADER)
         waiting_second_center_click = false;
+        right_seeking = false;
+        left_seeking = false;
 #endif
         /* Backlight is ON and keys are not locked */
         if (center_unheld_screen)

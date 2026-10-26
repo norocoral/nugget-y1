@@ -96,6 +96,7 @@
 #endif /* !__PCTOOL__ */
 #include "bookmark.h"
 #include "wps.h"
+#include "cuesheet.h"
 #include "playback.h"
 #include "voice_thread.h"
 
@@ -892,8 +893,27 @@ long default_event_handler_ex(long event, void (*callback)(void *), void *parame
                 return event;
             }
 #endif
-            audio_prev();
+        {
+            struct mp3entry *id3 = audio_current_track();
+            if (id3 && (audio_status() & AUDIO_STATUS_PLAY) && id3->elapsed >= DEFAULT_SKIP_THRESH)
+            {
+                if (id3->cuesheet)
+                {
+                    if (!curr_cuesheet_skip(id3->cuesheet, -1, id3->elapsed))
+                        audio_prev();
+                }
+                else
+                {
+                    audio_pre_ff_rewind();
+                    audio_ff_rewind(0);
+                }
+            }
+            else
+            {
+                audio_prev();
+            }
             return event;
+        }
         case BUTTON_MULTIMEDIA_FFWD:
 #if defined(INNIOASIS_Y1)
             if (y1_bt_is_receiver_mode())
@@ -906,7 +926,10 @@ long default_event_handler_ex(long event, void (*callback)(void *), void *parame
             struct mp3entry *id3 = audio_current_track();
             if (id3 && (audio_status() & AUDIO_STATUS_PLAY))
             {
-                long newpos = id3->elapsed + 5000;
+                long step = 1000 * global_settings.ff_rewind_min_step;
+                if (step <= 0)
+                    step = 5000;
+                long newpos = id3->elapsed + step;
                 if (newpos > (long)id3->length)
                     newpos = id3->length;
                 audio_pre_ff_rewind();
@@ -926,7 +949,10 @@ long default_event_handler_ex(long event, void (*callback)(void *), void *parame
             struct mp3entry *id3 = audio_current_track();
             if (id3 && (audio_status() & AUDIO_STATUS_PLAY))
             {
-                long newpos = (long)id3->elapsed - 5000;
+                long step = 1000 * global_settings.ff_rewind_min_step;
+                if (step <= 0)
+                    step = 5000;
+                long newpos = (long)id3->elapsed - step;
                 if (newpos < 0)
                     newpos = 0;
                 audio_pre_ff_rewind();
