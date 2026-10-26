@@ -128,7 +128,7 @@ void y1_early_load_resolution(void)
     for (int i = 0; paths[i]; i++) {
         FILE *fp = fopen(paths[i], "r");
         if (fp) {
-            char line[128];
+            char line[512];
             while (fgets(line, sizeof(line), fp)) {
                 if (strncmp(line, "y1 screen resolution:", 21) == 0) {
                     const char *val = line + 21;
@@ -240,7 +240,7 @@ const char* setting_get_cfgvals(const struct settings_list *setting)
 /* calculates and stores crc of settings, returns true if settings have changed */
 static bool settings_crc_changed(void)
 {
-    char value[MAX_PATH];
+    char value[512];
     uint32_t custom_crc = 0xFFFFFFFF;
     for(int i=0; i<nb_settings; i++)
     {
@@ -476,7 +476,7 @@ bool settings_load_config(const char* file, bool apply)
 {
     logf("%s()\r\n", __func__);
     int fd;
-    char line[128];
+    char line[1024];
     bool theme_changed = false;
     bool import_open_plugins = false;
     fd = open_utf8(file, O_RDONLY);
@@ -665,7 +665,7 @@ static bool settings_write_config(const char* filename, int options)
     logf("%s\r\n", __func__);
     int i;
     int fd;
-    char value[MAX_PATH];
+    char value[512];
     fd = open(filename,O_CREAT|O_TRUNC|O_WRONLY, 0666);
     if (fd < 0)
         return false;
@@ -724,7 +724,7 @@ static bool settings_write_config(const char* filename, int options)
                 break;
             }
         }
-        cfg_to_string(setting, value, MAX_PATH);
+        cfg_to_string(setting, value, sizeof(value));
         logf("Written: '%s: %s'\r\n",setting->cfg_name, value);
 
         fdprintf(fd,"%s: %s\r\n",setting->cfg_name,value);
