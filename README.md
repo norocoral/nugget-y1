@@ -45,7 +45,6 @@ https://github.com/norocoral/nugget-y1-tool
 ### Manual Installation
 1. Obtain `boot_rockbox.img` and `rockbox_sdcard.zip`.
 2. Flash `boot_rockbox.img` to the `boot` partition using:
-   - Innioasis Updater CE: Select *Nugget for Y1* and follow the prompt.
    - SP Flash Tool: Load MT6572 scatter, check `BOOTIMG`, select `boot_rockbox.img`, click Download, and connect Y1 holding Volume Down.
    - Fastboot / python-mtk:
      ```bash
