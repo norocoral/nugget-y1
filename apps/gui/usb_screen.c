@@ -115,6 +115,13 @@ static void handle_usb_events(struct viewport *title)
             reset_runtime();
 
 #if defined(INNIOASIS_Y1)
+        if (y1_usb_check_host_ejected())
+        {
+            /* Host PC safely ejected media: transition immediately to charge-only mode */
+            y1_usb_eject_to_charge_only();
+            return;
+        }
+
         if (button_status() & BUTTON_SELECT)
         {
             if (center_press_start == 0)

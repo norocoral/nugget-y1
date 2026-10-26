@@ -120,8 +120,11 @@ Inputs are mapped from Linux input events:
 
 ## 6. USB Gadget & Charge-Only Switching
 
-- Mass Storage: Managed by the Linux USB gadget subsystem exposing `/dev/block/mmcblk1p1`.
+- Mass Storage: Managed by the Linux USB gadget subsystem exposing `/dev/block/mmcblk1` (or `mmcblk1p1`) via `/sys/class/android_usb/android0/f_mass_storage/`.
 - Charge-Only Mode: In `apps/gui/usb_screen.c`, holding the Center button for 1 second (`BUTTON_SELECT` with repeat duration $\ge 1000\text{ ms}$) tears down the USB mass storage gadget and remounts the SD card read-write for Rockbox, allowing playback while charging.
+- Host PC Ejection & Re-Attachment Fix:
+  - **Problem:** When ejecting the device from a host PC (SCSI `START_STOP` command with LoEj bit set), the downstream Linux kernel `f_mass_storage` driver closed the backing file (`fsg_lun_close`), clearing `lun0/file` to an empty string. Subsequent connections or reconnects left `lun0/file` empty, presenting a generic empty card reader to Windows ("Please insert a disk into USB Drive").
+  - **Fix:** In `firmware/target/hosted/innioasis/y1/usb-y1.c`, `y1_usb_attach_storage()` dynamically probes `/dev/block/mmcblk1` and binds it to `lun0/file` whenever entering USB slave mode (`usb_enable(true)` / `disk_unmount_all()`), re-enabling the gadget. In `apps/gui/usb_screen.c`, `y1_usb_check_host_ejected()` monitors `lun0/file`; when the host PC safely ejects the volume, the device immediately transitions to charge-only mode, unbinds the gadget, and returns to Rockbox playback.
 
 ---
 
@@ -131,4 +134,28 @@ To maintain open-source compliance:
 - Proprietary blobs (`bt_blobs/`, `stock_unpacked/`, `logo.bin`, and all `*.ko` kernel objects) are excluded from Git via `.gitignore`.
 - Custom code, reverse-engineered utilities (`unmute_eac.c`, `mkbootimg_mtk.py`), scripts, and Rockbox target drivers remain tracked.
 - The build orchestrator (`build.py` / `build.sh`) unpacks required kernel binaries from `!stock_rom/boot.img` dynamically when building.
+
+---
+
+## 8. Sample Rate Switching & Phase Alignment Degradation Bug
+
+### 8.1 Symptom
+Rapid or repeated switching between audio tracks with differing sample rates (e.g. 44.1 kHz $\leftrightarrow$ 48.0 kHz) caused audible sound degradation: the presentation grew increasingly muddy, vocal definition in the center vanished, and the soundstage receded into the distance without a drop in overall RMS playback volume.
+
+### 8.2 Root Cause
+1. **Stereo Frame Misalignment in Partial Writes:**
+   The `pcm_worker` write loop previously rounded partial byte counts down using `written &= ~3`. The kernel circular buffer kept the unaligned count while user-space advanced by the rounded count. Subsequent writes started at an odd 2-byte boundary, inverting Left and Right stereo channels and shifting one channel by 1 sample ($d \approx 22.7\,\mu\text{s}$). The resulting inter-channel phase shift produced severe center cancellation and comb filtering.
+2. **PMIC FIR Interpolator State Corruption:**
+   Writing new clock divisors to PMIC NewIF (`0x4024`) and PMIC Codec DL (`0x4002`) while PMIC Downlink (`0x4014`) and Master (`0x4000`) were active corrupted the internal FIR digital filter state in the MT6323.
+3. **Stuck PMIC CDC Sync Trigger:**
+   In `top_ctl_trigger()`, the expression `toggle = ((~val) << 8) & 0x300` failed to toggle bits 8 and 9 because bits 0 and 1 of `0x4016` read zero, permanently disabling CDC clock resynchronization after boot.
+4. **Kernel Ring Buffer Stale Frame Bleed:**
+   Changing clock frequencies without resetting the 32 KB coherent DL1 buffer caused residual audio frames from the previous track to clock out at the new rate from unaligned offsets.
+
+### 8.3 Fix Details
+- **Frame Alignment Guarantee:** When `written & 3 != 0`, zero padding (`4 - unaligned` bytes) is written directly to `/dev/eac` to restore ring buffer alignment. User buffer pointers advance by `written + pad_len` to keep all subsequent frames 4-byte aligned.
+- **PMIC Gating & FIR Reset:** `sink_set_freq()` disables `0x4014` and `0x4000` prior to modifying rate registers, resets PMIC digital gains (`0x4006`, `0x4008`), and re-enables master control cleanly.
+- **DL1 Ring Buffer Reallocation:** `AUDDRV_FREE_DL1_BUF`, `AUDDRV_ALLOCATE_DL1_BUF`, and `SET_MEMIF_FP` reset kernel read and write pointers to 0 on sample rate changes.
+- **CDC Trigger XOR Toggle:** `top_ctl_trigger()` uses `(val ^ 0x300) & 0x300` in `pcm-eac.c` and `unmute_eac.c`.
+- **Concurrency Protection:** `sink_set_freq()` is protected with `sink_lock()` / `sink_unlock()` and clears `pcm_data` under `pcm_mtx`.
 

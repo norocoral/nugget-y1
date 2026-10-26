@@ -53,7 +53,7 @@ static inline unsigned int get_anareg(int fd, unsigned int offset)
 static inline void top_ctl_trigger(int fd)
 {
     unsigned int val = get_anareg(fd, 0x4016);
-    unsigned int toggle = ((~val) << 8) & 0x300;
+    unsigned int toggle = (val ^ 0x300) & 0x300;
     set_anareg(fd, 0x4016, toggle, 0x300);
 }
 

@@ -63,3 +63,27 @@ The 3.5mm jack uses an analog impedance sensing switch wired to the `accdet` dri
 - Disconnect: Monitored via `/sys/class/switch/h2w/state`. When unplugged, Rockbox immediately invokes `pause_action()`.
 - Reconnect: Playback resumes automatically when enabled in `Settings -> Playback Settings -> Pause on Headphone Unplug`.
 
+---
+
+## 6. Sample Rate Switching & Inter-Channel Phase Synchronization
+
+### 6.1 Frequency Switching Audio Degradation
+Repeated switching between tracks of different sample rates (e.g., 44.1 kHz $\leftrightarrow$ 48.0 kHz) led to progressive audio quality loss: vocals lost center presence, high frequencies suffered comb filtering, and the stereo image collapsed into a diffuse background reverberation ("muddier sound getting further away") despite unchanged RMS level.
+
+### 6.2 Root Cause Analysis
+1. **Inter-Channel Frame Alignment Desynchronization (`pcm_worker`):**
+   When `write(eac_fd)` returned a partial byte count (non-multiple of 4), `written &= ~3` stripped unaligned bytes from the user-space counter while the kernel circular buffer advanced by the unaligned count. On the subsequent write iteration, the user-space buffer offset started at a 2-byte misaligned boundary, swapping Left and Right channels and introducing a 1-sample inter-channel time delay ($d = 1 / f_s \approx 22.7\,\mu\text{s}$). With successive rate transitions, this phase shift accumulated, producing severe comb filtering and destructive center-channel cancellation.
+2. **PMIC FIR Reconstruction Filter Corruption:**
+   Reconfiguring `AFE_PMIC_NEWIF_CFG0` (0x108), `AFE_I2S_CON1` (0x34), PMIC NewIF frequency (`0x4024`), and PMIC Codec rate (`0x4002`) while PMIC Downlink (`0x4014`) and PMIC Audio Digital Master (`0x4000`) were active disrupted the internal FIR decimation and interpolation filter delay lines in the MT6323, corrupting the reconstruction filter state.
+3. **Stuck PMIC CDC Clock Sync Trigger:**
+   The function `top_ctl_trigger()` calculated `toggle = ((~val) << 8) & 0x300` using register `0x4016`. Because bits 0 and 1 of `0x4016` read zero, shifting by 8 produced a constant `0x300`, preventing the necessary clock sync edge on subsequent transitions.
+4. **Kernel Ring Buffer Stale Data & Unaligned Pointers:**
+   Changing clock rates without resetting the 32 KB coherent DL1 DMA buffer left stale samples from the previous song playing at the new clock rate and allowed kernel read/write pointers to begin at arbitrary non-zero offsets. Concurrently, `sink_set_freq()` ran without holding `sink_lock()`, allowing `pcm_worker` to write audio data during hardware register programming.
+
+### 6.3 Implementation
+- **Zero-Padding Frame Alignment:** In `pcm_worker`, when `written & 3 != 0`, zero padding (`4 - unaligned` bytes) is written directly to `/dev/eac` to restore the kernel ring buffer to a 4-byte boundary. User-space pointers advance by the full frame size (`written + pad_len`), maintaining 4-byte stereo alignment and eliminating channel swapping or phase delay.
+- **PMIC Gating:** In `sink_set_freq()`, PMIC downlink (`0x4014`) and master (`0x4000`) are gated to 0 before altering sample rate dividers, and re-enabled after registers and digital gain (`0x4006`, `0x4008` = 0 dB) are settled.
+- **Ring Buffer Pointer Reset:** On sample rate changes, `AUDDRV_FREE_DL1_BUF`, `AUDDRV_ALLOCATE_DL1_BUF`, and `SET_MEMIF_FP` reset kernel circular buffer pointers to 0.
+- **Toggling CDC Clock Trigger:** In `pcm-eac.c` and `unmute_eac.c`, `top_ctl_trigger()` toggles clock sync bits using `(val ^ 0x300) & 0x300`.
+- **Concurrency Locking:** `sink_set_freq()` is wrapped in `sink_lock()` and `sink_unlock()`, clearing `pcm_data` under `pcm_mtx` so Rockbox feeds newly aligned frames only after hardware stabilization.
+

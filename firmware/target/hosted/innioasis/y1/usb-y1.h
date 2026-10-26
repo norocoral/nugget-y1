@@ -14,8 +14,9 @@
 
 #include <stdbool.h>
 
+void y1_usb_attach_storage(void);
 void y1_usb_eject_to_charge_only(void);
 bool y1_is_charge_only_mode(void);
+bool y1_usb_check_host_ejected(void);
 
 #endif /* _USB_Y1_H_ */
-
