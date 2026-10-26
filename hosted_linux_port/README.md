@@ -1,27 +1,114 @@
 # Hosted Rockbox on Minimal Linux (Innioasis Y1)
 
-This folder contains the build environment, minimal Linux initramfs, hardware audio/display support, and packaging tools for the **Innioasis Y1** Rockbox port. The boot image contains Linux startup and hardware support; the Rockbox executable and its system files live on the physical MicroSD card.
+This directory contains the build system, minimal Linux initramfs, hardware abstraction drivers, and packaging tools for the Innioasis Y1 Rockbox port. The flashable boot image contains the Linux kernel and early startup logic; the Rockbox executable and system assets reside on the external MicroSD card.
+
+---
+
+## Technical Documentation
+
+Detailed subsystem specifications and reverse engineering notes are located in [`docs/`](docs/):
+- [Technical Findings](docs/TECHNICAL_FINDINGS.md): Reverse-engineered hardware interfaces, EAC audio driver, PMIC registers, power tuning, input quirks, and boot latency analysis.
+- [System Architecture](docs/ARCHITECTURE.md): Component diagrams, boot sequence flow, storage hierarchy, and HAL mapping.
+- [Audio Subsystem](docs/AUDIO_SUBSYSTEM.md): `/dev/eac` interface, bit-perfect 44.1/48kHz playback, pop elimination, and gain staging.
+- [Power Management](docs/POWER_MANAGEMENT.md): Idle battery drain fixes, CPU frequency governors, core offlining, and Always-On Display.
+
+---
 
 ## Directory Structure
-- `initramfs/`: PID 1 `/init` in C. Discovers and mounts physical MicroSD storage at boot, exposes it to a PC through USB Mass Storage, and displays framebuffer status screens using RAW images. USB OTG mounting and post-boot storage hotplug detection are not supported.
-- `audio/`: standalone `unmute_eac.c` hardware audio test utility.
-- `rootfs/`: Skeleton for the minimal initramfs ramdisk. It does not contain the Rockbox executable or `.rockbox` system directory.
-- `stock_unpacked/`: Extracted stock kernel (`kernel_mtk.bin`).
-- `tools/`: Build scripts, splash image converter (`convert_splash.py`), MTK boot image packer (`mkbootimg_mtk.py`), and CPIO ramdisk generator.
-- `rockbox_sdcard.zip`: SD-card payload containing `.rockbox/rockbox`, Rockbox system files, RAW status screens, and bundled Bluetooth assets.
-- `release/`: Flashable `boot_rockbox.img`, SD-card payload, SHA256 checksums, and release notes.
 
-## Building
+- `docs/`: Technical specifications, architecture designs, and hardware findings.
+- `initramfs/`: PID 1 `/init` in C. Handles boot CPU boosting, reactive MicroSD discovery, framebuffer status screens, and handoff to Rockbox.
+- `audio/`: Standalone `unmute_eac.c` test utility and `init_audio.sh` setup script.
+- `splash/`: Source PNG status screens (`boot.png`, `connect.png`, `errconnect.png`, `error.png`, `sdcard.png`).
+- `Themify2/`: Pre-bundled custom Rockbox theme, fonts, icons, and codecs for the SD card distribution.
+- `tools/`: Build scripts, splash image converter (`convert_splash.py`), MTK boot image packer (`mkbootimg_mtk.py`), and CPIO ramdisk generator (`build_initramfs.py`).
+- `rootfs/`: (Generated during build) Skeleton for the minimal initramfs ramdisk.
+- `stock_unpacked/`: (Generated during build) Extracted vendor kernel (`kernel_mtk.bin`), excluded from Git tracking.
+- `bt_blobs/`: MediaTek Bluetooth kernel modules and firmware patches, excluded from Git tracking.
+
+---
+
+## Building from Source
+
+### Prerequisites (Ubuntu / Debian / WSL)
 ```bash
+sudo apt update
+sudo apt install -y build-essential gcc-arm-linux-gnueabihf python3 python3-pip zip curl
+```
+
+### Build Command
+```bash
+cd hosted_linux_port
 ./build.sh
 ```
 
-Run the full build in WSL or Linux with the ARM hard-float cross toolchain, Python 3, and `zip` installed. It builds the Rockbox executable, places it at `.rockbox/rockbox` inside `rockbox_sdcard.zip`, and converts source status PNGs to RAW. PNG entries remain in the SD archive; startup displays the RAW files.
+### Build Process
+1. **Kernel Extraction:** If `stock_unpacked/kernel_mtk.bin` is missing, `build.sh` locates `!stock_rom/boot.img` and extracts the vendor kernel using `tools/mkbootimg_mtk.py`.
+2. **PID 1 Compilation:** Compiles `initramfs/init.c` with `arm-linux-gnueabihf-gcc` and copies minimal shared libraries into `rootfs/lib/`.
+3. **Splash Assets:** Converts PNG images in `splash/` into raw 32-bit framebuffer files.
+4. **Rockbox Compilation:** Builds the Rockbox executable targeting the Innioasis Y1 (`build_y1/`).
+5. **SD Payload Assembly:** Packages `.rockbox/rockbox`, codecs, fonts, and themes into `rockbox_sdcard.zip`.
+6. **Boot Image Packaging:** Assembles `ramdisk_rockbox.img` (gzip + MTK header) and packages `boot_rockbox.img` with MTK boot headers (max 6 MiB).
 
-From this directory, `build.sh` and `build.py` search parent directories for the workspace containing `!stock_rom`. Set `WORKSPACE_ROOT` if the workspace cannot be discovered automatically, or set `STOCK_BOOT` to use a different stock `boot.img` path.
+---
 
-Flash `boot_rockbox.img` to the boot partition, then extract `rockbox_sdcard.zip` to the root of the physical MicroSD card. The card must contain `.rockbox/rockbox` and the rest of `.rockbox`; internal eMMC is never used for Rockbox files. Startup waits on the RAW SD-card status screen if the card or executable is missing.
+## Proprietary Blob Handling
 
-Y1 diagnostic logging is disabled by default. Enable **Settings → Nugget → Device → Diagnostic Logging** to append init, display, audio, Bluetooth, button, and suspend diagnostics to `/mnt/sdcard/y1_debug.txt`. The setting is stored in `.rockbox/config.cfg`; init reads it at boot to decide whether to write startup diagnostics.
+To comply with open-source licensing:
+- MediaTek proprietary binaries (`bt_blobs/`, `stock_unpacked/`, `logo.bin`, and all `*.ko` kernel objects) are excluded from Git via `.gitignore`.
+- All custom C code, reverse-engineered tools, Python build scripts, and Rockbox port drivers remain tracked.
 
-`build.py` assembles the boot image from an existing `rockbox_sdcard.zip` and requires the same ARM cross toolchain to compile PID 1. It refuses to build if the archive does not contain `.rockbox/rockbox`.
+---
+
+## Diagnostic Logging
+
+Y1 diagnostic logging is disabled by default. Enable **Settings -> Nugget -> Device -> Diagnostic Logging** to append init, display, audio, Bluetooth, button, and suspend diagnostics to `/mnt/sdcard/y1_debug.txt`. The setting is stored in `.rockbox/config.cfg`; `/init` reads it at boot to decide whether to output startup diagnostics.
+
+---
+
+## Hardware Controls
+
+| Control | Action | Function |
+| :--- | :--- | :--- |
+| Click Wheel | Rotate | Scroll lists / adjust volume in WPS |
+| Center Button | Short Press | Select / activate menu item |
+| Center Button | Long Press (1s) | Open Context Menu for active track/file |
+| Center Button | Short Press (Screen Off) | Unhold and wake screen (click is cleanly swallowed) |
+| Center Button | Long Press (1s on USB screen) | Eject Mass Storage and switch to Charge-Only mode |
+| Menu Button | Short Press | Return to parent menu / back |
+| Menu Button | Long Press | Open Rockbox Quick Screen settings |
+| Play Button | Short Press | Play / Pause toggle |
+| Play Button | Long Press | Stop playback |
+| Left Button | Short Press | Rewind to track start if $\ge 3\text{s}$; skip to previous track if $< 3\text{s}$ |
+| Left Button | Long Press | Seek backward |
+| Right Button | Short Press | Skip to next track |
+| Right Button | Long Press | Seek forward |
+| Side Buttons | Press | Volume Up / Down (1 dB steps) |
+| Headphone Remote (MFB) | In-line Clicks | Single, double, triple clicks & hold actions (configurable in Settings) |
+
+## Diagnostic Logging
+
+Y1 diagnostic logging is disabled by default. Enable **Settings -> Nugget -> Device -> Diagnostic Logging** to append init, display, audio, Bluetooth, button, and suspend diagnostics to `/mnt/sdcard/y1_debug.txt`. The setting is stored in `.rockbox/config.cfg`; `/init` reads it at boot to decide whether to output startup diagnostics.
+
+---
+
+## Hardware Controls
+
+| Control | Action | Function |
+| :--- | :--- | :--- |
+| Click Wheel | Rotate | Scroll lists / adjust volume in WPS |
+| Center Button | Short Press | Select / activate menu item |
+| Center Button | Long Press (1s) | Open Context Menu for active track/file |
+| Center Button | Short Press (Screen Off) | Unhold and wake screen (click is cleanly swallowed) |
+| Center Button | Long Press (1s on USB screen) | Eject Mass Storage and switch to Charge-Only mode |
+| Menu Button | Short Press | Return to parent menu / back |
+| Menu Button | Long Press | Open Rockbox Quick Screen settings |
+| Play Button | Short Press | Play / Pause toggle |
+| Play Button | Long Press | Stop playback |
+| Left Button | Short Press | Rewind to track start if $\ge 3\text{s}$; skip to previous track if $< 3\text{s}$ |
+| Left Button | Long Press | Seek backward |
+| Right Button | Short Press | Skip to next track |
+| Right Button | Long Press | Seek forward |
+| Side Buttons | Press | Volume Up / Down (1 dB steps) |
+| Headphone Remote (MFB) | In-line Clicks | Single, double, triple clicks & hold actions (configurable in Settings) |
+
