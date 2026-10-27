@@ -69,7 +69,8 @@ enum {
     GO_TO_PICTUREFLOW,
 #endif
 #if defined(INNIOASIS_Y1)
-    GO_TO_BT_RECEIVER
+    GO_TO_BT_RECEIVER,
+    GO_TO_VIDEOS
 #endif
 };
 #ifndef PLUGIN

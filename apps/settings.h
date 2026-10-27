@@ -974,6 +974,12 @@ struct user_settings
     bool bt_receiver_auto_start;
     bool bt_receiver_auto_connect;
     bool bt_receiver_full_volume;
+    char y1_video_dir[MAX_PATHNAME+1];
+    int  y1_video_resume;
+    int  y1_video_aspect;
+    int  y1_video_skip_step;
+    bool y1_video_autoplay_next;
+    bool y1_video_show_thumbs;
 #endif
 #if !defined(SIMULATOR) && !defined(USB_NONE) && (defined(HAVE_USB_ADB) || defined(HAVE_USB_POWER))
     int usb_mode;

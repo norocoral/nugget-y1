@@ -1339,11 +1339,15 @@ int main(int argc, char *argv[])
         display_screen("boot");
         last_screen = "boot";
 
+        /* Ensure default Videos directory exists on MicroSD card */
+        mkdir("/mnt/sdcard/Videos", 0777);
+
         /* Link all MicroSD user files/directories to root / for plugins */
         link_sdcard_to_root();
 
         /* Launch Rockbox executable */
         setenv("PATH", "/bin:/sbin:/usr/bin:/usr/sbin", 1);
+        setenv("LD_LIBRARY_PATH", "/mnt/sdcard/.rockbox/lib:/lib:/usr/lib", 1);
         setenv("HOME", "/mnt/sdcard", 1);
         setenv("TERM", "linux", 1);
 

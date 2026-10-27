@@ -343,6 +343,11 @@ static inline bool action_poll_button(action_last_t *last, action_cur_t *cur)
     bool ret = true;
     int *button = &cur->button;
 
+#if defined(INNIOASIS_Y1)
+    extern void y1_bt_process_pending_audio_events(void);
+    y1_bt_process_pending_audio_events();
+#endif
+
     *button = button_get_w_tmo(cur->timeout);
 
    /* ********************************************************
@@ -360,13 +365,23 @@ static inline bool action_poll_button(action_last_t *last, action_cur_t *cur)
         *button = ACTION_REDRAW;
         return true;
     }
-   /* *************************************************
-    * If waiting for release, Don't send any buttons
-    * through until we see the release event
-    */
+    /* *************************************************
+     * If waiting for release, Don't send any buttons
+     * through until we see the release event
+     */
     if (last->wait_for_release)
     {
-        if (has_flag(*button, BUTTON_REL))
+        if (button_status() == 0)
+        {
+            /* No physical keys are held down; release state has cleared */
+            last->wait_for_release = false;
+        }
+
+        if (!last->wait_for_release)
+        {
+            /* Cleared */
+        }
+        else if (has_flag(*button, BUTTON_REL))
         { /* remember the button for button eating on context change */
             last->wait_for_release = false;
             last->button = *button;
@@ -408,6 +423,12 @@ static inline bool action_poll_button(action_last_t *last, action_cur_t *cur)
     */
     else if ((cur->context != last->context) && ((last->button & BUTTON_REL) == 0))
     {
+        if (button_status() == 0)
+        {
+            /* No physical button is being held across context switch */
+            last->button |= BUTTON_REL;
+        }
+
         if (has_flag(*button, BUTTON_REL))
         {
             last->button = *button;

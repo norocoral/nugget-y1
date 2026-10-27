@@ -80,6 +80,7 @@ void y1_bt_a2dp_write_pcm(const void *buf, size_t bytes, unsigned long sampr);
 
 void y1_bt_audio_disconnect_hook(void);
 void y1_bt_audio_connect_hook(void);
+void y1_bt_process_pending_audio_events(void);
 void y1_bt_store_active_volume(int vol);
 int  y1_bt_get_active_device_volume(void);
 void y1_bt_update_metadata(const char *title, const char *artist,

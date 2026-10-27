@@ -90,6 +90,7 @@ static pthread_mutex_t pcm_mtx = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t pcm_cond = PTHREAD_COND_INITIALIZER;
 
 static void sink_set_freq(uint16_t freq);
+static void program_hw_sampr(unsigned long sampr);
 static bool y1_set_deep_idle(bool enable);
 static void y1_audio_set_output_enabled(bool enable);
 static int vol_cb_to_hp_idx(int vol_cb);
@@ -418,7 +419,8 @@ static void y1_audio_set_output_enabled(bool enable)
     set_anareg(eac_fd, 0x10c, 0x100, 0x100);
     set_afereg(eac_fd, 0x10, 1, 1);
     audio_output_enabled = true;
-    sink_set_freq((uint16_t)current_sampr);
+    if (current_sampr && programmed_sampr != current_sampr)
+        program_hw_sampr(current_sampr);
 
     /* Power up Downlink DAC & analog L/R paths */
     set_anareg(eac_fd, 0x700, 0x7800, 0x7f80);
@@ -845,6 +847,148 @@ static void sink_dma_postinit(void)
     y1_bt_init();
 }
 
+static void program_hw_sampr(unsigned long sampr)
+{
+    if (eac_fd < 0)
+        return;
+
+    uint32_t dac_con1;
+    uint32_t rate_code;
+    uint32_t pmic_newif_rate;
+
+    char fmsg[96];
+    snprintf(fmsg, sizeof(fmsg), "[pcm-eac] program_hw_sampr: %lu Hz\n", sampr);
+    log_audio_debug(fmsg);
+
+    switch (sampr)
+    {
+        case 48000:
+            dac_con1 = 0x83001803;
+            rate_code = 10;
+            pmic_newif_rate = 8;
+            break;
+        case 32000:
+            dac_con1 = 0x63001803;
+            rate_code = 8;
+            pmic_newif_rate = 6;
+            break;
+        case 24000:
+            dac_con1 = 0x53001803;
+            rate_code = 6;
+            pmic_newif_rate = 5;
+            break;
+        case 22050:
+            dac_con1 = 0x43001803;
+            rate_code = 5;
+            pmic_newif_rate = 4;
+            break;
+        case 16000:
+            dac_con1 = 0x33001823;
+            rate_code = 4;
+            pmic_newif_rate = 3;
+            break;
+        case 12000:
+            dac_con1 = 0x23001803;
+            rate_code = 2;
+            pmic_newif_rate = 2;
+            break;
+        case 11025:
+            dac_con1 = 0x13001803;
+            rate_code = 1;
+            pmic_newif_rate = 1;
+            break;
+        case 8000:
+            dac_con1 = 0x03001823;
+            rate_code = 0;
+            pmic_newif_rate = 0;
+            break;
+        case 44100:
+        default:
+            dac_con1 = 0x73001803;
+            rate_code = 9;
+            pmic_newif_rate = 7;
+            break;
+    }
+
+    /* 1. Pause DL1 DMA during clock and PLL reconfiguration */
+    set_afereg(eac_fd, 0x10, 0, 1 << 1);
+
+    /* 2. Gate PMIC digital audio paths before reconfiguring clock dividers.
+     * MT6323 internal digital FIR interpolation filters corrupt their history
+     * state if sample rate dividers change while the processing pipeline is active. */
+    set_anareg(eac_fd, 0x4014, 0, 1);  /* Disable PMIC downlink channel */
+    set_anareg(eac_fd, 0x4000, 0, 1);  /* Disable PMIC Audio Digital Master */
+
+    /* 3. Flush and reset coherent DL1 DMA ring buffer pointers to byte 0.
+     * Eliminates stale frames from the previous track and synchronizes hardware
+     * and kernel pointers. */
+    ioctl(eac_fd, FREE_MEMIF_FP, 0);
+    ioctl(eac_fd, AUDDRV_FREE_DL1_BUF, 0);
+    ioctl(eac_fd, AUDDRV_ALLOCATE_DL1_BUF, 32768);
+    ioctl(eac_fd, SET_MEMIF_FP, 0);
+
+    /* 4. Configure AFE digital interconnections: DL1 -> I2S Out */
+    set_afereg(eac_fd, 0x24, 1 << 21, 1 << 21);
+    set_afereg(eac_fd, 0x28, 1 << 6,  1 << 6);
+
+    bool rate_programmed = true;
+
+    /* 5. DL1 sample rate in AFE_DAC_CON1 (0x14 bits 0..3) */
+    if (set_afereg(eac_fd, 0x14, rate_code, 0x0f) < 0)
+        rate_programmed = false;
+
+    /* 6. IRQ1 sample rate in AFE_IRQ_MCU_CON (0x3a0 bits 4..7) & enable (bit 0) */
+    if (set_afereg(eac_fd, 0x3a0, (rate_code << 4) | 1, 0xf1) < 0)
+        rate_programmed = false;
+
+    /* 7. IRQ1 period count in AFE_IRQ_MCU_CNT1 (0x3ac) = 1024 samples */
+    if (set_afereg(eac_fd, 0x3ac, 1024, ~0U) < 0)
+        rate_programmed = false;
+
+    /* 8. PMIC New IF DAC output config (0x108) */
+    if (set_afereg(eac_fd, 0x108, dac_con1, ~0U) < 0)
+        rate_programmed = false;
+
+    /* 9. I2S Out format & sample rate (AFE_I2S_CON1 / 0x34).
+     * Bits[11:8] = rate, bits[3:0] = 0x9 (bit 0 I2S enable, bit 3 16-bit). */
+    if (set_afereg(eac_fd, 0x34, (rate_code << 8) | 0x09, ~0U) < 0)
+        rate_programmed = false;
+
+    /* 10. PMIC NewIF Downlink Frequency (0x4024) */
+    if (set_anareg(eac_fd, 0x4024, (pmic_newif_rate << 12) | 0x330, 0xffff) < 0)
+        rate_programmed = false;
+
+    /* 11. PMIC Codec Downlink Sampling Rate (0x4002) */
+    if (set_anareg(eac_fd, 0x4002, rate_code, 0x0f) < 0)
+        rate_programmed = false;
+
+    /* 12. Reset digital gain registers to 0 dB unity gain */
+    set_anareg(eac_fd, 0x4006, 0, 0xffff);
+    set_anareg(eac_fd, 0x4008, 0, 0xffff);
+
+    /* 13. Re-enable PMIC Downlink channel */
+    set_anareg(eac_fd, 0x4014, 1, 1);
+
+    /* 14. Trigger PMIC TopCtl Clock Synchronization */
+    top_ctl_trigger(eac_fd);
+
+    /* 15. Re-enable PMIC Audio Digital Master */
+    set_anareg(eac_fd, 0x4000, 1, 1);
+
+    usleep(5000);
+
+    /* Resume DL1 DMA if playback was active */
+    if (dma_stopped == 0 && audio_output_enabled)
+    {
+        set_afereg(eac_fd, 0x10, 1 << 1, 1 << 1);
+    }
+
+    if (rate_programmed)
+        programmed_sampr = sampr;
+    else
+        log_audio_debug("[pcm-eac] Failed to program one or more sample-rate registers; will retry.\n");
+}
+
 static void sink_set_freq(uint16_t freq)
 {
     unsigned long sampr = (freq < HW_NUM_FREQ) ? hw_freq_sampr[freq] : freq;
@@ -856,150 +1000,7 @@ static void sink_set_freq(uint16_t freq)
 
     if (eac_fd >= 0 && audio_output_enabled)
     {
-        sink_lock();
-
-        pthread_mutex_lock(&pcm_mtx);
-        pcm_data = NULL;
-        pcm_size = 0;
-        pthread_mutex_unlock(&pcm_mtx);
-
-        uint32_t dac_con1;
-        uint32_t rate_code;
-        uint32_t pmic_newif_rate;
-
-        char fmsg[96];
-        snprintf(fmsg, sizeof(fmsg), "[pcm-eac] sink_set_freq: raw=%u -> sampr=%lu Hz\n", freq, sampr);
-        log_audio_debug(fmsg);
-
-        switch (sampr)
-        {
-            case 48000:
-                dac_con1 = 0x83001803;
-                rate_code = 10;
-                pmic_newif_rate = 8;
-                break;
-            case 32000:
-                dac_con1 = 0x63001803;
-                rate_code = 8;
-                pmic_newif_rate = 6;
-                break;
-            case 24000:
-                dac_con1 = 0x53001803;
-                rate_code = 6;
-                pmic_newif_rate = 5;
-                break;
-            case 22050:
-                dac_con1 = 0x43001803;
-                rate_code = 5;
-                pmic_newif_rate = 4;
-                break;
-            case 16000:
-                dac_con1 = 0x33001823;
-                rate_code = 4;
-                pmic_newif_rate = 3;
-                break;
-            case 12000:
-                dac_con1 = 0x23001803;
-                rate_code = 2;
-                pmic_newif_rate = 2;
-                break;
-            case 11025:
-                dac_con1 = 0x13001803;
-                rate_code = 1;
-                pmic_newif_rate = 1;
-                break;
-            case 8000:
-                dac_con1 = 0x03001823;
-                rate_code = 0;
-                pmic_newif_rate = 0;
-                break;
-            case 44100:
-            default:
-                dac_con1 = 0x73001803;
-                rate_code = 9;
-                pmic_newif_rate = 7;
-                break;
-        }
-
-        /* 1. Pause DL1 DMA during clock and PLL reconfiguration */
-        set_afereg(eac_fd, 0x10, 0, 1 << 1);
-
-        /* 2. Gate PMIC digital audio paths before reconfiguring clock dividers.
-         * MT6323 internal digital FIR interpolation filters corrupt their history
-         * state if sample rate dividers change while the processing pipeline is active. */
-        set_anareg(eac_fd, 0x4014, 0, 1);  /* Disable PMIC downlink channel */
-        set_anareg(eac_fd, 0x4000, 0, 1);  /* Disable PMIC Audio Digital Master */
-
-        /* 3. Flush and reset coherent DL1 DMA ring buffer pointers to byte 0.
-         * Eliminates stale frames from the previous track and synchronizes hardware
-         * and kernel pointers. */
-        ioctl(eac_fd, FREE_MEMIF_FP, 0);
-        ioctl(eac_fd, AUDDRV_FREE_DL1_BUF, 0);
-        ioctl(eac_fd, AUDDRV_ALLOCATE_DL1_BUF, 32768);
-        ioctl(eac_fd, SET_MEMIF_FP, 0);
-
-        /* 4. Configure AFE digital interconnections: DL1 -> I2S Out */
-        set_afereg(eac_fd, 0x24, 1 << 21, 1 << 21);
-        set_afereg(eac_fd, 0x28, 1 << 6,  1 << 6);
-
-        bool rate_programmed = true;
-
-        /* 5. DL1 sample rate in AFE_DAC_CON1 (0x14 bits 0..3) */
-        if (set_afereg(eac_fd, 0x14, rate_code, 0x0f) < 0)
-            rate_programmed = false;
-
-        /* 6. IRQ1 sample rate in AFE_IRQ_MCU_CON (0x3a0 bits 4..7) & enable (bit 0) */
-        if (set_afereg(eac_fd, 0x3a0, (rate_code << 4) | 1, 0xf1) < 0)
-            rate_programmed = false;
-
-        /* 7. IRQ1 period count in AFE_IRQ_MCU_CNT1 (0x3ac) = 1024 samples */
-        if (set_afereg(eac_fd, 0x3ac, 1024, ~0U) < 0)
-            rate_programmed = false;
-
-        /* 8. PMIC New IF DAC output config (0x108) */
-        if (set_afereg(eac_fd, 0x108, dac_con1, ~0U) < 0)
-            rate_programmed = false;
-
-        /* 9. I2S Out format & sample rate (AFE_I2S_CON1 / 0x34).
-         * Bits[11:8] = rate, bits[3:0] = 0x9 (bit 0 I2S enable, bit 3 16-bit). */
-        if (set_afereg(eac_fd, 0x34, (rate_code << 8) | 0x09, ~0U) < 0)
-            rate_programmed = false;
-
-        /* 10. PMIC NewIF Downlink Frequency (0x4024) */
-        if (set_anareg(eac_fd, 0x4024, (pmic_newif_rate << 12) | 0x330, 0xffff) < 0)
-            rate_programmed = false;
-
-        /* 11. PMIC Codec Downlink Sampling Rate (0x4002) */
-        if (set_anareg(eac_fd, 0x4002, rate_code, 0x0f) < 0)
-            rate_programmed = false;
-
-        /* 12. Reset digital gain registers to 0 dB unity gain */
-        set_anareg(eac_fd, 0x4006, 0, 0xffff);
-        set_anareg(eac_fd, 0x4008, 0, 0xffff);
-
-        /* 13. Re-enable PMIC Downlink channel */
-        set_anareg(eac_fd, 0x4014, 1, 1);
-
-        /* 14. Trigger PMIC TopCtl Clock Synchronization */
-        top_ctl_trigger(eac_fd);
-
-        /* 15. Re-enable PMIC Audio Digital Master */
-        set_anareg(eac_fd, 0x4000, 1, 1);
-
-        usleep(5000);
-
-        /* Resume DL1 DMA if playback was active */
-        if (dma_stopped == 0)
-        {
-            set_afereg(eac_fd, 0x10, 1 << 1, 1 << 1);
-        }
-
-        if (rate_programmed)
-            programmed_sampr = sampr;
-        else
-            log_audio_debug("[pcm-eac] Failed to program one or more sample-rate registers; will retry.\n");
-
-        sink_unlock();
+        program_hw_sampr(sampr);
     }
 }
 

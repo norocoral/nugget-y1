@@ -479,6 +479,22 @@ static int pictureflow_screen(void *param)
 }
 #endif
 
+#if defined(INNIOASIS_Y1)
+static int bt_receiver_screen(void *param);
+static int y1_videos_screen(void *param)
+{
+    (void)param;
+    int ret = plugin_load(VIEWERS_DIR "/y1_video.rock", "--library");
+    if (ret == PLUGIN_USB_CONNECTED || ret == PLUGIN_ERROR)
+        return GO_TO_ROOT;
+    if (ret == PLUGIN_GOTO_WPS)
+        return GO_TO_WPS;
+    if (ret == PLUGIN_GOTO_ROOT)
+        return GO_TO_ROOT;
+    return GO_TO_PREVIOUS;
+}
+#endif
+
 /* These are all static const'd from apps/menus/ *.c
    so little hack so we can use them */
 extern struct menu_item_ex
@@ -521,6 +537,7 @@ static const struct root_items items[] = {
 #endif
 #if defined(INNIOASIS_Y1)
     [GO_TO_BT_RECEIVER] = { bt_receiver_screen, NULL, NULL },
+    [GO_TO_VIDEOS] =      { y1_videos_screen, NULL, &y1_video_settings_menu },
 #endif
 
 };
@@ -646,6 +663,8 @@ MENUITEM_RETURNVALUE(pictureflow_menu_item, ID2P(LANG_PICTUREFLOW),
 #if defined(INNIOASIS_Y1)
 MENUITEM_RETURNVALUE(bt_receiver_menu_item, ID2P(LANG_BLUETOOTH_RECEIVER),
                      GO_TO_BT_RECEIVER, NULL, Icon_Radio_screen);
+MENUITEM_RETURNVALUE(videos_menu_item, ID2P(LANG_Y1_VIDEOS),
+                     GO_TO_VIDEOS, NULL, Icon_Plugin);
 #endif
 
 struct menu_item_ex root_menu_;
@@ -659,6 +678,9 @@ static struct menu_table menu_table[] = {
     { "database", &db_browser },
 #endif
     { "playlists", &playlists },
+#if defined(INNIOASIS_Y1)
+    { "videos", &videos_menu_item },
+#endif
     { "shortcuts", &shortcut_menu },
     { "bookmarks", &bookmarks },
 #if defined(INNIOASIS_Y1)

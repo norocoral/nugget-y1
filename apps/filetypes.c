@@ -53,7 +53,11 @@ static void read_config_init(int fd) INIT_ATTR;
 /* string array for known audio file types (tree_attr == FILE_ATTR_AUDIO) */
 static const char* inbuilt_audio_filetypes[] = {
     "mp3", "mp2", "mpa", "mp1", "ogg", "oga", "wma", "wmv", "asf", "wav",
-    "flac", "ac3", "a52", "mpc", "wv", "m4a", "m4b", "mp4", "mod", "mpga",
+    "flac", "ac3", "a52", "mpc", "wv", "m4a", "m4b",
+#if !defined(INNIOASIS_Y1)
+    "mp4",
+#endif
+    "mod", "mpga",
     "shn", "aif", "aiff", "spx", "opus", "sid", "adx", "nsf", "nsfe", "spc",
     "ape", "mac", "sap", "rm", "ra", "rmvb", "cmc", "cm3", "cmr", "cms", "dmc",
     "dlt", "mpt", "mpd", "rmt", "tmc", "tm8", "tm2", "oma", "aa3", "at3", "mmf",

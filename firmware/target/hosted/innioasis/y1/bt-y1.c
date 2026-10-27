@@ -101,7 +101,9 @@ static bool bt_target_enabled = false;
 static volatile bool bt_receiver_mode = false;
 static bool receiver_previous_bt_enabled;
 static volatile enum y1_bt_state bt_state = Y1_BT_STATE_OFF;
+static volatile bool a2dp_streaming = false;
 static int stpbt_fd = -1;
+static pthread_mutex_t stpbt_io_mtx = PTHREAD_MUTEX_INITIALIZER;
 
 static struct y1_bt_device bt_devices[Y1_BT_MAX_DEVICES];
 static int bt_num_devices = 0;
@@ -128,6 +130,11 @@ static void bt_set_target_enabled(bool enabled)
 {
     pthread_mutex_lock(&bt_enable_mtx);
     bt_target_enabled = enabled;
+    if (!enabled)
+    {
+        a2dp_streaming = false;
+        bt_state = Y1_BT_STATE_OFF;
+    }
     pthread_cond_broadcast(&bt_enable_cond);
     pthread_mutex_unlock(&bt_enable_mtx);
 }
@@ -160,7 +167,6 @@ static bool avdtp_med_remote_conf_done = false;
 static bool avdtp_initiator = false;
 static bool avdtp_discover_sent = false;
 static bool avdtp_opening_media = false;
-static volatile bool a2dp_streaming = false;
 static volatile bool in_sniff_mode = false;
 #define Y1_BT_MIC_RING_FRAMES 4096
 static int16_t bt_mic_pcm_ring[Y1_BT_MIC_RING_FRAMES * 2];
@@ -522,8 +528,11 @@ static void handle_sco_packet(const uint8_t *pkt, size_t len)
  * ============================================================================ */
 static int hci_send_cmd(uint16_t opcode, const void *param, uint8_t plen)
 {
-    if (stpbt_fd < 0)
+    pthread_mutex_lock(&stpbt_io_mtx);
+    if (stpbt_fd < 0) {
+        pthread_mutex_unlock(&stpbt_io_mtx);
         return -1;
+    }
     uint8_t pkt[260];
     pkt[0] = HCI_PKT_CMD;
     pkt[1] = (uint8_t)(opcode & 0xFF);
@@ -534,15 +543,21 @@ static int hci_send_cmd(uint16_t opcode, const void *param, uint8_t plen)
 
     ssize_t total = 4 + plen;
     ssize_t w = write(stpbt_fd, pkt, total);
+    pthread_mutex_unlock(&stpbt_io_mtx);
     return (w == total) ? 0 : -1;
 }
 
 static int l2cap_send_pdu(uint16_t dcid, const void *payload, uint16_t len)
 {
-    if (stpbt_fd < 0 || acl_handle == 0xFFFF || dcid == 0)
+    pthread_mutex_lock(&stpbt_io_mtx);
+    if (stpbt_fd < 0 || acl_handle == 0xFFFF || dcid == 0) {
+        pthread_mutex_unlock(&stpbt_io_mtx);
         return -1;
-    if (len > 1012)
+    }
+    if (len > 1012) {
+        pthread_mutex_unlock(&stpbt_io_mtx);
         return -1;
+    }
 
     uint8_t pkt[1024];
     uint16_t acl_len = len + 4;
@@ -561,6 +576,7 @@ static int l2cap_send_pdu(uint16_t dcid, const void *payload, uint16_t len)
         memcpy(&pkt[9], payload, len);
 
     ssize_t w = write(stpbt_fd, pkt, 9 + len);
+    pthread_mutex_unlock(&stpbt_io_mtx);
     if (w == (ssize_t)(9 + len)) {
         return 0;
     }
@@ -2393,8 +2409,10 @@ static bool mt6572_bt_hw_open_and_init(void)
     mknod("/dev/stpbt",  S_IFCHR | 0666, makedev(192, 0));
 
     bt_log("Opening /dev/stpbt (triggers MT6572 CONNSYS WMT power-on)...\n");
+    pthread_mutex_lock(&stpbt_io_mtx);
     stpbt_fd = open("/dev/stpbt", O_RDWR | O_NOCTTY);
     if (stpbt_fd < 0) {
+        pthread_mutex_unlock(&stpbt_io_mtx);
         char msg[128];
         snprintf(msg, sizeof(msg), "ERROR: open(/dev/stpbt) failed: %s (errno=%d)\n", strerror(errno), errno);
         bt_log(msg);
@@ -2403,6 +2421,7 @@ static bool mt6572_bt_hw_open_and_init(void)
 
     int flags = fcntl(stpbt_fd, F_GETFL, 0);
     fcntl(stpbt_fd, F_SETFL, flags | O_NONBLOCK);
+    pthread_mutex_unlock(&stpbt_io_mtx);
 
     /* 1. MT6572 Vendor GORM Init Script (from libbluetooth_mtk.so @ 0x4024) */
     static const uint8_t bdaddr_y1[6]   = { 0x59, 0x31, 0x72, 0x65, 0x46, 0x00 }; /* 00:46:65:72:31:59 */
@@ -2556,8 +2575,14 @@ static void *bt_worker_thread(void *arg)
                     hci_send_cmd(0x0406, disc, 3);
                     usleep(50000);
                 }
-                close(stpbt_fd);
+                pthread_mutex_lock(&stpbt_io_mtx);
+                int fd_to_close = stpbt_fd;
                 stpbt_fd = -1;
+                pthread_mutex_unlock(&stpbt_io_mtx);
+                if (fd_to_close >= 0) {
+                    close(fd_to_close);
+                    usleep(150000); /* 150ms settle delay for MT6572 kernel WMT driver */
+                }
                 reset_bt_session();
                 pending_switch_connect = false;
                 pthread_mutex_lock(&bt_mtx);
@@ -3016,12 +3041,13 @@ void y1_bt_disconnect(void)
 
 void y1_bt_forget_device(const uint8_t bdaddr[6])
 {
+    bool disconnect_needed = false;
     pthread_mutex_lock(&bt_mtx);
     for (int i = 0; i < bt_num_devices; i++) {
         if (memcmp(bt_devices[i].bdaddr, bdaddr, 6) == 0) {
             if (bt_devices[i].connected) {
                 req_disconnect = true;
-                y1_bt_audio_disconnect_hook();
+                disconnect_needed = true;
             }
             for (int j = i; j + 1 < bt_num_devices; j++)
                 bt_devices[j] = bt_devices[j + 1];
@@ -3031,6 +3057,8 @@ void y1_bt_forget_device(const uint8_t bdaddr[6])
         }
     }
     pthread_mutex_unlock(&bt_mtx);
+    if (disconnect_needed)
+        y1_bt_audio_disconnect_hook();
 }
 
 void y1_bt_update_metadata(const char *title, const char *artist,

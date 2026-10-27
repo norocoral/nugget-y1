@@ -75,7 +75,9 @@
 #define IS_SYSEVENT(ev)           ((ev & SYS_EVENT) == SYS_EVENT)
 
 #define MAX_NUM_QUEUES 32
-#if defined(HAVE_TOUCHSCREEN)  /* Multitouch generates more events */
+#if defined(APPLICATION)
+#define QUEUE_LENGTH 64 /* MUST be a power of 2 */
+#elif defined(HAVE_TOUCHSCREEN)  /* Multitouch generates more events */
 #define QUEUE_LENGTH 32 /* MUST be a power of 2 */
 #else
 #define QUEUE_LENGTH 16 /* MUST be a power of 2 */

@@ -18226,3 +18226,115 @@
     *: "Bluetooth mic"
   </voice>
 </phrase>
+<phrase>
+  id: LANG_Y1_VIDEOS
+  desc: Videos menu entry in Main Menu and Settings
+  user: core
+  <source>
+    *: "Videos"
+  </source>
+  <dest>
+    *: "Videos"
+  </dest>
+  <voice>
+    *: "Videos"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_VIDEO_DIR
+  desc: Video Directory setting
+  user: core
+  <source>
+    *: "Video Directory"
+  </source>
+  <dest>
+    *: "Video Directory"
+  </dest>
+  <voice>
+    *: "Video directory"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_VIDEO_RESUME
+  desc: Resume Video Playback setting
+  user: core
+  <source>
+    *: "Resume Playback"
+  </source>
+  <dest>
+    *: "Resume Playback"
+  </dest>
+  <voice>
+    *: "Resume playback"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_VIDEO_ASPECT
+  desc: Video Aspect Ratio setting
+  user: core
+  <source>
+    *: "Aspect Ratio"
+  </source>
+  <dest>
+    *: "Aspect Ratio"
+  </dest>
+  <voice>
+    *: "Aspect ratio"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_VIDEO_SKIP_STEP
+  desc: Video Skip Step setting
+  user: core
+  <source>
+    *: "Skip Step"
+  </source>
+  <dest>
+    *: "Skip Step"
+  </dest>
+  <voice>
+    *: "Skip step"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_VIDEO_AUTOPLAY_NEXT
+  desc: Autoplay Next Video setting
+  user: core
+  <source>
+    *: "Autoplay Next Video"
+  </source>
+  <dest>
+    *: "Autoplay Next Video"
+  </dest>
+  <voice>
+    *: "Autoplay next video"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_VIDEO_SHOW_THUMBS
+  desc: Show Video Thumbnails setting
+  user: core
+  <source>
+    *: "Extract Thumbnails"
+  </source>
+  <dest>
+    *: "Extract Thumbnails"
+  </dest>
+  <voice>
+    *: "Extract thumbnails"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_VIDEO_SCAN_DB
+  desc: Scan and Update Video Database action
+  user: core
+  <source>
+    *: "Update Video Database"
+  </source>
+  <dest>
+    *: "Update Video Database"
+  </dest>
+  <voice>
+    *: "Update video database"
+  </voice>
+</phrase>

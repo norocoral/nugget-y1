@@ -72,6 +72,7 @@ wav2wv.c
 alarmclock.c
 zxbox.c
 chessbox.c
+y1_video.c
 #endif
 
 

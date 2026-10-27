@@ -44,6 +44,7 @@ extern const struct menu_item_ex
         radio_settings_menu,        /* radio_menu.c     */
 #if defined(INNIOASIS_Y1)
         nugget_bluetooth_menu,      /* settings_menu.c  */
+        y1_video_settings_menu,     /* settings_menu.c  */
 #endif
         theme_menu;                 /* theme_menu.c     */
 

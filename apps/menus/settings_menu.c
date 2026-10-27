@@ -836,6 +836,60 @@ MAKE_MENU(nugget_device_menu, ID2P(LANG_DEVICE), 0, Icon_NOICON,
 MAKE_MENU(nugget_menu, ID2P(LANG_NUGGET), 0, Icon_NOICON,
           &nugget_device_menu);
 
+static int y1_video_select_dir_func(void)
+{
+    plugin_load(VIEWERS_DIR "/y1_video.rock", "--select-dir");
+    return 0;
+}
+
+static int y1_video_reset_dir_func(void)
+{
+    strmemccpy(global_settings.y1_video_dir, "/Videos",
+               sizeof(global_settings.y1_video_dir));
+    settings_save();
+    splash(HZ, ID2P(LANG_RESET_DONE_CLEAR));
+    return 0;
+}
+
+static char *y1_video_dir_get_name(int selected_item, void *data,
+                                   char *buffer, size_t buffer_len)
+{
+    (void)selected_item;
+    (void)data;
+    const char *vdir = global_settings.y1_video_dir[0] ?
+                       global_settings.y1_video_dir : "/Videos";
+    snprintf(buffer, buffer_len, "%s: %s", str(LANG_Y1_VIDEO_DIR), vdir);
+    return buffer;
+}
+
+static int y1_video_scan_db_func(void)
+{
+    plugin_load(VIEWERS_DIR "/y1_video.rock", "--scan-db");
+    return 0;
+}
+
+MENUITEM_FUNCTION_DYNTEXT(y1_video_dir_item, 0, y1_video_select_dir_func,
+                          y1_video_dir_get_name, NULL, NULL, NULL, Icon_Folder);
+MENUITEM_FUNCTION(y1_video_reset_dir_item, 0, ID2P(LANG_RESET),
+                  y1_video_reset_dir_func, NULL, Icon_Menu_functioncall);
+MENUITEM_SETTING(y1_video_resume_item, &global_settings.y1_video_resume, NULL);
+MENUITEM_SETTING(y1_video_aspect_item, &global_settings.y1_video_aspect, NULL);
+MENUITEM_SETTING(y1_video_skip_step_item, &global_settings.y1_video_skip_step, NULL);
+MENUITEM_SETTING(y1_video_autoplay_item, &global_settings.y1_video_autoplay_next, NULL);
+MENUITEM_SETTING(y1_video_thumbs_item, &global_settings.y1_video_show_thumbs, NULL);
+MENUITEM_FUNCTION(y1_video_scan_db_item, 0, ID2P(LANG_Y1_VIDEO_SCAN_DB),
+                  y1_video_scan_db_func, NULL, Icon_Menu_functioncall);
+
+MAKE_MENU(y1_video_settings_menu, ID2P(LANG_Y1_VIDEOS), 0, Icon_Menu_setting,
+          &y1_video_dir_item,
+          &y1_video_reset_dir_item,
+          &y1_video_resume_item,
+          &y1_video_aspect_item,
+          &y1_video_skip_step_item,
+          &y1_video_autoplay_item,
+          &y1_video_thumbs_item,
+          &y1_video_scan_db_item);
+
 #ifdef HAVE_SW_POWEROFF
 static int menu_power_off_settings(void)
 {

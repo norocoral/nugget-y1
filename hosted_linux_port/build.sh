@@ -420,7 +420,34 @@ cp "$BUILD_DIR/rockbox.zip" "$SCRIPT_DIR/rockbox_sdcard.zip"
 
 SD_STAGE="$(mktemp -d "$SCRIPT_DIR/.sdcard-stage.XXXXXX")"
 
-mkdir -p "$SD_STAGE/.rockbox/bt"
+mkdir -p "$SD_STAGE/.rockbox/bt" "$SD_STAGE/.rockbox/lib" "$SD_STAGE/Videos"
+
+echo "[*] Building external SD card video library (liby1video.so)..."
+"${CC[@]}" -O3 -mfpu=neon -mfloat-abi=hard -fPIC -shared \
+    -Wl,-rpath,/mnt/sdcard/.rockbox/lib \
+    "$SCRIPT_DIR/video/liby1video.c" \
+    "$SCRIPT_DIR"/video/h264_objs/libavcodec/*.o \
+    "$SCRIPT_DIR"/video/h264_objs/libavutil/*.o \
+    "$SCRIPT_DIR"/video/faad_objs/*.o \
+    -o "$SD_STAGE/.rockbox/lib/liby1video.so" \
+    -ldl -lm
+"$STRIP" --strip-unneeded \
+    -R .comment \
+    -R .note.gnu.build-id \
+    "$SD_STAGE/.rockbox/lib/liby1video.so"
+
+# Bundle optional ARMHF FFmpeg / codec shared libraries if present in sysroot or video/libs
+for libdir in "$SCRIPT_DIR/video/libs" "/usr/arm-linux-gnueabihf/lib" "/usr/lib/arm-linux-gnueabihf"; do
+    if [[ -d "$libdir" ]]; then
+        for pattern in "libm.so*" "libgcc_s.so*" "libz.so*" "libavutil.so*" "libswscale.so*" "libswresample.so*" "libavcodec.so*" "libavformat.so*"; do
+            for sofile in "$libdir"/$pattern; do
+                if [[ -f "$sofile" ]]; then
+                    cp -L "$sofile" "$SD_STAGE/.rockbox/lib/" 2>/dev/null || true
+                fi
+            done
+        done
+    fi
+done
 
 cp "$BUILD_DIR/rockbox" "$SD_STAGE/.rockbox/rockbox"
 
@@ -453,9 +480,9 @@ cd "$SD_STAGE"
 
 zip -u -q "$SCRIPT_DIR/rockbox_sdcard.zip" .rockbox/rockbox
 
-for asset in .rockbox/*.raw .rockbox/bt/*; do
+for asset in .rockbox/*.raw .rockbox/bt/* .rockbox/lib/* Videos; do
     [[ -e "$asset" ]] || continue
-    zip -u -q "$SCRIPT_DIR/rockbox_sdcard.zip" "$asset"
+    zip -u -q -r "$SCRIPT_DIR/rockbox_sdcard.zip" "$asset"
 done
 
 cd "$SCRIPT_DIR"

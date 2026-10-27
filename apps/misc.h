@@ -238,6 +238,7 @@ void system_sound_play(enum system_sound sound);
 
 #if defined(INNIOASIS_Y1)
 void y1_play_boot_sound(void);
+void y1_bt_process_pending_audio_events(void);
 #endif
 
 typedef bool (*keyclick_callback)(int action, void* data);

@@ -921,7 +921,8 @@ int plugin_load(const char* plugin, const void* parameter)
                                    !strcmp("text_viewer.rock", sepch + 1) ||
                                    !strcmp("view_text.rock", sepch + 1) ||
                                    !strcmp("disktidy.rock", sepch + 1) ||
-                                   !strcmp("open_plugins.rock", sepch + 1));
+                                   !strcmp("open_plugins.rock", sepch + 1) ||
+                                   !strcmp("y1_video.rock", sepch + 1));
 
     if (current_plugin_handle)
     {

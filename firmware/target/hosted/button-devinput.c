@@ -216,6 +216,8 @@ void button_remove_input_device(int i)
 
     close(fd);
     poll_fds[i].fd = -1;
+    poll_fds[i].events = 0;
+    poll_fds[i].revents = 0;
 }
 
 void button_close_device(void)
@@ -333,9 +335,19 @@ int button_read_device(BDATA)
     }
 #endif
 
-    /* check if there are any events pending and process them */
-    while(poll(poll_fds, num_devices, 0)) {
+    /* check if there are any events pending and process them up to a safe limit */
+    int max_polls = 16;
+    while(max_polls-- > 0 && poll(poll_fds, num_devices, 0) > 0) {
         for(int i = 0; i < num_devices; i++) {
+            if(poll_fds[i].fd < 0)
+                continue;
+
+            /* device error or disconnected — close it to stop poll returning error */
+            if(poll_fds[i].revents & (POLLERR | POLLHUP | POLLNVAL)) {
+                button_remove_input_device(i);
+                continue;
+            }
+
             /* read only if non-blocking */
             if(poll_fds[i].revents & POLLIN) {
                 int size = read(poll_fds[i].fd, &event, sizeof(event));
@@ -419,11 +431,10 @@ int button_read_device(BDATA)
                         /* Ignore other event types */
                         break;
                     }
+                } else if (size == 0 || (size < 0 && errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR)) {
+                    /* Device EOF or unrecoverable error; disconnect device to prevent busy spinning */
+                    button_remove_input_device(i);
                 }
-            }
-            /* device was removed/disconnected — close it to stop poll returning POLLHUP forever */
-            else if (poll_fds[i].revents & (POLLERR | POLLHUP)) {
-                button_remove_input_device(i);
             }
         }
     }
@@ -456,16 +467,26 @@ int button_read_device(BDATA)
 
     if (wheel_ticks > 0)
     {
+        if (wheel_ticks > 4)
+            wheel_ticks = 4;
         while (wheel_ticks-- > 0)
         {
-            button_queue_post(BUTTON_SCROLL_FWD, 0);
+            if (button_queue_empty())
+                button_queue_post(BUTTON_SCROLL_FWD, 0);
+            else
+                break;
         }
     }
     else if (wheel_ticks < 0)
     {
+        if (wheel_ticks < -4)
+            wheel_ticks = -4;
         while (wheel_ticks++ < 0)
         {
-            button_queue_post(BUTTON_SCROLL_BACK, 0);
+            if (button_queue_empty())
+                button_queue_post(BUTTON_SCROLL_BACK, 0);
+            else
+                break;
         }
     }
 #endif /* HAVE_SCROLLWHEEL */

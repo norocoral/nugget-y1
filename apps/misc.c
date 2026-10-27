@@ -653,67 +653,93 @@ static void lo_unplug_change(bool inserted)
 #endif /*HAVE_LINEOUT_DETECTION*/
 
 #if defined(INNIOASIS_Y1)
+#include "button.h"
+#include "bt-y1.h"
+
 static int wired_saved_volume = 0;
 static bool bt_audio_active = false;
 static bool bt_caused_pause = false;
+static volatile int y1_bt_audio_pending_event = 0;
+
+void y1_bt_process_pending_audio_events(void)
+{
+    int pending = y1_bt_audio_pending_event;
+    if (!pending)
+        return;
+    y1_bt_audio_pending_event = 0;
+
+    if (pending == 1)
+    {
+        if (!bt_audio_active)
+        {
+            wired_saved_volume = global_status.volume;
+            bt_audio_active = true;
+        }
+
+        int dev_vol = y1_bt_get_active_device_volume();
+        if (dev_vol > 0)
+            dev_vol = 0;
+        if (dev_vol < sound_min(SOUND_VOLUME))
+            dev_vol = sound_min(SOUND_VOLUME);
+
+        global_status.volume = dev_vol;
+        sound_set_volume(dev_vol);
+        status_save(false);
+
+        if (global_settings.unplug_mode)
+        {
+            int audio_stat = audio_status();
+            if ((audio_stat & AUDIO_STATUS_PLAY) &&
+                bt_caused_pause &&
+                global_settings.unplug_mode > 1)
+            {
+                unpause_action(true);
+            }
+            bt_caused_pause = false;
+        }
+    }
+    else if (pending == 2)
+    {
+        if (bt_audio_active)
+        {
+            bt_audio_active = false;
+            global_status.volume = wired_saved_volume;
+            sound_set_volume(wired_saved_volume);
+            status_save(false);
+        }
+
+        if (global_settings.unplug_mode)
+        {
+            int audio_stat = audio_status();
+            if ((audio_stat & AUDIO_STATUS_PLAY) &&
+                !(audio_stat & AUDIO_STATUS_PAUSE))
+            {
+                bt_caused_pause = true;
+                pause_action(false);
+            }
+        }
+    }
+}
 
 void y1_bt_audio_connect_hook(void)
 {
-    if (!bt_audio_active)
-    {
-        wired_saved_volume = global_status.volume;
-        bt_audio_active = true;
-    }
-
-    int dev_vol = y1_bt_get_active_device_volume();
-    if (dev_vol > 0)
-        dev_vol = 0;
-    if (dev_vol < sound_min(SOUND_VOLUME))
-        dev_vol = sound_min(SOUND_VOLUME);
-
-    global_status.volume = dev_vol;
-    sound_set_volume(dev_vol);
-    status_save(false);
-
-    if (global_settings.unplug_mode)
-    {
-        int audio_stat = audio_status();
-        if ((audio_stat & AUDIO_STATUS_PLAY) &&
-            bt_caused_pause &&
-            global_settings.unplug_mode > 1)
-        {
-            unpause_action(true);
-        }
-        bt_caused_pause = false;
-    }
+    y1_bt_audio_pending_event = 1;
+    button_queue_post(BUTTON_NONE, 0);
 }
 
 void y1_bt_audio_disconnect_hook(void)
 {
-    if (bt_audio_active)
-    {
-        bt_audio_active = false;
-        global_status.volume = wired_saved_volume;
-        sound_set_volume(wired_saved_volume);
-        status_save(false);
-    }
-
-    if (global_settings.unplug_mode)
-    {
-        int audio_stat = audio_status();
-        if ((audio_stat & AUDIO_STATUS_PLAY) &&
-            !(audio_stat & AUDIO_STATUS_PAUSE))
-        {
-            bt_caused_pause = true;
-            pause_action(false);
-        }
-    }
+    y1_bt_audio_pending_event = 2;
+    button_queue_post(BUTTON_NONE, 0);
 }
 
 #endif
 
 long default_event_handler_ex(long event, void (*callback)(void *), void *parameter)
 {
+#if defined(INNIOASIS_Y1)
+    y1_bt_process_pending_audio_events();
+#endif
 #if CONFIG_PLATFORM & (PLATFORM_ANDROID)
     static bool resume = false;
 #endif
