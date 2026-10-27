@@ -1719,11 +1719,69 @@ static int retrieve_entries(struct tree_context *c, int offset, bool init)
     tree_lock_cache(c);
     struct tagentry *dptr = core_get_data(c->cache.entries_handle);
 
-    if (tag != tag_title && tag != tag_filename)
+    /* Only show Play and Shuffle in specific views (e.g. tracks of an album, artist,
+     * or genre; level > 0), never in top-level general listing views (level == 0) */
+    bool is_specific_view = (level > 0);
+
+    if (tag == tag_title || tag == tag_filename)
     {
+        if (is_specific_view)
+        {
+            if (offset == 0)
+            {
+                dptr->newtable = TABLE_NAVIBROWSE;
+                dptr->name = ID2P(LANG_PLAY);
+                dptr->extraseek = 0;
+                dptr->customaction = ONPLAY_CUSTOMACTION_PLAY_ALL;
+                dptr++;
+                current_entry_count++;
+                c->special_entry_count++;
+            }
+            if (offset <= 1)
+            {
+                dptr->newtable = TABLE_NAVIBROWSE;
+                dptr->name = ID2P(LANG_SHUFFLE);
+                dptr->extraseek = 0;
+                dptr->customaction = ONPLAY_CUSTOMACTION_SHUFFLE_ALL;
+                dptr++;
+                current_entry_count++;
+                c->special_entry_count++;
+            }
+            total_count += 2;
+        }
+    }
+    else
+    {
+        int action_offset = 0;
+        if (is_specific_view)
+        {
+            if (offset == 0)
+            {
+                dptr->newtable = TABLE_ALLSUBENTRIES;
+                dptr->name = ID2P(LANG_PLAY);
+                dptr->extraseek = 0;
+                dptr->customaction = ONPLAY_CUSTOMACTION_PLAY_ALL;
+                dptr++;
+                current_entry_count++;
+                c->special_entry_count++;
+            }
+            if (offset <= 1)
+            {
+                dptr->newtable = TABLE_ALLSUBENTRIES;
+                dptr->name = ID2P(LANG_SHUFFLE);
+                dptr->extraseek = 0;
+                dptr->customaction = ONPLAY_CUSTOMACTION_SHUFFLE_ALL;
+                dptr++;
+                current_entry_count++;
+                c->special_entry_count++;
+            }
+            total_count += 2;
+            action_offset = 2;
+        }
+
         bool show_album_sorted = (tag == tag_album);
-        int show_album_sorted_offset = (show_album_sorted ? 1 : 0);
-        if (offset == 0 && show_album_sorted)
+        int show_album_sorted_offset = action_offset + (show_album_sorted ? 1 : 0);
+        if (offset <= action_offset && show_album_sorted)
         {
             dptr->newtable = TABLE_ALLSUBENTRIES_SORTED_BY_ALBUMS;
             dptr->name = ID2P(LANG_TAGNAVI_ALL_TRACKS_SORTED_BY_ALBUM);
@@ -1867,7 +1925,28 @@ static int retrieve_entries(struct tree_context *c, int offset, bool init)
             else
             {
                 tcs_get_basename(&tcs, is_basename);
-                namebufused += tcs.result_len;
+                char extra_info[128] = "";
+                if (global_settings.y1_rich_album_view && tag == tag_album)
+                {
+                    char artist_buf[64] = "";
+                    char year_buf[16] = "";
+                    tagcache_retrieve(&tcs, tcs.idx_id, tag_virt_canonicalartist, artist_buf, sizeof(artist_buf));
+                    if (artist_buf[0] == '\0')
+                        tagcache_retrieve(&tcs, tcs.idx_id, tag_albumartist, artist_buf, sizeof(artist_buf));
+                    if (artist_buf[0] == '\0')
+                        tagcache_retrieve(&tcs, tcs.idx_id, tag_artist, artist_buf, sizeof(artist_buf));
+                    tagcache_retrieve(&tcs, tcs.idx_id, tag_year, year_buf, sizeof(year_buf));
+
+                    if (artist_buf[0] && year_buf[0] && strcmp(year_buf, "0") != 0)
+                        snprintf(extra_info, sizeof(extra_info), " (%s • %s)", artist_buf, year_buf);
+                    else if (artist_buf[0])
+                        snprintf(extra_info, sizeof(extra_info), " (%s)", artist_buf);
+                    else if (year_buf[0] && strcmp(year_buf, "0") != 0)
+                        snprintf(extra_info, sizeof(extra_info), " (%s)", year_buf);
+                }
+
+                int extra_len = strlen(extra_info);
+                namebufused += tcs.result_len + extra_len;
                 bool buffer_full = (namebufused >= c->cache.name_buffer_size);
                 if (!buffer_full)
                 {
@@ -1877,7 +1956,11 @@ static int retrieve_entries(struct tree_context *c, int offset, bool init)
                         namebufused += strlen(dptr->album_name)+1;
                     else
                         dptr->album_name = NULL;
-                    strcpy(dptr->name, tcs.result);
+                    if (extra_len > 0)
+                        snprintf(dptr->name, c->cache.name_buffer_size - (dptr->name - (char*)core_get_data(c->cache.name_buffer_handle)),
+                                 "%s%s", tcs.result, extra_info);
+                    else
+                        strcpy(dptr->name, tcs.result);
                 }
                 else
                 {
@@ -1993,6 +2076,7 @@ static int load_root(struct tree_context *c)
 
     tc = c;
     c->currtable = TABLE_ROOT;
+    c->special_entry_count = 0;
     if (c->dirlevel == 0)
         c->currextra = rootmenu;
 
@@ -2524,7 +2608,13 @@ static bool insert_all_playlist(struct tree_context *c,
 
     last_tick = current_tick + HZ/2; /* Show splash after 0.5 seconds have passed */
     splash_progress_set_delay(HZ / 2); /* wait 1/2 sec before progress */
-    n = c->filesindir;
+    n = c->filesindir - c->special_entry_count;
+    if (n <= 0)
+    {
+        tagcache_search_finish(&tcs);
+        cpu_boost(false);
+        return false;
+    }
 
     if (playlist == NULL)
     {
@@ -2602,7 +2692,7 @@ static bool insert_all_playlist(struct tree_context *c,
             }
         }
 
-        if (!tagcache_retrieve(&tcs, tagtree_get_entry(c, i)->extraseek, tcs.type, buf, sizeof buf))
+        if (!tagcache_retrieve(&tcs, tagtree_get_entry(c, i + c->special_entry_count)->extraseek, tcs.type, buf, sizeof buf))
             continue;
 
         if (playlist == NULL)
@@ -2666,6 +2756,8 @@ static void reset_tc_to_prev(int dirlevel, int selected_item)
     tagtree_load(tc);
 }
 
+static int tagtree_play_all_db(bool shuffle);
+
 static bool tagtree_insert_selection(int position, bool queue,
                                      const char* playlist, bool new_playlist)
 {
@@ -2683,7 +2775,52 @@ static bool tagtree_insert_selection(int position, bool queue,
 #endif
         , 0, 0, 0);
 
-    newtable = tagtree_get_entry(tc, tc->selected_item)->newtable;
+    struct tagentry *entry = tagtree_get_entry(tc, tc->selected_item);
+    if (entry->customaction == ONPLAY_CUSTOMACTION_PLAY_ALL ||
+        entry->customaction == ONPLAY_CUSTOMACTION_SHUFFLE_ALL)
+    {
+        if (tc->currtable == TABLE_ROOT)
+        {
+            if (entry->customaction == ONPLAY_CUSTOMACTION_PLAY_ALL)
+            {
+                global_settings.playlist_shuffle = 0;
+                global_settings.repeat_mode = 0;
+                return (tagtree_play_all_db(false) == 0);
+            }
+            else
+            {
+                global_settings.playlist_shuffle = 1;
+                return (tagtree_play_all_db(true) == 0);
+            }
+        }
+        else if (csi->tagorder[tc->dirlevel] == tag_title ||
+                 csi->tagorder[tc->dirlevel] == tag_filename ||
+                 tc->currtable == TABLE_ALLSUBENTRIES ||
+                 tc->currtable == TABLE_ALLSUBENTRIES_SORTED_BY_ALBUMS)
+        {
+            if (tc->filesindir <= tc->special_entry_count)
+                splash(HZ, ID2P(LANG_END_PLAYLIST));
+            else if (!insert_all_playlist(tc, playlist, new_playlist, position, queue))
+                splash(HZ*2, ID2P(LANG_FAILED));
+            reset_tc_to_prev(dirlevel, selected_item);
+            return true;
+        }
+        else
+        {
+            ret = goto_allsubentries(TABLE_ALLSUBENTRIES);
+            if (ret)
+            {
+                if (tc->filesindir <= 0)
+                    splash(HZ, ID2P(LANG_END_PLAYLIST));
+                else if (!insert_all_playlist(tc, playlist, new_playlist, position, queue))
+                    splash(HZ*2, ID2P(LANG_FAILED));
+            }
+            reset_tc_to_prev(dirlevel, selected_item);
+            return ret;
+        }
+    }
+
+    newtable = entry->newtable;
 
     if (newtable == TABLE_PLAYTRACK) /* Insert a single track? */
     {
@@ -2875,7 +3012,10 @@ char* tagtree_get_entry_name(struct tree_context *c, int id,
         return entry->name;
     }
 
-    strmemccpy(buf, entry->name, bufsize);
+    if (global_settings.y1_modern_scheme)
+        modern_scheme_format(entry->name, buf, bufsize, true);
+    else
+        strmemccpy(buf, entry->name, bufsize);
     return buf;
 }
 
@@ -2933,4 +3073,62 @@ int tagtree_get_icon(struct tree_context* c)
         icon = Icon_Audio;
 
     return icon;
+}
+
+static int tagtree_play_all_db(bool shuffle)
+{
+    struct tagcache_search tcs;
+    struct playlist_insert_context context;
+    char buf[MAX_PATH];
+
+    if (playlist_create(NULL, NULL) < 0)
+        return -1;
+
+    cpu_boost(true);
+    if (!tagcache_search(&tcs, tag_filename))
+    {
+        cpu_boost(false);
+        return -1;
+    }
+
+    if (playlist_insert_context_create(NULL, &context, PLAYLIST_INSERT_LAST, false, false) < 0)
+    {
+        tagcache_search_finish(&tcs);
+        cpu_boost(false);
+        return -1;
+    }
+
+    while (tagcache_get_next(&tcs, buf, sizeof(buf)))
+    {
+        if (playlist_insert_context_add(&context, buf) < 0)
+            break;
+        yield();
+    }
+
+    playlist_insert_context_release(&context);
+    tagcache_search_finish(&tcs);
+    cpu_boost(false);
+
+    if (playlist_get_current()->amount > 0)
+    {
+        if (shuffle)
+        {
+            global_settings.playlist_shuffle = 1;
+            playlist_start(playlist_shuffle(0, 0), 0, 0);
+        }
+        else
+        {
+            global_settings.playlist_shuffle = 0;
+            global_settings.repeat_mode = 0;
+            playlist_start(0, 0, 0);
+        }
+        return 0;
+    }
+
+    return -1;
+}
+
+int tagtree_shuffle_all(void)
+{
+    return tagtree_play_all_db(true);
 }

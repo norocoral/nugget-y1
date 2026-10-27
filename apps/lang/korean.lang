@@ -18167,3 +18167,284 @@
     *: "블루투스 마이크"
   </voice>
 </phrase>
+<phrase>
+  id: LANG_Y1_VIDEOS
+  desc: Videos menu entry in Main Menu and Settings
+  user: core
+  <source>
+    *: "Videos"
+  </source>
+  <dest>
+    *: "비디오"
+  </dest>
+  <voice>
+    *: "비디오"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_VIDEO_DIR
+  desc: Video Directory setting
+  user: core
+  <source>
+    *: "Video Directory"
+  </source>
+  <dest>
+    *: "비디오 디렉터리"
+  </dest>
+  <voice>
+    *: "비디오 디렉터리"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_VIDEO_RESUME
+  desc: Resume Video Playback setting
+  user: core
+  <source>
+    *: "Resume Playback"
+  </source>
+  <dest>
+    *: "이어보기"
+  </dest>
+  <voice>
+    *: "이어보기"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_VIDEO_ASPECT
+  desc: Video Aspect Ratio setting
+  user: core
+  <source>
+    *: "Aspect Ratio"
+  </source>
+  <dest>
+    *: "화면 비율"
+  </dest>
+  <voice>
+    *: "화면 비율"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_VIDEO_SKIP_STEP
+  desc: Video Skip Step setting
+  user: core
+  <source>
+    *: "Skip Step"
+  </source>
+  <dest>
+    *: "건너뛰기 시간"
+  </dest>
+  <voice>
+    *: "건너뛰기 시간"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_VIDEO_AUTOPLAY_NEXT
+  desc: Autoplay Next Video setting
+  user: core
+  <source>
+    *: "Autoplay Next Video"
+  </source>
+  <dest>
+    *: "다음 비디오 자동 재생"
+  </dest>
+  <voice>
+    *: "다음 비디오 자동 재생"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_VIDEO_SHOW_THUMBS
+  desc: Show Video Thumbnails setting
+  user: core
+  <source>
+    *: "Extract Thumbnails"
+  </source>
+  <dest>
+    *: "미리보기 이미지 추출"
+  </dest>
+  <voice>
+    *: "미리보기 이미지 추출"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_VIDEO_SCAN_DB
+  desc: Scan and Update Video Database action
+  user: core
+  <source>
+    *: "Update Video Database"
+  </source>
+  <dest>
+    *: "비디오 데이터베이스 업데이트"
+  </dest>
+  <voice>
+    *: "비디오 데이터베이스 업데이트"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_VIDEO_1080P_MODE
+  desc: 1080p Video Playback Mode setting
+  user: core
+  <source>
+    *: "1080p Playback"
+  </source>
+  <dest>
+    *: "1080p 재생 모드"
+  </dest>
+  <voice>
+    *: "1080p 재생 모드"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_VIDEO_1080P_DIRECT
+  desc: Direct mode for 1080p video
+  user: core
+  <source>
+    *: "Direct"
+  </source>
+  <dest>
+    *: "Direct"
+  </dest>
+  <voice>
+    *: "다이렉트"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_VIDEO_1080P_CACHE
+  desc: Cache mode for 1080p video
+  user: core
+  <source>
+    *: "Cache"
+  </source>
+  <dest>
+    *: "Cache"
+  </dest>
+  <voice>
+    *: "캐시"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_BT_CONNECTED_DEVICE_FULL_VOLUME
+  desc: Set connected Bluetooth device to full volume and lock volume
+  user: core
+  <source>
+    *: "Set Connected Device Full Volume"
+  </source>
+  <dest>
+    *: "연결된 기기 최대 음량 설정"
+  </dest>
+  <voice>
+    *: "연결된 기기 최대 음량 설정"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_PHOTOS
+  desc: Photos menu option in Main Menu
+  user: core
+  <source>
+    *: "Photos"
+  </source>
+  <dest>
+    *: "사진"
+  </dest>
+  <voice>
+    *: "사진"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_PHOTO_ALBUMS
+  desc: Photo Albums view in Photos
+  user: core
+  <source>
+    *: "Photo Albums"
+  </source>
+  <dest>
+    *: "사진 앨범"
+  </dest>
+  <voice>
+    *: "사진 앨범"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_PHOTO_SLIDESHOW
+  desc: Slideshow in Photos
+  user: core
+  <source>
+    *: "Slideshow"
+  </source>
+  <dest>
+    *: "슬라이드쇼"
+  </dest>
+  <voice>
+    *: "슬라이드쇼"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_PHOTO_SLIDESHOW_INTERVAL
+  desc: Slideshow interval setting
+  user: core
+  <source>
+    *: "Slideshow Interval"
+  </source>
+  <dest>
+    *: "슬라이드쇼 간격"
+  </dest>
+  <voice>
+    *: "슬라이드쇼 간격"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_PHOTO_RESCAN
+  desc: Rescan Photos action
+  user: core
+  <source>
+    *: "Rescan Photos"
+  </source>
+  <dest>
+    *: "사진 라이브러리 다시 스캔"
+  </dest>
+  <voice>
+    *: "사진 라이브러리 다시 스캔"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_SHUFFLE_DATABASE
+  desc: Shuffle Database menu option in Main Menu
+  user: core
+  <source>
+    *: "Shuffle Database"
+  </source>
+  <dest>
+    *: "데이터베이스 셔플"
+  </dest>
+  <voice>
+    *: "데이터베이스 셔플"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_RICH_ALBUM_VIEW
+  desc: Rich Database Album view setting
+  user: core
+  <source>
+    *: "Rich Album View"
+  </source>
+  <dest>
+    *: "상세 앨범 보기"
+  </dest>
+  <voice>
+    *: "상세 앨범 보기"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_Y1_MODERN_SCHEME
+  desc: Modern list formatting (bullets, no leading zeros, play marker)
+  user: core
+  <source>
+    *: "Use Modern Scheme"
+  </source>
+  <dest>
+    *: "모던 스타일 사용"
+  </dest>
+  <voice>
+    *: "모던 스타일 사용"
+  </voice>
+</phrase>

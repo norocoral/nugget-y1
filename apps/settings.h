@@ -974,6 +974,9 @@ struct user_settings
     bool bt_receiver_auto_start;
     bool bt_receiver_auto_connect;
     bool bt_receiver_full_volume;
+    bool bt_connected_device_full_volume;
+    bool y1_rich_album_view;
+    bool y1_modern_scheme;
     char y1_video_dir[MAX_PATHNAME+1];
     int  y1_video_resume;
     int  y1_video_aspect;

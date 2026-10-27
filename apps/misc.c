@@ -676,11 +676,20 @@ void y1_bt_process_pending_audio_events(void)
             bt_audio_active = true;
         }
 
-        int dev_vol = y1_bt_get_active_device_volume();
-        if (dev_vol > 0)
+        int dev_vol = 0;
+        if (global_settings.bt_connected_device_full_volume)
+        {
             dev_vol = 0;
-        if (dev_vol < sound_min(SOUND_VOLUME))
-            dev_vol = sound_min(SOUND_VOLUME);
+            y1_bt_store_active_volume(0);
+        }
+        else
+        {
+            dev_vol = y1_bt_get_active_device_volume();
+            if (dev_vol > 0)
+                dev_vol = 0;
+            if (dev_vol < sound_min(SOUND_VOLUME))
+                dev_vol = sound_min(SOUND_VOLUME);
+        }
 
         global_status.volume = dev_vol;
         sound_set_volume(dev_vol);
@@ -1098,8 +1107,8 @@ void setvol(void)
 #if defined(INNIOASIS_Y1)
     if (y1_bt_a2dp_is_streaming())
     {
-        /* Enforce 0 dB max digital volume cap on Bluetooth to prevent distortion */
-        if (global_status.volume > 0)
+        /* Enforce max digital volume lock if connected device full volume is set */
+        if (global_settings.bt_connected_device_full_volume || global_status.volume > 0)
             global_status.volume = 0;
         y1_bt_store_active_volume(global_status.volume);
     }
@@ -1201,6 +1210,18 @@ void adjust_volume(int steps)
 
 void adjust_volume_ex(int steps, enum volume_adjust_mode mode)
 {
+#if defined(INNIOASIS_Y1)
+    if (global_settings.bt_connected_device_full_volume && y1_bt_a2dp_is_streaming())
+    {
+        /* Lock volume at maximum and do not allow adjustment */
+        if (global_status.volume != 0)
+        {
+            global_status.volume = 0;
+            setvol();
+        }
+        return;
+    }
+#endif
     switch (mode)
     {
     case VOLUME_ADJUST_PERCEPTUAL:
@@ -2719,6 +2740,85 @@ void validate_start_directory_init(void) /* INIT_ATTR */
         path_append(global_status.browse_last_folder, PATH_ROOTSTR, PA_SEP_HARD,
                     sizeof(global_status.browse_last_folder));
     }
+}
+
+/* Copy a run of digits from *sp to dst without leading zeros (keeps at
+ * least one digit). Returns number of bytes written. */
+static size_t modern_copy_number(const char **sp, char *dst, size_t room)
+{
+    const char *s = *sp;
+    size_t n = 0;
+    while (*s == '0' && s[1] >= '0' && s[1] <= '9')
+        s++;
+    while (*s >= '0' && *s <= '9' && n + 1 < room)
+        dst[n++] = *s++;
+    *sp = s;
+    return n;
+}
+
+void modern_scheme_format(const char *src, char *dst, size_t dstsz,
+                          bool leading_index)
+{
+    static const char bullet[] = " \xe2\x80\xa2 "; /* " • " */
+    const char *s = src;
+    size_t o = 0;
+
+    if (!dstsz)
+        return;
+
+    if (leading_index && *s >= '0' && *s <= '9')
+    {
+        /* Match "N. " or "D.N. " at the start of the line */
+        const char *p = s;
+        while (*p >= '0' && *p <= '9') p++;
+        const char *q = NULL;
+        if (*p == '.' && p[1] >= '0' && p[1] <= '9')
+        {
+            q = p + 1;
+            while (*q >= '0' && *q <= '9') q++;
+        }
+        const char *end = (q && *q == '.' && q[1] == ' ') ? q :
+                          (*p == '.' && p[1] == ' ') ? p : NULL;
+        if (end)
+        {
+            o += modern_copy_number(&s, dst + o, dstsz - o);
+            if (end != p && o + 1 < dstsz)
+            {
+                dst[o++] = '.';
+                s++;
+                o += modern_copy_number(&s, dst + o, dstsz - o);
+            }
+            s = end + 2; /* skip ". " */
+            for (int i = 0; i < 3 && o + 1 < dstsz; i++)
+                dst[o++] = ' ';
+        }
+    }
+
+    while (*s && o + 1 < dstsz)
+    {
+        if (s[0] == ' ' && s[1] == '-' && s[2] == ' ')
+        {
+            if (o + sizeof(bullet) - 1 >= dstsz)
+                break;
+            memcpy(dst + o, bullet, sizeof(bullet) - 1);
+            o += sizeof(bullet) - 1;
+            s += 3;
+            continue;
+        }
+        /* Time token at word start: strip leading zeros ("02:17" -> "2:17") */
+        if ((s == src || s[-1] == ' ') && *s >= '0' && *s <= '9')
+        {
+            const char *p = s;
+            while (*p >= '0' && *p <= '9') p++;
+            if (*p == ':')
+            {
+                o += modern_copy_number(&s, dst + o, dstsz - o);
+                continue;
+            }
+        }
+        dst[o++] = *s++;
+    }
+    dst[o] = '\0';
 }
 
 #endif /* ndef __PCTOOL__ */

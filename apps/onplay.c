@@ -1735,8 +1735,19 @@ int onplay(char* file, int attr, int from_context, bool hotkey, int customaction
 #else
     (void)hotkey;
 #endif
-    if (customaction == ONPLAY_CUSTOMACTION_SHUFFLE_SONGS)
+    if (customaction == ONPLAY_CUSTOMACTION_PLAY_ALL)
     {
+        global_settings.playlist_shuffle = 0;
+        global_settings.repeat_mode = 0;
+        int returnCode = add_to_playlist(&addtopl_replace);
+        if (returnCode == 1)
+            return ONPLAY_RELOAD_DIR;
+        return ONPLAY_START_PLAY;
+    }
+    if (customaction == ONPLAY_CUSTOMACTION_SHUFFLE_SONGS ||
+        customaction == ONPLAY_CUSTOMACTION_SHUFFLE_ALL)
+    {
+        global_settings.playlist_shuffle = 1;
         int returnCode = add_to_playlist(&addtopl_replace_shuffled);
         if (returnCode == 1)
             // User did not want to erase his current playlist, so let's show again the database main menu

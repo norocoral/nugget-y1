@@ -472,6 +472,9 @@ MENUITEM_SETTING(y1_cpu_cores_setting, &global_settings.y1_cpu_cores, NULL);
 MENUITEM_SETTING(y1_screen_off_cpu_save_item, &global_settings.y1_screen_off_cpu_save, NULL);
 MENUITEM_SETTING(y1_logging_item, &global_settings.y1_logging_enabled, NULL);
 MENUITEM_SETTING(y1_bt_enable_item, &global_settings.bt_enabled, NULL);
+MENUITEM_SETTING(y1_bt_connected_device_full_volume_item, &global_settings.bt_connected_device_full_volume, NULL);
+MENUITEM_SETTING(y1_rich_album_view_item, &global_settings.y1_rich_album_view, NULL);
+MENUITEM_SETTING(y1_modern_scheme_item, &global_settings.y1_modern_scheme, NULL);
 
 static bool keyclick_custom_sound_show_item(char *name, int attr,
                                             struct tree_context *tc)
@@ -798,6 +801,7 @@ MENUITEM_FUNCTION(y1_bt_disconnect_item, 0, ID2P(LANG_Y1_BT_DISCONNECT),
 
 MAKE_MENU(nugget_bluetooth_menu, ID2P(LANG_Y1_BLUETOOTH), 0, Icon_NOICON,
           &y1_bt_enable_item,
+          &y1_bt_connected_device_full_volume_item,
           &y1_bt_status_item,
           &y1_bt_paired_item,
           &y1_bt_remove_item,
@@ -826,6 +830,8 @@ MAKE_MENU(nugget_device_menu, ID2P(LANG_DEVICE), 0, Icon_NOICON,
           &y1_aod_brightness_item,
           &y1_aod_timeout_item,
           &y1_scroll_abc_item,
+          &y1_rich_album_view_item,
+          &y1_modern_scheme_item,
           &y1_double_click_unhold_item,
           &y1_cpu_mode_setting,
           &y1_cpu_cores_setting,

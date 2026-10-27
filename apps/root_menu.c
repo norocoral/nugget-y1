@@ -493,6 +493,13 @@ static int y1_videos_screen(void *param)
         return GO_TO_ROOT;
     return GO_TO_PREVIOUS;
 }
+static int shuffle_database_screen(void *param)
+{
+    (void)param;
+    if (tagtree_shuffle_all() == 0)
+        return GO_TO_WPS;
+    return GO_TO_PREVIOUS;
+}
 #endif
 
 /* These are all static const'd from apps/menus/ *.c
@@ -538,6 +545,7 @@ static const struct root_items items[] = {
 #if defined(INNIOASIS_Y1)
     [GO_TO_BT_RECEIVER] = { bt_receiver_screen, NULL, NULL },
     [GO_TO_VIDEOS] =      { y1_videos_screen, NULL, &y1_video_settings_menu },
+    [GO_TO_SHUFFLE_DATABASE] = { shuffle_database_screen, NULL, NULL },
 #endif
 
 };
@@ -665,6 +673,8 @@ MENUITEM_RETURNVALUE(bt_receiver_menu_item, ID2P(LANG_BLUETOOTH_RECEIVER),
                      GO_TO_BT_RECEIVER, NULL, Icon_Radio_screen);
 MENUITEM_RETURNVALUE(videos_menu_item, ID2P(LANG_Y1_VIDEOS),
                      GO_TO_VIDEOS, NULL, Icon_Plugin);
+MENUITEM_RETURNVALUE(shuffle_database_menu_item, ID2P(LANG_SHUFFLE),
+                     GO_TO_SHUFFLE_DATABASE, NULL, Icon_Audio);
 #endif
 
 struct menu_item_ex root_menu_;
@@ -680,6 +690,7 @@ static struct menu_table menu_table[] = {
     { "playlists", &playlists },
 #if defined(INNIOASIS_Y1)
     { "videos", &videos_menu_item },
+    { "shuffle_database", &shuffle_database_menu_item },
 #endif
     { "shortcuts", &shortcut_menu },
     { "bookmarks", &bookmarks },

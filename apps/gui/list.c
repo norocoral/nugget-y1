@@ -133,7 +133,7 @@ static bool scroll_abc_get_initial(struct gui_synclist *lists, int item,
         return false;
 
     text = get_name(item, lists->data, name, sizeof(name));
-    if (!text || !*text)
+    if (!text || P2ID((const unsigned char *)text) >= 0 || !*text)
         return false;
 
     next = utf8decode((const unsigned char *)text, &ch);
@@ -159,7 +159,8 @@ static bool scroll_abc_is_numbered_item(struct gui_synclist *lists, int item)
         return false;
 
     text = get_name(item, lists->data, name, sizeof(name));
-    if (!text || *text < '0' || *text > '9')
+    if (!text || P2ID((const unsigned char *)text) >= 0 ||
+        *text < '0' || *text > '9')
         return false;
 
     while (*text >= '0' && *text <= '9')

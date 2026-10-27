@@ -300,4 +300,10 @@ long from_normalized_volume(long norm, long min_vol, long max_vol, long max_norm
  * will be written to the lcd */
 void clear_screen_buffer(bool update);
 
+/* "Use Modern Scheme" list formatting: replaces " - " with " • ",
+ * strips leading zeros from times, and (if leading_index) turns a
+ * leading "01. " / "1.02. " index into "1   " / "1.2   " */
+void modern_scheme_format(const char *src, char *dst, size_t dstsz,
+                          bool leading_index);
+
 #endif /* MISC_H */

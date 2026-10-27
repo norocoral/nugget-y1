@@ -18354,29 +18354,156 @@
 </phrase>
 <phrase>
   id: LANG_Y1_VIDEO_1080P_DIRECT
-  desc: Direct 15 FPS mode for 1080p video
+  desc: Direct mode for 1080p video
   user: core
   <source>
-    *: "Direct (15 FPS Sync)"
+    *: "Direct"
   </source>
   <dest>
-    *: "Direct (15 FPS Sync)"
+    *: "Direct"
   </dest>
   <voice>
-    *: "Direct 15 FPS sync"
+    *: "Direct"
   </voice>
 </phrase>
 <phrase>
   id: LANG_Y1_VIDEO_1080P_CACHE
-  desc: Auto-Cache 30 FPS mode for 1080p video
+  desc: Cache mode for 1080p video
   user: core
   <source>
-    *: "Auto-Cache (30 FPS)"
+    *: "Cache"
   </source>
   <dest>
-    *: "Auto-Cache (30 FPS)"
+    *: "Cache"
   </dest>
   <voice>
-    *: "Auto-cache 30 FPS"
+    *: "Cache"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_BT_CONNECTED_DEVICE_FULL_VOLUME
+  desc: Set connected Bluetooth device to full volume and lock volume
+  user: core
+  <source>
+    *: "Set Connected Device Full Volume"
+  </source>
+  <dest>
+    *: "Set Connected Device Full Volume"
+  </dest>
+  <voice>
+    *: "Set connected device full volume"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_PHOTOS
+  desc: Photos menu option in Main Menu
+  user: core
+  <source>
+    *: "Photos"
+  </source>
+  <dest>
+    *: "Photos"
+  </dest>
+  <voice>
+    *: "Photos"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_PHOTO_ALBUMS
+  desc: Photo Albums view in Photos
+  user: core
+  <source>
+    *: "Photo Albums"
+  </source>
+  <dest>
+    *: "Photo Albums"
+  </dest>
+  <voice>
+    *: "Photo albums"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_PHOTO_SLIDESHOW
+  desc: Slideshow in Photos
+  user: core
+  <source>
+    *: "Slideshow"
+  </source>
+  <dest>
+    *: "Slideshow"
+  </dest>
+  <voice>
+    *: "Slideshow"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_PHOTO_SLIDESHOW_INTERVAL
+  desc: Slideshow interval setting
+  user: core
+  <source>
+    *: "Slideshow Interval"
+  </source>
+  <dest>
+    *: "Slideshow Interval"
+  </dest>
+  <voice>
+    *: "Slideshow interval"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_PHOTO_RESCAN
+  desc: Rescan Photos action
+  user: core
+  <source>
+    *: "Rescan Photos"
+  </source>
+  <dest>
+    *: "Rescan Photos"
+  </dest>
+  <voice>
+    *: "Rescan photos"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_SHUFFLE_DATABASE
+  desc: Shuffle Database menu option in Main Menu
+  user: core
+  <source>
+    *: "Shuffle Database"
+  </source>
+  <dest>
+    *: "Shuffle Database"
+  </dest>
+  <voice>
+    *: "Shuffle database"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_RICH_ALBUM_VIEW
+  desc: Rich Database Album view setting
+  user: core
+  <source>
+    *: "Rich Album View"
+  </source>
+  <dest>
+    *: "Rich Album View"
+  </dest>
+  <voice>
+    *: "Rich album view"
+  </voice>
+</phrase>
+
+<phrase>
+  id: LANG_Y1_MODERN_SCHEME
+  desc: Modern list formatting (bullets, no leading zeros, play marker)
+  user: core
+  <source>
+    *: "Use Modern Scheme"
+  </source>
+  <dest>
+    *: "Use Modern Scheme"
+  </dest>
+  <voice>
+    *: "Use modern scheme"
   </voice>
 </phrase>

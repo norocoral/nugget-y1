@@ -420,7 +420,7 @@ cp "$BUILD_DIR/rockbox.zip" "$SCRIPT_DIR/rockbox_sdcard.zip"
 
 SD_STAGE="$(mktemp -d "$SCRIPT_DIR/.sdcard-stage.XXXXXX")"
 
-mkdir -p "$SD_STAGE/.rockbox/bt" "$SD_STAGE/.rockbox/lib" "$SD_STAGE/Videos"
+mkdir -p "$SD_STAGE/.rockbox/bt" "$SD_STAGE/.rockbox/lib" "$SD_STAGE/.rockbox/bin" "$SD_STAGE/Videos"
 
 echo "[*] Building external SD card video library (liby1video.so)..."
 "${CC[@]}" -O3 -mfpu=neon -mfloat-abi=hard -fPIC -shared \
@@ -448,6 +448,17 @@ for libdir in "$SCRIPT_DIR/video/libs" "/usr/arm-linux-gnueabihf/lib" "/usr/lib/
         done
     fi
 done
+
+# Stage ARM FFmpeg binary if available for Cache mode
+if [[ ! -s "$SD_STAGE/.rockbox/bin/ffmpeg" ]]; then
+    if [[ -x "$SCRIPT_DIR/tools/ffmpeg" ]]; then
+        cp "$SCRIPT_DIR/tools/ffmpeg" "$SD_STAGE/.rockbox/bin/ffmpeg"
+        chmod +x "$SD_STAGE/.rockbox/bin/ffmpeg"
+    elif [[ -x "$SCRIPT_DIR/tools/ffmpeg-armv7l" ]]; then
+        cp "$SCRIPT_DIR/tools/ffmpeg-armv7l" "$SD_STAGE/.rockbox/bin/ffmpeg"
+        chmod +x "$SD_STAGE/.rockbox/bin/ffmpeg"
+    fi
+fi
 
 cp "$BUILD_DIR/rockbox" "$SD_STAGE/.rockbox/rockbox"
 
@@ -480,7 +491,7 @@ cd "$SD_STAGE"
 
 zip -u -q "$SCRIPT_DIR/rockbox_sdcard.zip" .rockbox/rockbox
 
-for asset in .rockbox/*.raw .rockbox/bt/* .rockbox/lib/* Videos; do
+for asset in .rockbox/*.raw .rockbox/bt/* .rockbox/lib/* .rockbox/bin/* Videos; do
     [[ -e "$asset" ]] || continue
     zip -u -q -r "$SCRIPT_DIR/rockbox_sdcard.zip" "$asset"
 done

@@ -796,9 +796,11 @@ static int dirbrowse(void)
             if (id3db && (button == ACTION_STD_OK || button == ACTION_STD_CONTEXT))
             {
                 customaction = tagtree_get_custom_action(&tc);
-                if (customaction == ONPLAY_CUSTOMACTION_SHUFFLE_SONGS)
+                if (customaction == ONPLAY_CUSTOMACTION_SHUFFLE_SONGS ||
+                    customaction == ONPLAY_CUSTOMACTION_SHUFFLE_ALL ||
+                    customaction == ONPLAY_CUSTOMACTION_PLAY_ALL)
                 {
-                    /* The code to insert shuffled is on the context branch of the switch so we always go here */
+                    /* The code to insert is on the context branch of the switch so we always go here */
                     button = ACTION_STD_CONTEXT;
                     do_restore_display = false;
                 }

@@ -70,7 +70,8 @@ enum {
 #endif
 #if defined(INNIOASIS_Y1)
     GO_TO_BT_RECEIVER,
-    GO_TO_VIDEOS
+    GO_TO_VIDEOS,
+    GO_TO_SHUFFLE_DATABASE
 #endif
 };
 #ifndef PLUGIN

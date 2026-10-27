@@ -564,6 +564,20 @@ static void format_line(struct playlist_entry* track, char* buf, int buf_sz)
     else if (!formatted_name)
         formatted_name = track->name + strlen(track->name) + 1;
 
+    if (global_settings.y1_modern_scheme)
+    {
+        char modern[MAX_PATH];
+        modern_scheme_format(formatted_name, modern, sizeof(modern), false);
+        if (track->index == viewer.current_playing_track)
+            snprintf(buf, buf_sz, "\xe2\x96\xb6  %s%s", skipped, modern); /* "▶  " */
+        else if (global_settings.playlist_viewer_indices)
+            snprintf(buf, buf_sz, "%d   %s%s", track->display_index,
+                     skipped, modern);
+        else
+            snprintf(buf, buf_sz, "%s%s", skipped, modern);
+        return;
+    }
+
     if (global_settings.playlist_viewer_indices)
         snprintf(buf, buf_sz, "%s%d. %s%s%s", prefix, track->display_index,
                  skipped, formatted_name, suffix);
@@ -802,7 +816,12 @@ static const char* playlist_callback_name(int selected_item,
                                           char *buffer,
                                           size_t buffer_len)
 {
-    struct playlist_entry *track = pv_get_track(data, selected_item);
+    if (selected_item == 0)
+        return str(LANG_PLAY);
+    if (selected_item == 1)
+        return str(LANG_SHUFFLE);
+
+    struct playlist_entry *track = pv_get_track(data, selected_item - 2);
 
     format_line(track, buffer, buffer_len);
 
@@ -813,8 +832,11 @@ static const char* playlist_callback_name(int selected_item,
 static enum themable_icons playlist_callback_icons(int selected_item,
                                                    void *data)
 {
+    if (selected_item < 2)
+        return Icon_Audio;
+
     struct playlist_viewer *local_viewer = (struct playlist_viewer *)data;
-    struct playlist_entry *track = pv_get_track(local_viewer, selected_item);
+    struct playlist_entry *track = pv_get_track(local_viewer, selected_item - 2);
 
     if (track->index == local_viewer->current_playing_track)
     {
@@ -880,7 +902,7 @@ static void update_gui(struct gui_synclist * playlist_lists, bool init)
     if (init)
         gui_synclist_init(playlist_lists, playlist_callback_name,
                           &viewer, false, 1, NULL);
-    gui_synclist_set_nb_items(playlist_lists, viewer.num_tracks);
+    gui_synclist_set_nb_items(playlist_lists, viewer.num_tracks + 2);
     gui_synclist_set_voice_callback(playlist_lists,
                                     global_settings.talk_file?
                                     &playlist_callback_voice:NULL);
@@ -1057,9 +1079,49 @@ enum playlist_viewer_result playlist_viewer_ex(const char* filename,
             }
             case ACTION_STD_OK:
             {
+                if (viewer.selected_track == 0)
+                {
+                    /* Play - Play the songs with shuffle off and repeat off */
+                    global_settings.playlist_shuffle = 0;
+                    global_settings.repeat_mode = 0;
+                    if (!viewer.playlist)
+                    {
+                        playlist_start(0, 0, 0);
+                        update_playlist(false);
+                    }
+                    else if (warn_on_pl_erase())
+                    {
+                        playlist_set_current(viewer.playlist);
+                        viewer.playlist = NULL;
+                        playlist_start(0, 0, 0);
+                    }
+                    ret = PLAYLIST_VIEWER_OK;
+                    goto exit;
+                }
+                if (viewer.selected_track == 1)
+                {
+                    /* Shuffle - Play the songs with shuffle on and repeat untouched */
+                    global_settings.playlist_shuffle = 1;
+                    if (!viewer.playlist)
+                    {
+                        playlist_shuffle(0, -1);
+                        playlist_start(0, 0, 0);
+                        update_playlist(false);
+                    }
+                    else if (warn_on_pl_erase())
+                    {
+                        playlist_set_current(viewer.playlist);
+                        viewer.playlist = NULL;
+                        playlist_shuffle(0, -1);
+                        playlist_start(0, 0, 0);
+                    }
+                    ret = PLAYLIST_VIEWER_OK;
+                    goto exit;
+                }
+
                 struct playlist_entry * current_track =
                             playlist_buffer_get_track(&viewer.buffer,
-                                                      viewer.selected_track);
+                                                      viewer.selected_track - 2);
                 int ret_val, start_index = current_track->index;
                 if (viewer.moving_track >= 0)
                 {
@@ -1119,7 +1181,9 @@ enum playlist_viewer_result playlist_viewer_ex(const char* filename,
             }
             case ACTION_STD_CONTEXT:
             {
-                int pv_context_result = context_menu(viewer.selected_track);
+                if (viewer.selected_track < 2)
+                    break;
+                int pv_context_result = context_menu(viewer.selected_track - 2);
 
                 if (pv_context_result == PV_CONTEXT_USB)
                 {
@@ -1165,9 +1229,11 @@ enum playlist_viewer_result playlist_viewer_ex(const char* filename,
 #ifdef HAVE_HOTKEY
             case ACTION_TREE_HOTKEY:
             {
+                if (viewer.selected_track < 2)
+                    break;
                 struct playlist_entry *current_track = playlist_buffer_get_track(
                                                             &viewer.buffer,
-                                                            viewer.selected_track);
+                                                            viewer.selected_track - 2);
                 enum pv_context_result (*do_plugin)(const struct playlist_entry *) = NULL;
 #ifdef HAVE_TAGCACHE
                 if (global_settings.hotkey_tree == HOTKEY_PICTUREFLOW)

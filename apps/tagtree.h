@@ -40,6 +40,7 @@ int tagtree_export(void);
 int tagtree_import(void);
 void tagtree_init(void) INIT_ATTR;
 bool tagtree_ready(void);
+int tagtree_shuffle_all(void);
 void tagtree_set_wps_browse_target(enum tagtree_wps_browse_target target);
 int tagtree_enter(struct tree_context* c, bool is_visible);
 void tagtree_exit(struct tree_context* c, bool is_visible);
