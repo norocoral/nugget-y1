@@ -978,6 +978,7 @@ struct user_settings
     int  y1_video_resume;
     int  y1_video_aspect;
     int  y1_video_skip_step;
+    int  y1_video_1080p_mode;
     bool y1_video_autoplay_next;
     bool y1_video_show_thumbs;
 #endif

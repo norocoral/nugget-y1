@@ -874,6 +874,7 @@ MENUITEM_FUNCTION(y1_video_reset_dir_item, 0, ID2P(LANG_RESET),
                   y1_video_reset_dir_func, NULL, Icon_Menu_functioncall);
 MENUITEM_SETTING(y1_video_resume_item, &global_settings.y1_video_resume, NULL);
 MENUITEM_SETTING(y1_video_aspect_item, &global_settings.y1_video_aspect, NULL);
+MENUITEM_SETTING(y1_video_1080p_item, &global_settings.y1_video_1080p_mode, NULL);
 MENUITEM_SETTING(y1_video_skip_step_item, &global_settings.y1_video_skip_step, NULL);
 MENUITEM_SETTING(y1_video_autoplay_item, &global_settings.y1_video_autoplay_next, NULL);
 MENUITEM_SETTING(y1_video_thumbs_item, &global_settings.y1_video_show_thumbs, NULL);
@@ -885,6 +886,7 @@ MAKE_MENU(y1_video_settings_menu, ID2P(LANG_Y1_VIDEOS), 0, Icon_Menu_setting,
           &y1_video_reset_dir_item,
           &y1_video_resume_item,
           &y1_video_aspect_item,
+          &y1_video_1080p_item,
           &y1_video_skip_step_item,
           &y1_video_autoplay_item,
           &y1_video_thumbs_item,

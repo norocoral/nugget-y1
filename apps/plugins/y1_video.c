@@ -80,7 +80,7 @@ static bool g_lib_ready = false;
 
 /* Audio streaming double buffer for Rockbox mixer channel (512 frames = 11.6ms at 44.1kHz) */
 #define PCM_CHUNK_FRAMES     512
-#define AUDIO_HW_LATENCY_MS  185
+#define AUDIO_HW_LATENCY_MS  30
 static int16_t g_pcm_buf[2][PCM_CHUNK_FRAMES * 2];
 static int g_pcm_active_buf = 0;
 static y1vid_ctx *g_active_vid_ctx = NULL;
@@ -758,6 +758,80 @@ static int show_in_video_context_menu(struct y1_video_db_entry *db_entry,
     return 0;
 }
 
+static bool find_cached_video_path(const char *src_path, char *cache_path, size_t max_len)
+{
+    if (!src_path || !cache_path || max_len < 32)
+        return false;
+
+    const char *last_slash = strrchr(src_path, '/');
+    const char *filename = last_slash ? (last_slash + 1) : src_path;
+    const char *last_dot = strrchr(filename, '.');
+    char name_no_ext[128];
+    if (last_dot) {
+        size_t nlen = (size_t)(last_dot - filename);
+        if (nlen >= sizeof(name_no_ext)) nlen = sizeof(name_no_ext) - 1;
+        memcpy(name_no_ext, filename, nlen);
+        name_no_ext[nlen] = '\0';
+    } else {
+        rb->strlcpy(name_no_ext, filename, sizeof(name_no_ext));
+    }
+
+    struct stat st;
+
+    /* Check 1: /mnt/sdcard/.rockbox/video_cache/<name>_360p.mp4 */
+    rb->snprintf(cache_path, max_len, "/mnt/sdcard/.rockbox/video_cache/%s_360p.mp4", name_no_ext);
+    if (stat(cache_path, &st) == 0 && st.st_size > 4096)
+        return true;
+
+    /* Check 2: Same directory <name>.360p.mp4 or <name>.opt.mp4 */
+    char dir[MAX_PATHNAME];
+    if (last_slash) {
+        size_t dlen = (size_t)(last_slash - src_path);
+        if (dlen >= sizeof(dir)) dlen = sizeof(dir) - 1;
+        memcpy(dir, src_path, dlen);
+        dir[dlen] = '\0';
+    } else {
+        rb->strlcpy(dir, ".", sizeof(dir));
+    }
+
+    rb->snprintf(cache_path, max_len, "%s/%s.360p.mp4", dir, name_no_ext);
+    if (stat(cache_path, &st) == 0 && st.st_size > 4096)
+        return true;
+
+    rb->snprintf(cache_path, max_len, "%s/%s.opt.mp4", dir, name_no_ext);
+    if (stat(cache_path, &st) == 0 && st.st_size > 4096)
+        return true;
+
+    return false;
+}
+
+static void get_default_cache_path(const char *src_path, char *target_path, size_t max_len)
+{
+    const char *last_slash = strrchr(src_path, '/');
+    const char *filename = last_slash ? (last_slash + 1) : src_path;
+    const char *last_dot = strrchr(filename, '.');
+    char name_no_ext[128];
+    if (last_dot) {
+        size_t nlen = (size_t)(last_dot - filename);
+        if (nlen >= sizeof(name_no_ext)) nlen = sizeof(name_no_ext) - 1;
+        memcpy(name_no_ext, filename, nlen);
+        name_no_ext[nlen] = '\0';
+    } else {
+        rb->strlcpy(name_no_ext, filename, sizeof(name_no_ext));
+    }
+
+    rb->snprintf(target_path, max_len, "/mnt/sdcard/.rockbox/video_cache/%s_360p.mp4", name_no_ext);
+}
+
+static int prompt_1080p_choice(void)
+{
+    MENUITEM_STRINGLIST(menu, "1080p Playback Mode", NULL,
+                        "Direct (15 FPS Sync)",
+                        "Auto-Cache (30 FPS)");
+    int selected = 0;
+    return rb->do_menu(&menu, &selected, NULL, false);
+}
+
 /* Returns:
  *  0 = user pressed MENU to exit
  *  1 = video finished naturally (for autoplay next)
@@ -768,8 +842,8 @@ static int play_single_video(const char *path, bool force_from_beginning)
     if (!load_external_video_library())
         return 0;
 
-    int db_idx = ensure_db_entry_for_path(path);
-    struct y1_video_db_entry *db_entry = (db_idx >= 0) ? &g_db[db_idx] : NULL;
+    char actual_path[MAX_PATHNAME];
+    rb->strlcpy(actual_path, path, sizeof(actual_path));
 
     struct screen *disp = rb->screens[SCREEN_MAIN];
     int sw = disp->getwidth();
@@ -778,11 +852,86 @@ static int play_single_video(const char *path, bool force_from_beginning)
     if (sh > 360) sh = 360;
 
     int aspect = rb->global_settings->y1_video_aspect;
-    y1vid_ctx *ctx = g_vid.open(path, sw, sh, aspect, 44100);
+
+    /* Probe file to detect video resolution */
+    struct y1vid_meta probe_meta;
+    memset(&probe_meta, 0, sizeof(probe_meta));
+    g_vid.probe_metadata(actual_path, &probe_meta, NULL, 0, 0);
+
+    bool is_1080p = (probe_meta.width > 1280 || probe_meta.height > 720);
+    char cached_path[MAX_PATHNAME];
+    bool has_cache = is_1080p && find_cached_video_path(actual_path, cached_path, sizeof(cached_path));
+
+    if (has_cache) {
+        /* Optimized downscaled stream already exists: play at full 30 FPS */
+        rb->strlcpy(actual_path, cached_path, sizeof(actual_path));
+        is_1080p = false;
+    } else if (is_1080p) {
+        int mode = rb->global_settings->y1_video_1080p_mode;
+        if (mode == 2) { /* Ask / Prompt */
+            int choice = prompt_1080p_choice();
+            if (choice == 1) {
+                mode = 1; /* Auto-Cache (30 FPS) */
+            } else if (choice == 0) {
+                mode = 0; /* Direct (15 FPS Sync) */
+            } else {
+                return 0; /* User cancelled */
+            }
+        }
+
+        if (mode == 1) { /* Auto-Cache (30 FPS) */
+            const char *ffmpeg_bin = NULL;
+            if (access("/mnt/sdcard/.rockbox/bin/ffmpeg", X_OK) == 0) {
+                ffmpeg_bin = "/mnt/sdcard/.rockbox/bin/ffmpeg";
+            } else if (access("/bin/ffmpeg", X_OK) == 0) {
+                ffmpeg_bin = "/bin/ffmpeg";
+            } else if (access("/usr/bin/ffmpeg", X_OK) == 0) {
+                ffmpeg_bin = "/usr/bin/ffmpeg";
+            }
+
+            char target_cache[MAX_PATHNAME];
+            get_default_cache_path(actual_path, target_cache, sizeof(target_cache));
+
+            if (ffmpeg_bin) {
+                rb->splash(0, "Optimizing 1080p video...\nPlease wait");
+                mkdir("/mnt/sdcard/.rockbox/video_cache", 0755);
+                char cmd[MAX_PATHNAME * 2 + 256];
+                rb->snprintf(cmd, sizeof(cmd),
+                    "%s -y -i \"%s\" -vf \"scale=480:360:force_original_aspect_ratio=decrease,pad=480:360:(ow-iw)/2:(oh-ih)/2\" "
+                    "-c:v libx264 -preset ultrafast -profile:v baseline -level 3.0 -b:v 800k -c:a copy \"%s\" >/dev/null 2>&1",
+                    ffmpeg_bin, actual_path, target_cache);
+                int ret = system(cmd);
+                struct stat st;
+                if (ret == 0 && stat(target_cache, &st) == 0 && st.st_size > 4096) {
+                    rb->strlcpy(actual_path, target_cache, sizeof(actual_path));
+                    is_1080p = false;
+                }
+            } else {
+                rb->splashf(HZ * 2, "1080p Video Detected\nPlaying in 15 FPS Sync mode...");
+            }
+        }
+    }
+
+    int db_idx = ensure_db_entry_for_path(path);
+    struct y1_video_db_entry *db_entry = (db_idx >= 0) ? &g_db[db_idx] : NULL;
+
+    y1vid_ctx *ctx = g_vid.open(actual_path, sw, sh, aspect, 44100);
     if (!ctx) {
-        rb->splashf(HZ * 2, "Cannot open video:\n%s", path);
+        rb->splashf(HZ * 2, "Cannot open video:\n%s", actual_path);
         return 0;
     }
+
+    /* Verify resolution from active context */
+    struct y1vid_meta meta;
+    memset(&meta, 0, sizeof(meta));
+    g_vid.get_meta(ctx, &meta);
+    if (meta.width > 1280 || meta.height > 720)
+        is_1080p = true;
+    else
+        is_1080p = false;
+
+    bool direct_15fps = is_1080p;
+    int64_t frame_interval_ms = (meta.fps_x100 > 0) ? (200000 / meta.fps_x100) : 66;
 
     int64_t dur_ms = g_vid.get_duration_ms(ctx);
     if (db_entry && dur_ms > 0)
@@ -890,24 +1039,27 @@ static int play_single_video(const char *path, bool force_from_beginning)
             int64_t clock_ms = get_master_clock_ms(media_anchor_ms, wall_anchor_ms);
             int64_t lag_ms   = clock_ms - cur_pts_ms;
 
-            /* Decode into ctx->v_frame first without YUV->RGB565 conversion:
-             * drop_mode 3 = AVDISCARD_NONREF (skip B-frames) + no blit
-             * drop_mode 2 = AVDISCARD_DEFAULT + no blit */
-            int drop_mode = (lag_ms > 20) ? 3 : 2;
-            int dec = g_vid.decode_video(ctx, g_video_fb, &cur_pts_ms, drop_mode);
+            /* Resynchronize clock anchor if video fell significantly behind (>400ms) */
+            if (lag_ms > 400) {
+                media_anchor_ms = cur_pts_ms;
+                wall_anchor_ms  = now_ms_monotonic();
+                g_audio_clock_valid = false;
+                clock_ms = cur_pts_ms;
+                lag_ms   = 0;
+            }
 
-            /* If the frame we just decoded is still >35ms behind the master audio clock,
-             * skip YUV->RGB565 conversion and LCD update on it and immediately decode
-             * the next frame (up to 4 catch-up frames) so video stays at 100% speed! */
-            int catchup_steps = 0;
-            while (dec > 0 && catchup_steps < 4) {
+            /* If not in 15fps mode and lagging > 70ms, drop at most 1 frame without blit */
+            if (!direct_15fps && lag_ms > 70) {
+                g_vid.decode_video(ctx, g_video_fb, &cur_pts_ms, 3);
                 clock_ms = get_master_clock_ms(media_anchor_ms, wall_anchor_ms);
                 lag_ms   = clock_ms - cur_pts_ms;
-                if (lag_ms <= 35)
-                    break;
-                dec = g_vid.decode_video(ctx, g_video_fb, &cur_pts_ms, 3);
-                catchup_steps++;
             }
+
+            /* Decode and downscale directly into g_video_fb:
+             * drop_mode 1: discard non-reference B-frames if still lagging (>40ms)
+             * drop_mode 0: full decode & downscale blit */
+            int drop_mode = (!direct_15fps && lag_ms > 40) ? 1 : 0;
+            int dec = g_vid.decode_video(ctx, g_video_fb, &cur_pts_ms, drop_mode);
 
             if (dec <= 0) {
                 /* Reached End of Video or decode error */
@@ -919,8 +1071,12 @@ static int play_single_video(const char *path, bool force_from_beginning)
                 break;
             }
 
-            /* Blit the caught-up YUV420P frame into g_video_fb (drop_nonref == 4) */
-            g_vid.decode_video(ctx, g_video_fb, &cur_pts_ms, 4);
+            if (direct_15fps) {
+                /* In 15 FPS locked cadence mode, skip next frame to keep 15 FPS
+                 * cadence rock-solid and preserve 100% audio sync */
+                int64_t skip_pts = 0;
+                g_vid.decode_video(ctx, g_video_fb, &skip_pts, 3);
+            }
         }
 
         /* Blit decoded video frame + iPod OSD to LCD */
@@ -937,7 +1093,8 @@ static int play_single_video(const char *path, bool force_from_beginning)
             btn = rb->button_get(false);
             if (btn == BUTTON_NONE) {
                 int64_t clock_ms = get_master_clock_ms(media_anchor_ms, wall_anchor_ms);
-                int64_t ahead_ms = cur_pts_ms - clock_ms;
+                int64_t target_pts = cur_pts_ms + (direct_15fps ? frame_interval_ms : 0);
+                int64_t ahead_ms = target_pts - clock_ms;
                 if (ahead_ms > 80) ahead_ms = 80;
                 while (ahead_ms > 2) {
                     int64_t step_us = (ahead_ms > 6) ? 4000 : ((ahead_ms - 1) * 1000);
@@ -946,7 +1103,7 @@ static int play_single_video(const char *path, bool force_from_beginning)
                     if (btn != BUTTON_NONE)
                         break;
                     clock_ms = get_master_clock_ms(media_anchor_ms, wall_anchor_ms);
-                    ahead_ms = cur_pts_ms - clock_ms;
+                    ahead_ms = target_pts - clock_ms;
                 }
             }
         }
@@ -1537,6 +1694,7 @@ MENUITEM_FUNCTION(vid_reset_dir_item, 0, ID2P(LANG_RESET),
                   menu_act_reset_dir, NULL, Icon_Menu_functioncall);
 static struct menu_item_ex vid_resume_item    = { MT_SETTING, { .variable = NULL }, { video_settings_callback } };
 static struct menu_item_ex vid_aspect_item    = { MT_SETTING, { .variable = NULL }, { video_settings_callback } };
+static struct menu_item_ex vid_1080p_item     = { MT_SETTING, { .variable = NULL }, { video_settings_callback } };
 static struct menu_item_ex vid_skip_step_item = { MT_SETTING, { .variable = NULL }, { video_settings_callback } };
 static struct menu_item_ex vid_autoplay_item  = { MT_SETTING, { .variable = NULL }, { video_settings_callback } };
 static struct menu_item_ex vid_thumbs_item    = { MT_SETTING, { .variable = NULL }, { video_settings_callback } };
@@ -1549,6 +1707,7 @@ MAKE_MENU(video_settings_menu, ID2P(LANG_Y1_VIDEOS),
           &vid_reset_dir_item,
           &vid_resume_item,
           &vid_aspect_item,
+          &vid_1080p_item,
           &vid_skip_step_item,
           &vid_autoplay_item,
           &vid_thumbs_item,
@@ -1636,6 +1795,7 @@ static void init_video_menus(void)
 {
     vid_resume_item.variable    = &rb->global_settings->y1_video_resume;
     vid_aspect_item.variable    = &rb->global_settings->y1_video_aspect;
+    vid_1080p_item.variable     = &rb->global_settings->y1_video_1080p_mode;
     vid_skip_step_item.variable = &rb->global_settings->y1_video_skip_step;
     vid_autoplay_item.variable  = &rb->global_settings->y1_video_autoplay_next;
     vid_thumbs_item.variable    = &rb->global_settings->y1_video_show_thumbs;

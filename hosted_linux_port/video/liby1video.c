@@ -28,6 +28,7 @@
 #include <strings.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <dlfcn.h>
 #include <unistd.h>
 #include <fcntl.h>
@@ -59,6 +60,357 @@ extern void *av_mallocz(size_t size);
 extern void  av_free(void *ptr);
 extern int   av_opt_set_int(void *obj, const char *name, int64_t val, int search_flags);
 
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+#include <arm_neon.h>
+
+typedef void (*qpel_mc_func)(uint8_t *dst, const uint8_t *src, ptrdiff_t stride);
+
+static void neon_put_pixels16(uint8_t *dst, const uint8_t *src, ptrdiff_t stride)
+{
+    for (int i = 0; i < 16; i++) {
+        vst1q_u8(dst, vld1q_u8(src));
+        src += stride;
+        dst += stride;
+    }
+}
+
+static void neon_avg_pixels16(uint8_t *dst, const uint8_t *src, ptrdiff_t stride)
+{
+    for (int i = 0; i < 16; i++) {
+        vst1q_u8(dst, vrhaddq_u8(vld1q_u8(dst), vld1q_u8(src)));
+        src += stride;
+        dst += stride;
+    }
+}
+
+static void neon_put_qpel16_h(uint8_t *dst, const uint8_t *src, ptrdiff_t stride)
+{
+    for (int i = 0; i < 16; i++) {
+        vst1q_u8(dst, vrhaddq_u8(vld1q_u8(src), vld1q_u8(src + 1)));
+        src += stride;
+        dst += stride;
+    }
+}
+
+static void neon_avg_qpel16_h(uint8_t *dst, const uint8_t *src, ptrdiff_t stride)
+{
+    for (int i = 0; i < 16; i++) {
+        vst1q_u8(dst, vrhaddq_u8(vld1q_u8(dst), vrhaddq_u8(vld1q_u8(src), vld1q_u8(src + 1))));
+        src += stride;
+        dst += stride;
+    }
+}
+
+static void neon_put_qpel16_v(uint8_t *dst, const uint8_t *src, ptrdiff_t stride)
+{
+    for (int i = 0; i < 16; i++) {
+        vst1q_u8(dst, vrhaddq_u8(vld1q_u8(src), vld1q_u8(src + stride)));
+        src += stride;
+        dst += stride;
+    }
+}
+
+static void neon_avg_qpel16_v(uint8_t *dst, const uint8_t *src, ptrdiff_t stride)
+{
+    for (int i = 0; i < 16; i++) {
+        vst1q_u8(dst, vrhaddq_u8(vld1q_u8(dst), vrhaddq_u8(vld1q_u8(src), vld1q_u8(src + stride))));
+        src += stride;
+        dst += stride;
+    }
+}
+
+static void neon_put_qpel16_hv(uint8_t *dst, const uint8_t *src, ptrdiff_t stride)
+{
+    for (int i = 0; i < 16; i++) {
+        uint8x16_t s0 = vrhaddq_u8(vld1q_u8(src), vld1q_u8(src + 1));
+        uint8x16_t s1 = vrhaddq_u8(vld1q_u8(src + stride), vld1q_u8(src + stride + 1));
+        vst1q_u8(dst, vrhaddq_u8(s0, s1));
+        src += stride;
+        dst += stride;
+    }
+}
+
+static void neon_avg_qpel16_hv(uint8_t *dst, const uint8_t *src, ptrdiff_t stride)
+{
+    for (int i = 0; i < 16; i++) {
+        uint8x16_t s0 = vrhaddq_u8(vld1q_u8(src), vld1q_u8(src + 1));
+        uint8x16_t s1 = vrhaddq_u8(vld1q_u8(src + stride), vld1q_u8(src + stride + 1));
+        vst1q_u8(dst, vrhaddq_u8(vld1q_u8(dst), vrhaddq_u8(s0, s1)));
+        src += stride;
+        dst += stride;
+    }
+}
+
+static void neon_put_pixels8(uint8_t *dst, const uint8_t *src, ptrdiff_t stride)
+{
+    for (int i = 0; i < 8; i++) {
+        vst1_u8(dst, vld1_u8(src));
+        src += stride;
+        dst += stride;
+    }
+}
+
+static void neon_avg_pixels8(uint8_t *dst, const uint8_t *src, ptrdiff_t stride)
+{
+    for (int i = 0; i < 8; i++) {
+        vst1_u8(dst, vrhadd_u8(vld1_u8(dst), vld1_u8(src)));
+        src += stride;
+        dst += stride;
+    }
+}
+
+static void neon_put_qpel8_h(uint8_t *dst, const uint8_t *src, ptrdiff_t stride)
+{
+    for (int i = 0; i < 8; i++) {
+        vst1_u8(dst, vrhadd_u8(vld1_u8(src), vld1_u8(src + 1)));
+        src += stride;
+        dst += stride;
+    }
+}
+
+static void neon_avg_qpel8_h(uint8_t *dst, const uint8_t *src, ptrdiff_t stride)
+{
+    for (int i = 0; i < 8; i++) {
+        vst1_u8(dst, vrhadd_u8(vld1_u8(dst), vrhadd_u8(vld1_u8(src), vld1_u8(src + 1))));
+        src += stride;
+        dst += stride;
+    }
+}
+
+static void neon_put_qpel8_v(uint8_t *dst, const uint8_t *src, ptrdiff_t stride)
+{
+    for (int i = 0; i < 8; i++) {
+        vst1_u8(dst, vrhadd_u8(vld1_u8(src), vld1_u8(src + stride)));
+        src += stride;
+        dst += stride;
+    }
+}
+
+static void neon_avg_qpel8_v(uint8_t *dst, const uint8_t *src, ptrdiff_t stride)
+{
+    for (int i = 0; i < 8; i++) {
+        vst1_u8(dst, vrhadd_u8(vld1_u8(dst), vrhadd_u8(vld1_u8(src), vld1_u8(src + stride))));
+        src += stride;
+        dst += stride;
+    }
+}
+
+static void neon_put_qpel8_hv(uint8_t *dst, const uint8_t *src, ptrdiff_t stride)
+{
+    for (int i = 0; i < 8; i++) {
+        uint8x8_t s0 = vrhadd_u8(vld1_u8(src), vld1_u8(src + 1));
+        uint8x8_t s1 = vrhadd_u8(vld1_u8(src + stride), vld1_u8(src + stride + 1));
+        vst1_u8(dst, vrhadd_u8(s0, s1));
+        src += stride;
+        dst += stride;
+    }
+}
+
+static void neon_avg_qpel8_hv(uint8_t *dst, const uint8_t *src, ptrdiff_t stride)
+{
+    for (int i = 0; i < 8; i++) {
+        uint8x8_t s0 = vrhadd_u8(vld1_u8(src), vld1_u8(src + 1));
+        uint8x8_t s1 = vrhadd_u8(vld1_u8(src + stride), vld1_u8(src + stride + 1));
+        vst1_u8(dst, vrhadd_u8(vld1_u8(dst), vrhadd_u8(s0, s1)));
+        src += stride;
+        dst += stride;
+    }
+}
+
+static void neon_put_pixels4(uint8_t *dst, const uint8_t *src, ptrdiff_t stride)
+{
+    for (int i = 0; i < 4; i++) {
+        *(uint32_t *)dst = *(const uint32_t *)src;
+        src += stride;
+        dst += stride;
+    }
+}
+
+static void neon_avg_pixels4(uint8_t *dst, const uint8_t *src, ptrdiff_t stride)
+{
+    for (int i = 0; i < 4; i++) {
+        uint32_t a = *(uint32_t *)dst;
+        uint32_t b = *(const uint32_t *)src;
+        *(uint32_t *)dst = (a | b) - (((a ^ b) >> 1) & 0x7f7f7f7f);
+        src += stride;
+        dst += stride;
+    }
+}
+
+static void neon_put_qpel4_h(uint8_t *dst, const uint8_t *src, ptrdiff_t stride)
+{
+    for (int i = 0; i < 4; i++) {
+        uint32_t a = *(const uint32_t *)src;
+        uint32_t b = *(const uint32_t *)(src + 1);
+        *(uint32_t *)dst = (a | b) - (((a ^ b) >> 1) & 0x7f7f7f7f);
+        src += stride;
+        dst += stride;
+    }
+}
+
+static void neon_avg_qpel4_h(uint8_t *dst, const uint8_t *src, ptrdiff_t stride)
+{
+    for (int i = 0; i < 4; i++) {
+        uint32_t d = *(uint32_t *)dst;
+        uint32_t a = *(const uint32_t *)src;
+        uint32_t b = *(const uint32_t *)(src + 1);
+        uint32_t s = (a | b) - (((a ^ b) >> 1) & 0x7f7f7f7f);
+        *(uint32_t *)dst = (d | s) - (((d ^ s) >> 1) & 0x7f7f7f7f);
+        src += stride;
+        dst += stride;
+    }
+}
+
+static void neon_put_qpel4_v(uint8_t *dst, const uint8_t *src, ptrdiff_t stride)
+{
+    for (int i = 0; i < 4; i++) {
+        uint32_t a = *(const uint32_t *)src;
+        uint32_t b = *(const uint32_t *)(src + stride);
+        *(uint32_t *)dst = (a | b) - (((a ^ b) >> 1) & 0x7f7f7f7f);
+        src += stride;
+        dst += stride;
+    }
+}
+
+static void neon_avg_qpel4_v(uint8_t *dst, const uint8_t *src, ptrdiff_t stride)
+{
+    for (int i = 0; i < 4; i++) {
+        uint32_t d = *(uint32_t *)dst;
+        uint32_t a = *(const uint32_t *)src;
+        uint32_t b = *(const uint32_t *)(src + stride);
+        uint32_t s = (a | b) - (((a ^ b) >> 1) & 0x7f7f7f7f);
+        *(uint32_t *)dst = (d | s) - (((d ^ s) >> 1) & 0x7f7f7f7f);
+        src += stride;
+        dst += stride;
+    }
+}
+
+static void neon_put_qpel4_hv(uint8_t *dst, const uint8_t *src, ptrdiff_t stride)
+{
+    for (int i = 0; i < 4; i++) {
+        uint32_t a0 = *(const uint32_t *)src;
+        uint32_t a1 = *(const uint32_t *)(src + 1);
+        uint32_t b0 = *(const uint32_t *)(src + stride);
+        uint32_t b1 = *(const uint32_t *)(src + stride + 1);
+        uint32_t r0 = (a0 | a1) - (((a0 ^ a1) >> 1) & 0x7f7f7f7f);
+        uint32_t r1 = (b0 | b1) - (((b0 ^ b1) >> 1) & 0x7f7f7f7f);
+        *(uint32_t *)dst = (r0 | r1) - (((r0 ^ r1) >> 1) & 0x7f7f7f7f);
+        src += stride;
+        dst += stride;
+    }
+}
+
+static void neon_avg_qpel4_hv(uint8_t *dst, const uint8_t *src, ptrdiff_t stride)
+{
+    for (int i = 0; i < 4; i++) {
+        uint32_t d  = *(uint32_t *)dst;
+        uint32_t a0 = *(const uint32_t *)src;
+        uint32_t a1 = *(const uint32_t *)(src + 1);
+        uint32_t b0 = *(const uint32_t *)(src + stride);
+        uint32_t b1 = *(const uint32_t *)(src + stride + 1);
+        uint32_t r0 = (a0 | a1) - (((a0 ^ a1) >> 1) & 0x7f7f7f7f);
+        uint32_t r1 = (b0 | b1) - (((b0 ^ b1) >> 1) & 0x7f7f7f7f);
+        uint32_t s  = (r0 | r1) - (((r0 ^ r1) >> 1) & 0x7f7f7f7f);
+        *(uint32_t *)dst = (d | s) - (((d ^ s) >> 1) & 0x7f7f7f7f);
+        src += stride;
+        dst += stride;
+    }
+}
+
+typedef void (*h264_chroma_mc_func)(uint8_t *dst, const uint8_t *src,
+                                    ptrdiff_t stride, int h, int x, int y);
+
+static void neon_put_h264_chroma8(uint8_t *dst, const uint8_t *src, ptrdiff_t stride,
+                                  int h, int x, int y)
+{
+    if (x == 0 && y == 0) {
+        for (int i = 0; i < h; i++) {
+            vst1_u8(dst, vld1_u8(src));
+            src += stride;
+            dst += stride;
+        }
+        return;
+    }
+    uint8_t cD = (uint8_t)(x * y);
+    uint8_t cC = (uint8_t)((8 - x) * y);
+    uint8_t cB = (uint8_t)(x * (8 - y));
+    uint8_t cA = (uint8_t)((8 - x) * (8 - y));
+
+    uint8x8_t vA = vdup_n_u8(cA);
+    uint8x8_t vB = vdup_n_u8(cB);
+    uint8x8_t vC = vdup_n_u8(cC);
+    uint8x8_t vD = vdup_n_u8(cD);
+
+    for (int i = 0; i < h; i++) {
+        uint8x8_t s00 = vld1_u8(src);
+        uint8x8_t s01 = vld1_u8(src + 1);
+        uint8x8_t s10 = vld1_u8(src + stride);
+        uint8x8_t s11 = vld1_u8(src + stride + 1);
+
+        uint16x8_t res = vmull_u8(s00, vA);
+        res = vmlal_u8(res, s01, vB);
+        res = vmlal_u8(res, s10, vC);
+        res = vmlal_u8(res, s11, vD);
+
+        vst1_u8(dst, vrshrn_n_u16(res, 6));
+        src += stride;
+        dst += stride;
+    }
+}
+
+static void neon_avg_h264_chroma8(uint8_t *dst, const uint8_t *src, ptrdiff_t stride,
+                                  int h, int x, int y)
+{
+    uint8_t tmp[8 * 16];
+    neon_put_h264_chroma8(tmp, src, 8, h, x, y);
+    for (int i = 0; i < h; i++) {
+        uint8x8_t d = vld1_u8(dst);
+        uint8x8_t s = vld1_u8(&tmp[i * 8]);
+        vst1_u8(dst, vrhadd_u8(d, s));
+        dst += stride;
+    }
+}
+
+static void neon_put_h264_chroma4(uint8_t *dst, const uint8_t *src, ptrdiff_t stride,
+                                  int h, int x, int y)
+{
+    if (x == 0 && y == 0) {
+        for (int i = 0; i < h; i++) {
+            *(uint32_t *)dst = *(const uint32_t *)src;
+            src += stride;
+            dst += stride;
+        }
+        return;
+    }
+    int cD = (x * y);
+    int cC = ((8 - x) * y);
+    int cB = (x * (8 - y));
+    int cA = ((8 - x) * (8 - y));
+
+    for (int i = 0; i < h; i++) {
+        for (int j = 0; j < 4; j++) {
+            dst[j] = (uint8_t)((cA * src[j] + cB * src[j + 1] +
+                                cC * src[j + stride] + cD * src[j + stride + 1] + 32) >> 6);
+        }
+        src += stride;
+        dst += stride;
+    }
+}
+
+static void neon_avg_h264_chroma4(uint8_t *dst, const uint8_t *src, ptrdiff_t stride,
+                                  int h, int x, int y)
+{
+    uint8_t tmp[4 * 8];
+    neon_put_h264_chroma4(tmp, src, 4, h, x, y);
+    for (int i = 0; i < h; i++) {
+        for (int j = 0; j < 4; j++) {
+            dst[j] = (uint8_t)((dst[j] + tmp[i * 4 + j] + 1) >> 1);
+        }
+        dst += stride;
+    }
+}
+#endif
+
 /* Architecture init & parse stubs required by h264_objs */
 void ff_h264_pred_init_arm(void *h, int codec_id, int bit_depth, int chroma_format_idc)
 { (void)h; (void)codec_id; (void)bit_depth; (void)chroma_format_idc; }
@@ -66,7 +418,22 @@ void ff_h264_pred_init_mips(void *h, int codec_id, int bit_depth, int chroma_for
 { (void)h; (void)codec_id; (void)bit_depth; (void)chroma_format_idc; }
 void ff_h264_pred_init_x86(void *h, int codec_id, int bit_depth, int chroma_format_idc)
 { (void)h; (void)codec_id; (void)bit_depth; (void)chroma_format_idc; }
-void ff_h264chroma_init_arm(void *c, int bit_depth) { (void)c; (void)bit_depth; }
+
+void ff_h264chroma_init_arm(void *c, int bit_depth)
+{
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+    if (bit_depth != 8 || !c) return;
+    h264_chroma_mc_func *put = (h264_chroma_mc_func *)c;
+    h264_chroma_mc_func *avg = (h264_chroma_mc_func *)((uint8_t *)c + 16);
+    put[0] = neon_put_h264_chroma8;
+    put[1] = neon_put_h264_chroma4;
+    avg[0] = neon_avg_h264_chroma8;
+    avg[1] = neon_avg_h264_chroma4;
+#else
+    (void)c; (void)bit_depth;
+#endif
+}
+
 void ff_h264chroma_init_mips(void *c, int bit_depth) { (void)c; (void)bit_depth; }
 void ff_h264chroma_init_x86(void *c, int bit_depth) { (void)c; (void)bit_depth; }
 void ff_h264dsp_init_arm(void *c, int bit_depth, int chroma_format_idc)
@@ -75,7 +442,52 @@ void ff_h264dsp_init_mips(void *c, int bit_depth, int chroma_format_idc)
 { (void)c; (void)bit_depth; (void)chroma_format_idc; }
 void ff_h264dsp_init_x86(void *c, int bit_depth, int chroma_format_idc)
 { (void)c; (void)bit_depth; (void)chroma_format_idc; }
-void ff_h264qpel_init_arm(void *c, int bit_depth) { (void)c; (void)bit_depth; }
+
+void ff_h264qpel_init_arm(void *c, int bit_depth)
+{
+#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+    if (bit_depth != 8 || !c) return;
+    qpel_mc_func (*put)[16] = (qpel_mc_func (*)[16])c;
+    qpel_mc_func (*avg)[16] = (qpel_mc_func (*)[16])((uint8_t *)c + 256);
+
+    for (int sub = 0; sub < 16; sub++) {
+        int x = sub & 3;
+        int y = (sub >> 2) & 3;
+        if (x == 0 && y == 0) {
+            put[0][sub] = neon_put_pixels16;
+            put[1][sub] = neon_put_pixels8;
+            put[2][sub] = neon_put_pixels4;
+            avg[0][sub] = neon_avg_pixels16;
+            avg[1][sub] = neon_avg_pixels8;
+            avg[2][sub] = neon_avg_pixels4;
+        } else if (y == 0) {
+            put[0][sub] = neon_put_qpel16_h;
+            put[1][sub] = neon_put_qpel8_h;
+            put[2][sub] = neon_put_qpel4_h;
+            avg[0][sub] = neon_avg_qpel16_h;
+            avg[1][sub] = neon_avg_qpel8_h;
+            avg[2][sub] = neon_avg_qpel4_h;
+        } else if (x == 0) {
+            put[0][sub] = neon_put_qpel16_v;
+            put[1][sub] = neon_put_qpel8_v;
+            put[2][sub] = neon_put_qpel4_v;
+            avg[0][sub] = neon_avg_qpel16_v;
+            avg[1][sub] = neon_avg_qpel8_v;
+            avg[2][sub] = neon_avg_qpel4_v;
+        } else {
+            put[0][sub] = neon_put_qpel16_hv;
+            put[1][sub] = neon_put_qpel8_hv;
+            put[2][sub] = neon_put_qpel4_hv;
+            avg[0][sub] = neon_avg_qpel16_hv;
+            avg[1][sub] = neon_avg_qpel8_hv;
+            avg[2][sub] = neon_avg_qpel4_hv;
+        }
+    }
+#else
+    (void)c; (void)bit_depth;
+#endif
+}
+
 void ff_h264qpel_init_mips(void *c, int bit_depth) { (void)c; (void)bit_depth; }
 void ff_h264qpel_init_x86(void *c, int bit_depth) { (void)c; (void)bit_depth; }
 void ff_me_cmp_init_arm(void *c, void *avctx) { (void)c; (void)avctx; }
@@ -1954,11 +2366,16 @@ y1vid_ctx* y1vid_open(const char *path, int out_w, int out_h, int scale_mode, in
      * +0x60: flags2 (|= 0x0001 CODEC_FLAG2_FAST)
      * +0x64: extradata (uint8_t*)
      * +0x68: extradata_size (int)
-     * +0x320: thread_count = 1 */
+     * +0x320: thread_count = 1
+     * +0x344: skip_loop_filter (enum AVDiscard: 48 = AVDISCARD_ALL)
+     * +0x348: skip_idct (enum AVDiscard: 8 = AVDISCARD_NONREF)
+     * +0x34c: skip_frame (enum AVDiscard: 8 = AVDISCARD_NONREF) */
     uint8_t *vctx_bytes = (uint8_t *)ctx->v_ctx;
     *(int *)(vctx_bytes + 0x5c) |= 0x00008000;
     *(int *)(vctx_bytes + 0x60) |= 0x00000001;
     *(int *)(vctx_bytes + 0x320) = 1;
+    *(int *)(vctx_bytes + 0x344) = AVDISCARD_ALL;
+    *(int *)(vctx_bytes + 0x348) = AVDISCARD_NONREF;
 
     const uint8_t *v_ext = ctx->is_mkv ? ctx->mkv.v_extradata : ctx->v_mp4.extradata;
     int v_ext_len        = ctx->is_mkv ? ctx->mkv.v_extradata_len : ctx->v_mp4.extradata_len;
@@ -2093,6 +2510,11 @@ int y1vid_decode_video(y1vid_ctx *ctx, uint16_t *rgb565_buf, int64_t *pts_ms, in
 
     int skip_nonref = (drop_nonref == 1 || drop_nonref == 3) ? 1 : 0;
     int do_blit     = (drop_nonref == 2 || drop_nonref == 3) ? 0 : 1;
+
+    uint8_t *vctx_bytes = (uint8_t *)ctx->v_ctx;
+    *(int *)(vctx_bytes + 0x344) = AVDISCARD_ALL;
+    *(int *)(vctx_bytes + 0x348) = AVDISCARD_NONREF;
+    *(int *)(vctx_bytes + 0x34c) = skip_nonref ? AVDISCARD_NONREF : AVDISCARD_DEFAULT;
 
     av_opt_set_int(ctx->v_ctx, "skip_frame",
                    skip_nonref ? AVDISCARD_NONREF : AVDISCARD_DEFAULT, 0);

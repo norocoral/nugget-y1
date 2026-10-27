@@ -18338,3 +18338,45 @@
     *: "Update video database"
   </voice>
 </phrase>
+<phrase>
+  id: LANG_Y1_VIDEO_1080P_MODE
+  desc: 1080p Video Playback Mode setting
+  user: core
+  <source>
+    *: "1080p Playback"
+  </source>
+  <dest>
+    *: "1080p Playback"
+  </dest>
+  <voice>
+    *: "1080p playback"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_VIDEO_1080P_DIRECT
+  desc: Direct 15 FPS mode for 1080p video
+  user: core
+  <source>
+    *: "Direct (15 FPS Sync)"
+  </source>
+  <dest>
+    *: "Direct (15 FPS Sync)"
+  </dest>
+  <voice>
+    *: "Direct 15 FPS sync"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_VIDEO_1080P_CACHE
+  desc: Auto-Cache 30 FPS mode for 1080p video
+  user: core
+  <source>
+    *: "Auto-Cache (30 FPS)"
+  </source>
+  <dest>
+    *: "Auto-Cache (30 FPS)"
+  </dest>
+  <voice>
+    *: "Auto-cache 30 FPS"
+  </voice>
+</phrase>
