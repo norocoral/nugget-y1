@@ -1,4 +1,4 @@
-<img width="1440" height="1080" alt="hero1" src="https://github.com/user-attachments/assets/10e1d348-e75f-4271-a893-6ff63120375e" />
+<img width="1440" height="1080" alt="herokr" src="https://github.com/user-attachments/assets/e2ccc92e-e80b-4137-9537-2affff1bcf59" />
 
 🌐 **한국어** | [English](README.md)
 
