@@ -1,3 +1,5 @@
+🌐 [한국어](kr/POWER_MANAGEMENT.md) | **English**
+
 # Power Management: Innioasis Y1
 
 This document describes the power management architecture, CPU scaling, core hotplugging, idle battery mitigations, and display power-saving modes on the Innioasis Y1 hosted Rockbox port.

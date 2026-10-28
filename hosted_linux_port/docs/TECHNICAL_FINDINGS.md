@@ -1,3 +1,5 @@
+🌐 [한국어](kr/TECHNICAL_FINDINGS.md) | **English**
+
 # Technical Findings: Innioasis Y1 (MT6572) Hosted Linux Port
 
 This document records the technical architecture, reverse-engineered hardware interfaces, subsystem implementations, and bug fixes for the Innioasis Y1 hosted Rockbox port on downstream Linux kernel 3.4.67.

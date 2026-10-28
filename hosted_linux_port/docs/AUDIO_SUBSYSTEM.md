@@ -1,3 +1,5 @@
+🌐 [한국어](kr/AUDIO_SUBSYSTEM.md) | **English**
+
 # Audio Subsystem: MediaTek EAC & MT6323
 
 This document details the audio hardware architecture, driver interface, sample rate switching, transient pop mitigation, and gain staging on the Innioasis Y1 hosted Rockbox port.

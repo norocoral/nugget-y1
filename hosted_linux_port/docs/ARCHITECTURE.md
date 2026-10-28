@@ -1,3 +1,5 @@
+🌐 [한국어](kr/ARCHITECTURE.md) | **English**
+
 # System Architecture: Innioasis Y1 Hosted Linux Port
 
 This document details the software architecture, process model, boot lifecycle, and storage layout of the Innioasis Y1 Rockbox port on downstream minimal Linux.

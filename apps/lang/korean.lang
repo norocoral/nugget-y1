@@ -3232,7 +3232,7 @@
     *: "한국어 (KSX1001)"
   </dest>
   <voice>
-    *: "항국어"
+    *: "한국어"
   </voice>
 </phrase>
 <phrase>
@@ -3993,11 +3993,11 @@
   </source>
   <dest>
     *: none
-    alarm: "%d:%02d에 깨어남"
+    alarm: "%d:%02d 후 기상"
   </dest>
   <voice>
     *: none
-    alarm: "잠에서 깨어나기"
+    alarm: "기상까지"
   </voice>
 </phrase>
 <phrase>
@@ -4599,7 +4599,7 @@
   </dest>
   <voice>
     *: none
-    radio: "프리셋 자동 검"
+    radio: "프리셋 자동 검색"
   </voice>
 </phrase>
 <phrase>
@@ -4881,7 +4881,7 @@
   </source>
   <dest>
     *: none
-    recording: "~PCM Wave"
+    recording: "PCM 웨이브"
   </dest>
   <voice>
     *: none
@@ -5906,15 +5906,15 @@
   </source>
   <dest>
     *: none
-    hibylinux: "~USB:"
-    multivolume: "~HD1:"
+    hibylinux: "USB:"
+    multivolume: "HD1:"
     sansac200*,sansaclipplus,sansae200*,sansafuze*: "마이크로SD:"
     xduoox3: "마이크로SD2:"
   </dest>
   <voice>
     *: none
-    hibylinux: "~U S B"
-    multivolume: "~H D 1"
+    hibylinux: "U S B"
+    multivolume: "H D 1"
     sansac200*,sansaclipplus,sansae200*,sansafuze*: "마이크로 S D"
     xduoox3: "마이크로 S D 2"
   </voice>
@@ -9283,11 +9283,11 @@
   </source>
   <dest>
     *: none
-    recording: "녹화 중지 및 종료"
+    recording: "녹음 중지 및 종료"
   </dest>
   <voice>
     *: none
-    recording: "녹화 중지 및 종료"
+    recording: "녹음 중지 및 종료"
   </voice>
 </phrase>
 <phrase>
@@ -9510,7 +9510,7 @@
     *: "건너뛰기 길이"
   </dest>
   <voice>
-    *: "건너뛰기 길"
+    *: "건너뛰기 길이"
   </voice>
 </phrase>
 <phrase>
@@ -9585,7 +9585,7 @@
   </source>
   <dest>
     *: none
-    agc: "지동 게인 제어"
+    agc: "자동 게인 제어"
   </dest>
   <voice>
     *: none
@@ -10665,10 +10665,10 @@
     *: "Remote Base Skin"
   </source>
   <dest>
-    *: "기본 스킨 원격"
+    *: "원격 기본 스킨"
   </dest>
   <voice>
-    *: "기본 스킨 원격"
+    *: "원격 기본 스킨"
   </voice>
 </phrase>
 <phrase>
@@ -11846,11 +11846,11 @@
   </source>
   <dest>
     *: none
-    es9218: "벽"
+    es9218: "브릭 월"
   </dest>
   <voice>
     *: none
-    es9218: "벽"
+    es9218: "브릭 월"
   </voice>
 </phrase>
 <phrase>
@@ -12032,14 +12032,17 @@
   <source>
     *: none
     ibassodx50,ibassodx90: "Freq Scaling Governor"
+    innioasisy1: "CPU Performance"
   </source>
   <dest>
     *: none
     ibassodx50,ibassodx90: "주파수 스케일링 거버너"
+    innioasisy1: "CPU 성능"
   </dest>
   <voice>
     *: none
     ibassodx50,ibassodx90: "주파수 스케일링 거버너"
+    innioasisy1: "CPU 성능"
   </voice>
 </phrase>
 <phrase>
@@ -13535,7 +13538,7 @@
     *: ""
   </dest>
   <voice>
-    *: "재생 버튼을 눌러 배터리 벤치를 실행하거나 중지하여 취소"
+    *: "재생 버튼을 눌러 배터리 벤치를 실행하거나 정지 버튼을 눌러 취소"
   </voice>
 </phrase>
 <phrase>
@@ -13693,11 +13696,11 @@
     lowmem: none
   </source>
   <dest>
-    *: "옵션 재시작"
+    *: "재시작 옵션"
     lowmem: none
   </dest>
   <voice>
-    *: "옵션 재시작"
+    *: "재시작 옵션"
     lowmem: none
   </voice>
 </phrase>
@@ -14834,11 +14837,11 @@
   </source>
   <dest>
     *: none
-    hotkey: "발매 형식"
+    hotkey: "안내 형식"
   </dest>
   <voice>
     *: none
-    hotkey: "발매 형식"
+    hotkey: "안내 형식"
   </voice>
 </phrase>
 <phrase>
@@ -14885,11 +14888,11 @@
   </source>
   <dest>
     *: none
-    hotkey: "발매일"
+    hotkey: "안내 시점"
   </dest>
   <voice>
     *: none
-    hotkey: "발매일"
+    hotkey: "안내 시점"
   </voice>
 </phrase>
 <phrase>
@@ -16378,10 +16381,10 @@
     *: "Album Artists"
   </source>
   <dest>
-    *: "앨범 아티스트"
+    *: "앨범 아티스트 목록"
   </dest>
   <voice>
-    *: "앨범 아티스트"
+    *: "앨범 아티스트 목록"
   </voice>
 </phrase>
 <phrase>
@@ -17265,10 +17268,10 @@
     *: "Always On Display"
   </source>
   <dest>
-    *: "Always On Display"
+    *: "항상 켜짐 화면"
   </dest>
   <voice>
-    *: "Always On Display"
+    *: "항상 켜짐 화면"
   </voice>
 </phrase>
 <phrase>
@@ -17573,7 +17576,7 @@
     *: "Nugget"
   </source>
   <dest>
-    *: "너겟 (Nugget)"
+    *: "너겟"
   </dest>
   <voice>
     *: "너겟"
@@ -18301,7 +18304,7 @@
     *: "Direct"
   </source>
   <dest>
-    *: "Direct"
+    *: "다이렉트"
   </dest>
   <voice>
     *: "다이렉트"
@@ -18315,7 +18318,7 @@
     *: "Cache"
   </source>
   <dest>
-    *: "Cache"
+    *: "캐시"
   </dest>
   <voice>
     *: "캐시"

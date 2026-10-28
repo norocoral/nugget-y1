@@ -1,3 +1,5 @@
+🌐 [한국어](krREADME.md) | **English**
+
 # Hosted Rockbox on Minimal Linux (Innioasis Y1)
 
 This directory contains the build system, minimal Linux initramfs, hardware abstraction drivers, and packaging tools for the Innioasis Y1 Rockbox port. The flashable boot image contains the Linux kernel and early startup logic; the Rockbox executable and system assets reside on the external MicroSD card.
