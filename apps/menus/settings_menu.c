@@ -790,6 +790,49 @@ static int menu_y1_bt_disconnect_action(void)
     return 0;
 }
 
+static const char *y1_bt_codec_list_get_name(int selected_item, void *data,
+                                             char *buffer, size_t buffer_len)
+{
+    (void)data;
+    (void)buffer;
+    (void)buffer_len;
+    return (selected_item == Y1_BT_CODEC_SBC_XQ) ? "SBC XQ" : "SBC";
+}
+
+static int menu_y1_bt_codec_action(void)
+{
+    struct gui_synclist codec_list;
+    int cur_codec = y1_bt_get_active_device_codec();
+
+    gui_synclist_init(&codec_list, y1_bt_codec_list_get_name, NULL, false, 1, NULL);
+    gui_synclist_set_title(&codec_list, "Codec", Icon_NOICON);
+    gui_synclist_set_nb_items(&codec_list, 2);
+    gui_synclist_select_item(&codec_list,
+                             cur_codec == Y1_BT_CODEC_SBC_XQ ? 1 : 0);
+    gui_synclist_draw(&codec_list);
+
+    while (true)
+    {
+        int action = get_action(CONTEXT_LIST, HZ / 2);
+        if (action == ACTION_NONE)
+            continue;
+        if (gui_synclist_do_button(&codec_list, &action))
+            continue;
+        if (action == ACTION_STD_CANCEL)
+            break;
+        if (action == ACTION_STD_OK)
+        {
+            int sel = gui_synclist_get_sel_pos(&codec_list);
+            y1_bt_set_active_device_codec(sel == 1 ?
+                Y1_BT_CODEC_SBC_XQ : Y1_BT_CODEC_SBC);
+            break;
+        }
+    }
+    return 0;
+}
+
+MENUITEM_FUNCTION(y1_bt_codec_item, 0, "Codec",
+                  menu_y1_bt_codec_action, NULL, Icon_NOICON);
 MENUITEM_FUNCTION(y1_bt_paired_item, 0, ID2P(LANG_Y1_BT_PAIRED_DEVICES),
                   menu_y1_bt_paired_action, NULL, Icon_NOICON);
 MENUITEM_FUNCTION(y1_bt_remove_item, 0, ID2P(LANG_Y1_BT_REMOVE_PAIRED),
@@ -802,12 +845,13 @@ MENUITEM_FUNCTION(y1_bt_disconnect_item, 0, ID2P(LANG_Y1_BT_DISCONNECT),
 MAKE_MENU(nugget_bluetooth_menu, ID2P(LANG_Y1_BLUETOOTH), 0, Icon_NOICON,
           &y1_bt_enable_item,
           &y1_bt_connected_device_full_volume_item,
+          &y1_bt_codec_item,
           &y1_bt_status_item,
           &y1_bt_paired_item,
           &y1_bt_remove_item,
           &y1_bt_new_item,
           &y1_bt_disconnect_item);
-
+          
 MENUITEM_SETTING(y1_mfb_single_item, &global_settings.mfb_single_click, NULL);
 MENUITEM_SETTING(y1_mfb_double_item, &global_settings.mfb_double_click, NULL);
 MENUITEM_SETTING(y1_mfb_triple_item, &global_settings.mfb_triple_click, NULL);

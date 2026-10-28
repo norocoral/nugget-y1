@@ -32,6 +32,11 @@ enum y1_bt_state {
     Y1_BT_STATE_ERROR
 };
 
+enum y1_bt_codec {
+    Y1_BT_CODEC_SBC = 0,
+    Y1_BT_CODEC_SBC_XQ = 1
+};
+
 struct y1_bt_device {
     uint8_t bdaddr[6]; /* Little-endian HCI order */
     char    name[64];
@@ -42,6 +47,7 @@ struct y1_bt_device {
     uint8_t key_type;
     char    pin[16];
     int     volume;    /* Remembered volume for this specific device */
+    uint8_t codec;     /* Remembered codec (enum y1_bt_codec, default Y1_BT_CODEC_SBC) */
 };
 
 enum y1_bt_receiver_command {
@@ -83,6 +89,10 @@ void y1_bt_audio_connect_hook(void);
 void y1_bt_process_pending_audio_events(void);
 void y1_bt_store_active_volume(int vol);
 int  y1_bt_get_active_device_volume(void);
+int  y1_bt_get_device_codec(const uint8_t bdaddr[6]);
+void y1_bt_set_device_codec(const uint8_t bdaddr[6], int codec);
+int  y1_bt_get_active_device_codec(void);
+void y1_bt_set_active_device_codec(int codec);
 void y1_bt_update_metadata(const char *title, const char *artist,
                            const char *album, uint32_t duration_ms,
                            uint32_t position_ms, uint8_t play_status);

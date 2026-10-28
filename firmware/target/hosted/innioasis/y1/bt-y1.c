@@ -42,6 +42,7 @@
 #include "sbc/sbc.h"
 
 #define PAIRED_DB_PATH   "/mnt/sdcard/.rockbox/bt_paired.dat"
+#define PAIRED_MAGIC_V3  0x59314203U /* 'Y1B3' (v3 with pin, volume, and codec) */
 #define PAIRED_MAGIC_V2  0x59314202U /* 'Y1B2' (v2 with pin and volume) */
 #define PAIRED_MAGIC_V1  0x59314254U /* 'Y1BT' (legacy v1) */
 
@@ -250,6 +251,7 @@ struct paired_db_entry {
     uint8_t key_type;
     char    pin[16];
     int32_t volume;
+    uint8_t codec;
 };
 
 static void load_paired_devices(void)
@@ -261,7 +263,7 @@ static void load_paired_devices(void)
     uint32_t magic = 0, count = 0;
     if (read(fd, &magic, 4) == 4 && read(fd, &count, 4) == 4)
     {
-        if (magic == PAIRED_MAGIC_V2)
+        if (magic == PAIRED_MAGIC_V3)
         {
             for (uint32_t i = 0; i < count && bt_num_devices < Y1_BT_MAX_DEVICES; i++)
             {
@@ -276,6 +278,36 @@ static void load_paired_devices(void)
                 d->key_type = e.key_type;
                 strncpy(d->pin, e.pin, sizeof(d->pin) - 1);
                 d->volume = e.volume;
+                d->codec = (e.codec == Y1_BT_CODEC_SBC_XQ) ?
+                           Y1_BT_CODEC_SBC_XQ : Y1_BT_CODEC_SBC;
+                d->paired = true;
+                d->rssi = -60;
+            }
+        }
+        else if (magic == PAIRED_MAGIC_V2)
+        {
+            struct paired_db_entry_v2 {
+                uint8_t bdaddr[6];
+                char    name[64];
+                uint8_t link_key[16];
+                uint8_t key_type;
+                char    pin[16];
+                int32_t volume;
+            };
+            for (uint32_t i = 0; i < count && bt_num_devices < Y1_BT_MAX_DEVICES; i++)
+            {
+                struct paired_db_entry_v2 e;
+                if (read(fd, &e, sizeof(e)) != sizeof(e))
+                    break;
+                struct y1_bt_device *d = &bt_devices[bt_num_devices++];
+                memset(d, 0, sizeof(*d));
+                memcpy(d->bdaddr, e.bdaddr, 6);
+                strncpy(d->name, e.name, sizeof(d->name) - 1);
+                memcpy(d->link_key, e.link_key, 16);
+                d->key_type = e.key_type;
+                strncpy(d->pin, e.pin, sizeof(d->pin) - 1);
+                d->volume = e.volume;
+                d->codec = Y1_BT_CODEC_SBC;
                 d->paired = true;
                 d->rssi = -60;
             }
@@ -300,6 +332,7 @@ static void load_paired_devices(void)
                 memcpy(d->link_key, e.link_key, 16);
                 d->key_type = e.key_type;
                 d->volume = -15;
+                d->codec = Y1_BT_CODEC_SBC;
                 d->paired = true;
                 d->rssi = -60;
             }
@@ -314,7 +347,7 @@ static void save_paired_devices(void)
     if (fd < 0)
         return;
 
-    uint32_t magic = PAIRED_MAGIC_V2;
+    uint32_t magic = PAIRED_MAGIC_V3;
     uint32_t count = 0;
     for (int i = 0; i < bt_num_devices; i++) {
         if (bt_devices[i].paired)
@@ -332,6 +365,7 @@ static void save_paired_devices(void)
             e.key_type = bt_devices[i].key_type;
             strncpy(e.pin, bt_devices[i].pin, sizeof(e.pin) - 1);
             e.volume = bt_devices[i].volume;
+            e.codec = bt_devices[i].codec;
             (void)!write(fd, &e, sizeof(e));
         }
     }
@@ -352,6 +386,7 @@ static struct y1_bt_device *find_or_create_device(const uint8_t bd[6])
                 memcpy(bt_devices[i].bdaddr, bd, 6);
                 format_bdaddr(bd, bt_devices[i].name, sizeof(bt_devices[i].name));
                 bt_devices[i].volume = -15;
+                bt_devices[i].codec = Y1_BT_CODEC_SBC;
                 return &bt_devices[i];
             }
         }
@@ -362,6 +397,7 @@ static struct y1_bt_device *find_or_create_device(const uint8_t bd[6])
     memcpy(d->bdaddr, bd, 6);
     format_bdaddr(bd, d->name, sizeof(d->name));
     d->volume = -15;
+    d->codec = Y1_BT_CODEC_SBC;
     return d;
 }
 
@@ -993,12 +1029,12 @@ static void handle_avdtp_sig_pdu(const uint8_t *pdu, uint16_t len)
                     break;
                 }
 
-                /* Use standard SBC parameters first; these are widely supported by speakers. */
+                uint8_t preferred_codec = (uint8_t)y1_bt_get_device_codec(active_bdaddr);
                 sbc_cfg_octet1 = blocks | subbands | allocation;
-                if ((sup_o0 & 0x04) && min_bp <= 38 && max_bp >= 38 &&
-                    remote_sink_count == 1)
+                if (preferred_codec == Y1_BT_CODEC_SBC_XQ &&
+                    (sup_o0 & 0x04) && min_bp <= 38 && max_bp >= 38)
                 {
-                    /* Preserve the higher-quality mode for a single compatible endpoint. */
+                    /* Use SBC XQ when manually selected for this device and supported by endpoint. */
                     sbc_is_xq = true;
                     sbc_cfg_octet0 = freq | 0x04; /* Dual Channel */
                     sbc_bitpool = 38;
@@ -1498,6 +1534,101 @@ void y1_bt_store_active_volume(int vol)
         }
     }
     pthread_mutex_unlock(&bt_mtx);
+}
+
+int y1_bt_get_device_codec(const uint8_t bdaddr[6])
+{
+    int codec = Y1_BT_CODEC_SBC;
+    if (!bdaddr)
+        return codec;
+
+    pthread_mutex_lock(&bt_mtx);
+    for (int i = 0; i < bt_num_devices; i++) {
+        if (memcmp(bt_devices[i].bdaddr, bdaddr, 6) == 0) {
+            codec = (bt_devices[i].codec == Y1_BT_CODEC_SBC_XQ) ?
+                    Y1_BT_CODEC_SBC_XQ : Y1_BT_CODEC_SBC;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&bt_mtx);
+    return codec;
+}
+
+void y1_bt_set_device_codec(const uint8_t bdaddr[6], int codec)
+{
+    if (!bdaddr)
+        return;
+
+    uint8_t new_codec = (codec == Y1_BT_CODEC_SBC_XQ) ?
+                        Y1_BT_CODEC_SBC_XQ : Y1_BT_CODEC_SBC;
+    bool changed = false;
+
+    pthread_mutex_lock(&bt_mtx);
+    struct y1_bt_device *d = find_or_create_device(bdaddr);
+    if (d && d->codec != new_codec) {
+        d->codec = new_codec;
+        changed = true;
+        save_paired_devices();
+    }
+    pthread_mutex_unlock(&bt_mtx);
+
+    /* If this device is currently connected, reconnect to renegotiate the new codec */
+    if (changed && acl_handle != 0xFFFF && !bt_receiver_mode &&
+        memcmp(active_bdaddr, bdaddr, 6) == 0) {
+        memcpy(pending_switch_bdaddr, bdaddr, 6);
+        pending_switch_connect = true;
+        uint8_t disc[3] = {
+            (uint8_t)(acl_handle & 0xFF),
+            (uint8_t)(acl_handle >> 8),
+            0x13
+        };
+        hci_send_cmd(0x0406, disc, sizeof(disc));
+    }
+}
+
+static uint8_t default_bt_codec = Y1_BT_CODEC_SBC;
+
+int y1_bt_get_active_device_codec(void)
+{
+    if (acl_handle != 0xFFFF)
+        return y1_bt_get_device_codec(active_bdaddr);
+
+    int codec = default_bt_codec;
+    pthread_mutex_lock(&bt_mtx);
+    for (int i = bt_num_devices - 1; i >= 0; i--) {
+        if (bt_devices[i].paired) {
+            codec = (bt_devices[i].codec == Y1_BT_CODEC_SBC_XQ) ?
+                    Y1_BT_CODEC_SBC_XQ : Y1_BT_CODEC_SBC;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&bt_mtx);
+    return codec;
+}
+
+void y1_bt_set_active_device_codec(int codec)
+{
+    default_bt_codec = (codec == Y1_BT_CODEC_SBC_XQ) ?
+                       Y1_BT_CODEC_SBC_XQ : Y1_BT_CODEC_SBC;
+    if (acl_handle != 0xFFFF) {
+        y1_bt_set_device_codec(active_bdaddr, default_bt_codec);
+        return;
+    }
+
+    uint8_t target_bd[6];
+    bool found = false;
+    pthread_mutex_lock(&bt_mtx);
+    for (int i = bt_num_devices - 1; i >= 0; i--) {
+        if (bt_devices[i].paired) {
+            memcpy(target_bd, bt_devices[i].bdaddr, 6);
+            found = true;
+            break;
+        }
+    }
+    pthread_mutex_unlock(&bt_mtx);
+
+    if (found)
+        y1_bt_set_device_codec(target_bd, default_bt_codec);
 }
 
 /* ============================================================================
