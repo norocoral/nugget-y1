@@ -363,6 +363,11 @@ bool button_handle_key_event(int keycode, int value, bool is_accdet)
     return true;
 }
 
+bool y1_button_hold_active(void)
+{
+    return phys_play_is_down || mfb_is_down || mfb_waiting_5s || (mfb_click_count > 0);
+}
+
 void y1_mfb_init(void)
 {
     static bool inited = false;
@@ -468,8 +473,10 @@ bool headphones_inserted(void)
     static int h2w_fd = -1;
     long now = current_tick;
 
-    /* Check switch state at most twice per second to minimize sysfs I/O */
-    if (last_check_tick != 0 && TIME_BEFORE(now, last_check_tick + (HZ / 2)))
+    /* Check switch state at most twice per second when active, or every 2s when screen is sleeping */
+    extern bool y1_is_screen_sleeping(void);
+    long interval = y1_is_screen_sleeping() ? (2 * HZ) : (HZ / 2);
+    if (last_check_tick != 0 && TIME_BEFORE(now, last_check_tick + interval))
         return cached_state;
 
     last_check_tick = now;

@@ -82,15 +82,20 @@ void y1_set_screen_off_power_mode(bool screen_off)
     }
 }
 
+static void write_sysfs_path(const char *path, const char *val)
+{
+    int fd = open(path, O_WRONLY | O_CLOEXEC);
+    if (fd >= 0) {
+        (void)!write(fd, val, strlen(val));
+        close(fd);
+    }
+}
+
 static void write_cpu_node(int cpu, const char *node, const char *val)
 {
     char path[128];
     snprintf(path, sizeof(path), "/sys/devices/system/cpu/cpu%d/cpufreq/%s", cpu, node);
-    int fd = open(path, O_WRONLY | O_CLOEXEC);
-    if (fd >= 0) {
-        write(fd, val, strlen(val));
-        close(fd);
-    }
+    write_sysfs_path(path, val);
 }
 
 static void write_cpu_freq_bounds(int cpu, const char *min_f, const char *max_f)
@@ -149,6 +154,14 @@ void y1_set_cpu_mode(int mode)
             break;
         }
     }
+
+    if (mode == Y1_CPU_DYNAMIC) {
+        write_sysfs_path("/sys/devices/system/cpu/cpufreq/ondemand/up_threshold", "98\n");
+        write_sysfs_path("/sys/devices/system/cpu/cpufreq/ondemand/sampling_down_factor", "1\n");
+        write_sysfs_path("/sys/devices/system/cpu/cpufreq/ondemand/sampling_rate", "100000\n");
+        write_sysfs_path("/sys/devices/system/cpu/cpufreq/ondemand/io_is_busy", "0\n");
+        write_sysfs_path("/sys/devices/system/cpu/cpufreq/ondemand/powersave_bias", "200\n");
+    }
 }
 
 int y1_get_current_freq(void)
@@ -166,13 +179,14 @@ void y1_set_cpu_cores_setting(int mode)
         return;
 
     /* mode 0: Dual-Core (online=1), mode 1: Single-Core (online=0) */
-    int fd = open("/sys/devices/system/cpu/cpu1/online", O_WRONLY | O_CLOEXEC);
-    if (fd >= 0) {
-        if (mode == 1) {
-            (void)!write(fd, "0\n", 2);
-        } else {
-            (void)!write(fd, "1\n", 2);
-        }
-        close(fd);
+    if (mode == 1) {
+        /* Must lower MTK hotplug base/limit to 1 first, otherwise kernel hotplug forces CPU1 back online */
+        write_sysfs_path("/sys/devices/system/cpu/cpufreq/hotplug/cpu_num_base", "1\n");
+        write_sysfs_path("/sys/devices/system/cpu/cpufreq/hotplug/cpu_num_limit", "1\n");
+        write_sysfs_path("/sys/devices/system/cpu/cpu1/online", "0\n");
+    } else {
+        write_sysfs_path("/sys/devices/system/cpu/cpufreq/hotplug/cpu_num_base", "1\n");
+        write_sysfs_path("/sys/devices/system/cpu/cpufreq/hotplug/cpu_num_limit", "2\n");
+        write_sysfs_path("/sys/devices/system/cpu/cpu1/online", "1\n");
     }
 }

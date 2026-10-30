@@ -256,12 +256,6 @@ struct tm *get_time(void)
         y1_force_rtc_read = false;
         rtc_read_datetime(&tm);
         tm.tm_isdst = -1; /* Not implemented for now */
-
-        static long last_save_tick = 0;
-        if (TIME_AFTER(current_tick, last_save_tick + 60 * HZ)) {
-            last_save_tick = current_tick;
-            y1_save_rtc_file(time(NULL));
-        }
     }
 #else
     if (rtc_dirty())

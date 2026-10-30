@@ -37,15 +37,82 @@
 /* Forward-declaration */
 void interrupt(void);
 
+#if defined(INNIOASIS_Y1)
+#include "innioasis/y1/bt-y1.h"
+extern bool y1_is_screen_sleeping(void);
+extern bool y1_is_display_power_saving(void);
+extern bool y1_should_always_on(void);
+extern bool y1_playback_active(void);
+extern int  y1_wait_for_input_events(int timeout_ms);
+extern bool y1_button_hold_active(void);
+#endif
+
 static pthread_cond_t wfi_cond = PTHREAD_COND_INITIALIZER;
 static pthread_mutex_t wfi_mtx = PTHREAD_MUTEX_INITIALIZER;
-/*
- * call tick tasks and wake the scheduler up */
-void timer_signal(union sigval arg)
+static unsigned int tick_interval_ms = 10;
+static pthread_t tick_thread_id;
+static bool tick_thread_started = false;
+
+static uint64_t monotonic_ms(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000ULL + (uint64_t)(ts.tv_nsec / 1000000ULL);
+}
+
+#if defined(INNIOASIS_Y1)
+static bool y1_can_deep_idle_tick(uint64_t now_ms, uint64_t last_active_ms)
+{
+    if (now_ms - last_active_ms < 5000ULL)
+        return false;
+    if (!y1_is_screen_sleeping() || y1_is_display_power_saving() || y1_should_always_on())
+        return false;
+    if (y1_playback_active() || y1_bt_is_receiver_mode() || y1_bt_is_scanning())
+        return false;
+    if (y1_button_hold_active())
+        return false;
+    return true;
+}
+#endif
+
+static void *tick_worker(void *arg)
 {
     (void)arg;
-    call_tick_tasks();
-    interrupt();
+    unsigned int iv_ms = tick_interval_ms ? tick_interval_ms : 10;
+#if defined(INNIOASIS_Y1)
+    uint64_t last_active_ms = monotonic_ms();
+#endif
+
+    while (1)
+    {
+#if defined(INNIOASIS_Y1)
+        uint64_t before_ms = monotonic_ms();
+        if (y1_can_deep_idle_tick(before_ms, last_active_ms))
+        {
+            /* Screen is off and player is idle: block in kernel poll() on input
+             * devices for up to 250ms so CPU 0 stays in uninterrupted SPM Deep Idle,
+             * while waking in < 1ms the instant any button is pressed. */
+            int ev = y1_wait_for_input_events(250);
+            uint64_t after_ms = monotonic_ms();
+            uint64_t elapsed_ms = (after_ms > before_ms) ? (after_ms - before_ms) : iv_ms;
+            long ticks_elapsed = (long)(elapsed_ms / iv_ms);
+            if (ticks_elapsed > 1)
+                current_tick += (ticks_elapsed - 1);
+            if (ev > 0)
+                last_active_ms = after_ms;
+
+            call_tick_tasks();
+            interrupt();
+            continue;
+        }
+        if (!y1_is_screen_sleeping() || y1_playback_active() || y1_button_hold_active())
+            last_active_ms = before_ms;
+#endif
+        usleep(iv_ms * 1000U);
+        call_tick_tasks();
+        interrupt();
+    }
+    return NULL;
 }
 
 /*
@@ -64,42 +131,20 @@ void interrupt(void)
     pthread_cond_signal(&wfi_cond);
 }
 
-/*
- * setup a hrtimer to send a signal to our process every tick
- *
- * WARNING for Android: JNI calls are not permitted from tick tasks, as the
- * underlying thread is not attached to the Java VM
- *
- * Can be possibly be attached if it really needs to be. but let's
- * keep this leightweight
- */
-
 void tick_start(unsigned int interval_in_ms)
 {
-    int ret = 0;
-    timer_t timerid;
-    struct itimerspec ts;
-    sigevent_t sigev;
+    tick_interval_ms = interval_in_ms ? interval_in_ms : 10;
 
-    /* initializing in the declaration causes some weird warnings */
-    memset(&sigev, 0, sizeof(sigevent_t));
-    sigev.sigev_notify = SIGEV_THREAD,
-    sigev.sigev_notify_function = timer_signal;
-
-    ts.it_value.tv_sec = ts.it_interval.tv_sec = 0;
-    ts.it_value.tv_nsec = ts.it_interval.tv_nsec = interval_in_ms*1000*1000;
-
-    /* add the timer */
-    ret |= timer_create(CLOCK_REALTIME, &sigev, &timerid);
-    ret |= timer_settime(timerid, 0, &ts, NULL);
-
-    /* Grab the mutex already now and leave it to this thread. We don't
-     * care about race conditions when signaling the condition (because
-     * they are not critical), but a mutex is necessary due to the API */
+    /* Grab the mutex already now and leave it to this thread. */
     pthread_mutex_lock(&wfi_mtx);
 
-    if (ret != 0)
-        panicf("%s(): %s\n", __func__, strerror(errno));
+    if (!tick_thread_started)
+    {
+        tick_thread_started = true;
+        int ret = pthread_create(&tick_thread_id, NULL, tick_worker, NULL);
+        if (ret != 0)
+            panicf("%s(): %s\n", __func__, strerror(ret));
+    }
 }
 
 #define cycles_to_microseconds(cycles) \

@@ -222,17 +222,15 @@ void lcd_enable(bool on)
     if (on) {
         int r_pon = ioctl(fb_fd, MTKFB_POWERON);
         int err_pon = errno;
+        (void)ioctl(fb_fd, MTKFB_RESET_UPDATESPEED, 0);
         y1_logf("[lcd-y1] lcd_enable(ON): MTKFB_POWERON ret=%d (errno=%d)\n",
                 r_pon, err_pon);
         send_event(LCD_EVENT_ACTIVATION, NULL);
         lcd_update();
     } else {
-        y1_logf("[lcd-y1] lcd_enable(OFF): keeping MTKFB scan-out alive (backlight off)\n");
-        /* Do NOT call MTKFB_POWEROFF or FBIOBLANK(VESA_POWERDOWN).
-         * On MediaTek MT6572, powering off the display controller breaks the
-         * hardware overlay pipeline, preventing display wake without Android SurfaceFlinger.
-         * The LED backlight is turned off completely via write_bl_hw(0), saving
-         * 99.9% of display power while guaranteeing flawless, instant screen wake. */
+        unsigned long speed = 1;
+        (void)ioctl(fb_fd, MTKFB_CHANGE_UPDATESPEED, &speed);
+        y1_logf("[lcd-y1] lcd_enable(OFF): throttled MTKFB scan-out to 1 Hz\n");
     }
 }
 

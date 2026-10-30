@@ -142,11 +142,24 @@ void y1_usb_eject_to_charge_only(void)
 
 int usb_detect(void)
 {
-    int present = 0;
-    if (!sysfs_get_int("/sys/class/power_supply/usb/online", &present))
-        sysfs_get_int("/sys/class/power_supply/ac/online", &present);
+    static long last_usb_check_tick = 0;
+    static int cached_present = 0;
+    extern volatile long current_tick;
+    extern bool y1_is_screen_sleeping(void);
 
-    if (!present)
+    long now = current_tick;
+    long interval = y1_is_screen_sleeping() ? (2 * HZ) : (HZ / 2);
+
+    if (last_usb_check_tick == 0 || !TIME_BEFORE(now, last_usb_check_tick + interval))
+    {
+        last_usb_check_tick = now ? now : 1;
+        int present = 0;
+        if (!sysfs_get_int("/sys/class/power_supply/usb/online", &present))
+            sysfs_get_int("/sys/class/power_supply/ac/online", &present);
+        cached_present = present;
+    }
+
+    if (!cached_present)
     {
         /* Physical cable unplugged: reset charge-only mode for next connection */
         y1_charge_only = false;
@@ -168,17 +181,21 @@ void usb_enable(bool on)
     }
     else
     {
-        /* Detach storage backing file when USB is disabled */
+        /* Detach storage backing file and disable gadget when USB is unplugged so usb_wakelock is released */
         y1_sysfs_write_line("/sys/class/android_usb/android0/f_mass_storage/lun0/file", "");
         y1_sysfs_write_line("/sys/class/android_usb/android0/f_mass_storage/lun/file", "");
         y1_sysfs_write_line("/sys/class/android_usb/android0/f_mass_storage/lun1/file", "");
+        y1_sysfs_write_line("/sys/class/android_usb/android0/enable", "0");
         y1_storage_attached = false;
     }
 }
 
 void usb_init_device(void)
 {
-    y1_usb_attach_storage();
+    if (usb_detect() == USB_INSERTED)
+        y1_usb_attach_storage();
+    else
+        usb_enable(false);
 }
 
 int disk_mount_all(void)

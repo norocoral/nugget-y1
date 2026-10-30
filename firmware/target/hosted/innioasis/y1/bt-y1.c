@@ -2592,7 +2592,8 @@ static bool mt6572_bt_hw_open_and_init(void)
     uint8_t link_pol[2] = { 0x0F, 0x00 };  /* Enable Role Switch, Hold, Sniff, Park */
     run_cmd_sync(0x080F, link_pol, 2);     /* HCI_Write_Default_Link_Policy_Settings */
 
-    uint8_t scan_en = 0x03;                /* Inquiry + Page Scan Enabled */
+    /* Only enable Inquiry + Page scan in Receiver mode; otherwise Page Scan only (0x02) to save idle power */
+    uint8_t scan_en = bt_receiver_mode ? 0x03 : 0x02;
     run_cmd_sync(0x0C1A, &scan_en, 1);     /* HCI_Write_Scan_Enable */
 
     bt_log("MT6572 Bluetooth Radio initialized and discoverable as 'Innioasis Y1'!\n");
@@ -2897,12 +2898,10 @@ static void *bt_worker_thread(void *arg)
             timeout_ms = 25;
         else if (a2dp_streaming)
             timeout_ms = 12;
-        else if (in_sniff_mode)
-            timeout_ms = 200;
-        else if (acl_handle == 0xFFFF)
-            timeout_ms = 150;
+        else if (in_sniff_mode || acl_handle == 0xFFFF)
+            timeout_ms = 1000;
         else
-            timeout_ms = 50;
+            timeout_ms = 100;
 
         struct pollfd pfd = { .fd = stpbt_fd, .events = POLLIN };
         int pr = poll(&pfd, 1, timeout_ms);

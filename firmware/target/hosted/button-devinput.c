@@ -120,6 +120,13 @@ bool button_center_wakeup_available(void)
 {
     return center_button_wakeup_enabled;
 }
+
+int y1_wait_for_input_events(int timeout_ms)
+{
+    if (num_devices <= 0 || timeout_ms <= 0)
+        return 0;
+    return poll(poll_fds, num_devices, timeout_ms);
+}
 #endif
 
 void button_add_input_device(int i)

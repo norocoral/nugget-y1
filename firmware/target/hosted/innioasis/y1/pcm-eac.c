@@ -395,8 +395,45 @@ static void apply_hp_analog_gain(int idx_l, int idx_r)
 
 static void y1_audio_set_output_enabled(bool enable)
 {
-    if (eac_fd < 0 || audio_output_enabled == enable)
+    if (audio_output_enabled == enable && (enable ? (eac_fd >= 0) : (eac_fd < 0)))
         return;
+
+    if (!enable && eac_fd < 0) {
+        audio_output_enabled = false;
+        return;
+    }
+
+    if (enable && eac_fd < 0) {
+        eac_fd = open("/dev/eac", O_RDWR | O_CLOEXEC);
+        if (eac_fd < 0)
+            return;
+        y1_audio_clocks(1);
+        ioctl(eac_fd, FREE_MEMIF_FP, 0);
+        ioctl(eac_fd, AUDDRV_FREE_DL1_BUF, 0);
+        ioctl(eac_fd, FREE_MEMIF_BUF, 0);
+        ioctl(eac_fd, AUDDRV_ALLOCATE_DL1_BUF, 32768);
+        ioctl(eac_fd, SET_MEMIF_FP, 0);
+        set_afereg(eac_fd, 0x24, 1 << 21, 1 << 21);
+        set_afereg(eac_fd, 0x28, 1 << 6,  1 << 6);
+        set_afereg(eac_fd, 0x10c, 0xf74f0000, ~0U);
+        set_afereg(eac_fd, 0x124, 1, 1);
+        set_afereg(eac_fd, 0x4c4, 0, 0x10);
+        ioctl(eac_fd, SET_SPEAKER_OFF, 0);
+        ioctl(eac_fd, SET_EARPIECE_OFF, 0);
+        programmed_sampr = 0;
+    } else if (enable) {
+        y1_audio_clocks(1);
+        ioctl(eac_fd, FREE_MEMIF_FP, 0);
+        ioctl(eac_fd, AUDDRV_FREE_DL1_BUF, 0);
+        ioctl(eac_fd, AUDDRV_ALLOCATE_DL1_BUF, 32768);
+        ioctl(eac_fd, SET_MEMIF_FP, 0);
+    }
+    if (enable) {
+        set_anareg(eac_fd, 0x106, 1, 0xffff);
+        set_anareg(eac_fd, 0x10c, 0x100, 0x100);
+        set_afereg(eac_fd, 0x10, 1, 1);
+        audio_output_enabled = true;
+    }
 
     if (!enable)
     {
@@ -405,8 +442,26 @@ static void y1_audio_set_output_enabled(bool enable)
         set_anareg(eac_fd, 0x4014, 0, 1);
         set_anareg(eac_fd, 0x4000, 0, 1);
         top_ctl_trigger(eac_fd);
+        /* Power down MT6323 analog headphone amp, charge pump, preamps, and DACs */
+        set_anareg(eac_fd, 0x70a, 0x0000, 0xffff);
+        set_anareg(eac_fd, 0x708, 0x0000, 0xffff);
+        set_anareg(eac_fd, 0x70c, 0x0000, 0xffff);
+        set_anareg(eac_fd, 0x704, 0x0000, 0x00ff);
+        set_anareg(eac_fd, 0x702, 0x0000, 0x0700);
+        set_anareg(eac_fd, 0x700, 0x0000, 0xfffa);
+        set_anareg(eac_fd, 0x710, 0x0000, 0x0008);
+        /* Gate PMIC 13MHz audio clock */
+        set_anareg(eac_fd, 0x10c, 0x0000, 0x0100);
+        set_anareg(eac_fd, 0x106, 0x0000, 0xffff);
         set_afereg(eac_fd, 0x10, 0, 1 << 0);
+        /* Release DL1 DMA buffer and close /dev/eac so AudDrv_release() drops all kernel audio wakelocks */
+        ioctl(eac_fd, FREE_MEMIF_FP, 0);
+        ioctl(eac_fd, AUDDRV_FREE_DL1_BUF, 0);
+        ioctl(eac_fd, FREE_MEMIF_BUF, 0);
         y1_audio_clocks(0);
+        close(eac_fd);
+        eac_fd = -1;
+        y1_play_wake_lock(false);
         audio_output_enabled = false;
         programmed_sampr = 0;
         current_hp_idx_l = -1;
@@ -415,6 +470,10 @@ static void y1_audio_set_output_enabled(bool enable)
     }
 
     y1_audio_clocks(1);
+    ioctl(eac_fd, FREE_MEMIF_FP, 0);
+    ioctl(eac_fd, AUDDRV_FREE_DL1_BUF, 0);
+    ioctl(eac_fd, AUDDRV_ALLOCATE_DL1_BUF, 32768);
+    ioctl(eac_fd, SET_MEMIF_FP, 0);
     set_anareg(eac_fd, 0x106, 1, 0xffff);
     set_anareg(eac_fd, 0x10c, 0x100, 0x100);
     set_afereg(eac_fd, 0x10, 1, 1);
@@ -499,17 +558,25 @@ static void *pcm_worker(void *arg)
         while ((dma_stopped == 1 || dma_locked == 1) &&
                !y1_audio_receiver_is_active() && !pcm_thread_exit)
         {
-            struct timespec ts;
-            clock_gettime(CLOCK_REALTIME, &ts);
-            ts.tv_sec += 5;
-            int rc = pthread_cond_timedwait(&pcm_cond, &pcm_mtx, &ts);
-            if (rc == ETIMEDOUT && dma_stopped == 1 &&
-                !y1_audio_receiver_is_active() && audio_output_enabled)
+            if (audio_output_enabled)
             {
-                pthread_mutex_unlock(&pcm_mtx);
-                y1_audio_set_output_enabled(false);
-                y1_set_deep_idle(true);
-                pthread_mutex_lock(&pcm_mtx);
+                struct timespec ts;
+                clock_gettime(CLOCK_REALTIME, &ts);
+                ts.tv_sec += 5;
+                int rc = pthread_cond_timedwait(&pcm_cond, &pcm_mtx, &ts);
+                if (rc == ETIMEDOUT && dma_stopped == 1 &&
+                    !y1_audio_receiver_is_active() && audio_output_enabled)
+                {
+                    pthread_mutex_unlock(&pcm_mtx);
+                    y1_audio_set_output_enabled(false);
+                    y1_set_deep_idle(true);
+                    pthread_mutex_lock(&pcm_mtx);
+                }
+            }
+            else
+            {
+                /* Audio hardware is already powered down: sleep indefinitely with zero wakeups */
+                pthread_cond_wait(&pcm_cond, &pcm_mtx);
             }
         }
         pthread_mutex_unlock(&pcm_mtx);
@@ -596,7 +663,7 @@ static void *pcm_worker(void *arg)
             pcm_play_dma_status_callback(PCM_DMAST_STARTED);
         }
 
-        if (eac_fd >= 0 && pcm_data && pcm_size > 0)
+        if ((eac_fd >= 0 || y1_bt_a2dp_is_streaming()) && pcm_data && pcm_size > 0)
         {
             const char *buf = (const char *)pcm_data;
             size_t remaining = pcm_size;
@@ -1014,16 +1081,13 @@ static void sink_dma_start(const void *addr, size_t size)
     dma_stopped = 0;
     pthread_mutex_unlock(&pcm_mtx);
 
-    if (eac_fd >= 0)
+    y1_play_wake_lock(true);
+    y1_audio_set_output_enabled(!y1_bt_a2dp_is_streaming());
+    if (eac_fd >= 0 && audio_output_enabled)
     {
-        y1_play_wake_lock(true);
-        y1_audio_set_output_enabled(!y1_bt_a2dp_is_streaming());
-        if (audio_output_enabled)
-        {
-            sink_set_freq((uint16_t)current_sampr);
-            set_afereg(eac_fd, 0x10, (1 << 0) | (1 << 1),
-                       (1 << 0) | (1 << 1));
-        }
+        sink_set_freq((uint16_t)current_sampr);
+        set_afereg(eac_fd, 0x10, (1 << 0) | (1 << 1),
+                   (1 << 0) | (1 << 1));
     }
 
     pthread_mutex_lock(&pcm_mtx);
