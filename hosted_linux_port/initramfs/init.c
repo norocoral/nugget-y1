@@ -207,12 +207,27 @@ static void log_battery_diagnostics(void)
         snprintf(path, sizeof(path), "/sys/class/power_supply/%s/voltage_now",
                  entry->d_name);
         read_text_file(path, voltage, sizeof(voltage));
+        if (voltage[0] == '\0') {
+            snprintf(path, sizeof(path), "/sys/class/power_supply/%s/batt_vol",
+                     entry->d_name);
+            read_text_file(path, voltage, sizeof(voltage));
+        }
         snprintf(path, sizeof(path), "/sys/class/power_supply/%s/current_now",
                  entry->d_name);
         read_text_file(path, current, sizeof(current));
+        if (current[0] == '\0') {
+            snprintf(path, sizeof(path), "/sys/class/power_supply/%s/batt_current",
+                     entry->d_name);
+            read_text_file(path, current, sizeof(current));
+        }
         snprintf(path, sizeof(path), "/sys/class/power_supply/%s/temp",
                  entry->d_name);
         read_text_file(path, temperature, sizeof(temperature));
+        if (temperature[0] == '\0') {
+            snprintf(path, sizeof(path), "/sys/class/power_supply/%s/batt_temp",
+                     entry->d_name);
+            read_text_file(path, temperature, sizeof(temperature));
+        }
         snprintf(path, sizeof(path), "/sys/class/power_supply/%s/status",
                  entry->d_name);
         read_text_file(path, status, sizeof(status));
@@ -254,13 +269,13 @@ static void diagnostic_monitor(void)
 
     while (1) {
         if (!logging_enabled_from_config()) {
-            sleep(300);
-            continue;
+            /* Logging disabled: exit telemetry monitor process to eliminate any MicroSD wakeups */
+            break;
         }
 
         sleep(60);
         if (!logging_enabled_from_config())
-            continue;
+            break;
 
         size_t current_count = sample_process_cpu(current,
                                                   MAX_DIAGNOSTIC_PROCESSES);
@@ -770,19 +785,37 @@ static void optimize_power_and_battery(void)
 {
     log_line("Applying OS power and storage optimizations...\n");
 
-    /* 1. Enable MT6572 SPM idle modes at boot. Audio playback disables deep
-     * idle temporarily because it can starve the AFE DMA path. */
+    /* 1. Eliminate MediaTek proprietary USB clock override and PPM policies */
+    write_sysfs("/proc/cpufreq/usb_raise_freq", "0\n");
+    write_sysfs("/proc/cpufreq/MTK_PPM_POLICY", "DISABLE\n");
+    write_sysfs("/proc/cpufreq/MTK_PPM_POLICY", "0\n");
+
+    /* 2. Prevent MediaTek hotplug mechanisms from reviving Core 1 against user preference */
+    write_sysfs("/proc/mtk_hotplug/enable", "0\n");
+    write_sysfs("/sys/module/mt_hotplug_mechanism/parameters/g_enable", "0\n");
+    write_sysfs("/sys/devices/system/cpu/cpufreq/hotplug/cpu_hotplug_disable", "1\n");
+
+    /* 3. Enable MT6572 SPM idle modes at boot */
     write_sysfs("/sys/power/idle_state", "1\n");
     write_sysfs("/sys/power/dpidle_state", "cpupdn 1\n");
     write_sysfs("/sys/power/dpidle_state", "1\n");
     write_sysfs("/sys/power/rgidle_state", "1\n");
 
-    /* 4. Linux Kernel VM dirty page flush tuning (avoid waking up storage bus) */
-    write_sysfs("/proc/sys/vm/dirty_writeback_centisecs", "12000\n");
-    write_sysfs("/proc/sys/vm/dirty_expire_centisecs", "12000\n");
+    /* 4. Linux Kernel Scheduler & VM dirty page flush tuning */
+    write_sysfs("/proc/sys/kernel/sched_tunable_scaling", "0\n");
+    write_sysfs("/proc/sys/kernel/sched_child_runs_first", "1\n");
+    write_sysfs("/proc/sys/vm/swappiness", "0\n");
+    write_sysfs("/proc/sys/vm/page-cluster", "0\n");
+    write_sysfs("/proc/sys/vm/vfs_cache_pressure", "150\n");
+    write_sysfs("/proc/sys/vm/dirty_background_ratio", "10\n");
+    write_sysfs("/proc/sys/vm/dirty_ratio", "20\n");
+    write_sysfs("/proc/sys/vm/dirty_writeback_centisecs", "60000\n");
+    write_sysfs("/proc/sys/vm/dirty_expire_centisecs", "60000\n");
     write_sysfs("/proc/sys/vm/laptop_mode", "5\n");
 
-    /* 5. Storage queue schedulers & burst-read ahead tuning */
+    /* 5. Storage queue schedulers, burst-read ahead, and stop card polling wakeups */
+    write_sysfs("/sys/block/mmcblk0/events_dfl_poll_msecs", "0\n");
+    write_sysfs("/sys/block/mmcblk1/events_dfl_poll_msecs", "0\n");
     write_sysfs("/sys/block/mmcblk1/queue/scheduler", "noop\n");
     write_sysfs("/sys/block/mmcblk1/queue/read_ahead_kb", "2048\n");
     write_sysfs("/sys/block/mmcblk0/queue/scheduler", "noop\n");
@@ -797,26 +830,47 @@ static void optimize_power_and_battery(void)
     write_sysfs("/sys/block/mmcblk1/power/autosuspend_delay_ms", "100\n");
     write_sysfs("/sys/devices/platform/mt_usb/power/control", "auto\n");
 
-    /* 6. Power-gate unused Mali-400 GPU (Rockbox uses 2D software rendering) */
+    /* 6. RAM & Peripheral Bus: Force MediaTek SMI Eco Mode & DRAM Dynamic Frequency Scaling */
+    write_sysfs("/proc/mtk_smi/eco_mode", "1\n");
+    write_sysfs("/proc/dispsys/eco_mode", "1\n");
+    write_sysfs("/sys/module/mtk_smi/parameters/eco_mode", "1\n");
+    write_sysfs("/sys/module/mtk_smi/parameters/bwc_enable", "1\n");
+    write_sysfs("/sys/devices/platform/mt_emi_ctrl/con_emi_clk_drop", "1\n");
+    write_sysfs("/sys/devices/platform/mt_emi_ctrl/force_dram_dfs", "1\n");
+    write_sysfs("/proc/cpufreq/MTK_VCORE_DVFS", "0\n");
+    write_sysfs("/sys/kernel/debug/vcore_dvfs/vcore_dvfs_force_opp", "0\n");
+
+    /* 7. Power-gate unused Mali-400 GPU & lock clocks to lowest step */
     write_sysfs("/sys/devices/platform/mt_gpu/power/control", "auto\n");
     write_sysfs("/sys/devices/platform/mali.0/power/control", "auto\n");
     write_sysfs("/sys/devices/platform/mt_gpu/power/autosuspend_delay_ms", "50\n");
     write_sysfs("/sys/devices/platform/mali.0/power/autosuspend_delay_ms", "50\n");
+    write_sysfs("/sys/class/misc/mali0/device/power_policy", "coarse_demand\n");
+    write_sysfs("/sys/module/mali/parameters/mali_core_power_tweak", "1\n");
+    write_sysfs("/sys/module/mali/parameters/mali_dvfs_control", "0\n");
+    write_sysfs("/sys/class/misc/mali0/device/clock", "104\n");
+    write_sysfs("/sys/class/misc/mali0/device/max_freq", "104000\n");
 
-    /* 7. MediaTek Dynamic Clock Management (DCM) & Low Power Mode (LPM) */
+    /* 8. MediaTek Dynamic Clock Management (DCM) & Low Power Mode (LPM) */
     write_sysfs("/proc/dcm/dcm_enable", "1\n");
     write_sysfs("/proc/lpm/lpm_enable", "1\n");
     write_sysfs("/proc/spm_fs/dpidle", "1\n");
     write_sysfs("/proc/spm_fs/mcdi", "1\n");
 
-    /* 8. Suppress kernel console wakeups / printk spam */
+    /* 9. Suppress kernel console wakeups, printk spam & watchdog timers */
     write_sysfs("/proc/sys/kernel/printk", "1 1 1 1\n");
+    write_sysfs("/proc/sys/kernel/watchdog", "0\n");
+    write_sysfs("/proc/sys/kernel/nmi_watchdog", "0\n");
+    write_sysfs("/proc/timer_stats", "0\n");
+    write_sysfs("/proc/mtk_printk_ctrl", "0\n");
+    write_sysfs("/sys/module/printk/parameters/always_kmsg_dump", "0\n");
+    write_sysfs("/sys/devices/platform/mtk-uart.0/power/control", "auto\n");
 
-    /* 9. Ensure unused wireless/connectivity chips remain unpowered */
+    /* 10. Ensure unused wireless/connectivity chips remain unpowered */
     write_sysfs("/sys/class/rfkill/rfkill0/state", "0\n");
     write_sysfs("/sys/class/rfkill/rfkill1/state", "0\n");
 
-    /* 10. Enable hardware keypad wakeup in kernel sysfs */
+    /* 11. Disable haptic vibrator wakeups & enable hardware keypad wakeup */
     write_sysfs("/sys/devices/platform/mtk-kpd/power/wakeup", "enabled\n");
 
     log_line("Battery optimizations active: CPU 598MHz/single-core, SPM idle modes enabled.\n");
@@ -1209,6 +1263,10 @@ static void setup_usb_gadget(const char *sd_dev, const char *ext_dev)
 
     /* 6. Enable gadget after LUNs are assigned */
     write_sysfs("/sys/class/android_usb/android0/enable", "1\n");
+    /* Suppress MediaTek USB clock boost that locks CPU to 1.0GHz */
+    write_sysfs("/proc/cpufreq/usb_raise_freq", "0\n");
+    write_sysfs("/proc/cpufreq/MTK_PPM_POLICY", "DISABLE\n");
+    write_sysfs("/proc/cpufreq/MTK_PPM_POLICY", "0\n");
     log_line("USB Mass Storage activated (PC music transfer ready).\n");
 }
 

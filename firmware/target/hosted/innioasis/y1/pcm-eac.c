@@ -663,6 +663,13 @@ static void *pcm_worker(void *arg)
             pcm_play_dma_status_callback(PCM_DMAST_STARTED);
         }
 
+        if (pcm_data && pcm_size > 0 && dma_stopped == 0 && !pcm_thread_exit)
+        {
+            bool bt_active = y1_bt_a2dp_is_streaming();
+            if (!bt_active && (!audio_output_enabled || eac_fd < 0))
+                y1_audio_set_output_enabled(true);
+        }
+
         if ((eac_fd >= 0 || y1_bt_a2dp_is_streaming()) && pcm_data && pcm_size > 0)
         {
             const char *buf = (const char *)pcm_data;
@@ -679,7 +686,7 @@ static void *pcm_worker(void *arg)
                 bool bt_active = y1_bt_a2dp_is_streaming();
                 if (bt_active && audio_output_enabled)
                     y1_audio_set_output_enabled(false);
-                else if (!bt_active && !audio_output_enabled && dma_stopped == 0)
+                else if (!bt_active && (!audio_output_enabled || eac_fd < 0) && dma_stopped == 0)
                     y1_audio_set_output_enabled(true);
 
                 ssize_t written;
@@ -1119,16 +1126,22 @@ static void sink_dma_stop(void)
 
 void audiohw_close(void)
 {
+    pthread_mutex_lock(&pcm_mtx);
+    pcm_thread_exit = true;
+    dma_stopped = 1;
+    pcm_data = NULL;
+    pcm_size = 0;
+    pthread_cond_broadcast(&pcm_cond);
+    pthread_mutex_unlock(&pcm_mtx);
+
     if (eac_fd >= 0)
     {
         y1_audio_set_output_enabled(false);
-        ioctl(eac_fd, FREE_MEMIF_FP, 0);
-        ioctl(eac_fd, AUDDRV_FREE_DL1_BUF, 0);
-        ioctl(eac_fd, FREE_MEMIF_BUF, 0);
-        ioctl(eac_fd, AUD_DRV_AFE_CLK, 0);
-        ioctl(eac_fd, AUD_DRV_AIF_CLK, 0);
-        close(eac_fd);
-        eac_fd = -1;
+        if (eac_fd >= 0)
+        {
+            close(eac_fd);
+            eac_fd = -1;
+        }
     }
 }
 

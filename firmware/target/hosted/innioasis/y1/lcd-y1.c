@@ -34,6 +34,7 @@
 #include "audio.h"
 #include "y1-log.h"
 #include "bt-y1.h"
+#include "sysfs.h"
 
 #ifndef VESA_NO_BLANKING
 #define VESA_NO_BLANKING 0
@@ -211,26 +212,23 @@ void lcd_init_device(void)
 void lcd_enable(bool on)
 {
     bool cur_act = lcd_active();
-    y1_logf("[lcd-y1] lcd_enable(%d) called (current_active=%d, fb_fd=%d)\n",
-            (int)on, (int)cur_act, fb_fd);
-    if (fb_fd < 0) {
-        y1_logf("[lcd-y1] lcd_enable(%d) FAILED: fb_fd < 0\n", (int)on);
+    if (cur_act == on)
         return;
-    }
+
+    if (fb_fd < 0)
+        return;
 
     lcd_set_active(on);
     if (on) {
-        int r_pon = ioctl(fb_fd, MTKFB_POWERON);
-        int err_pon = errno;
-        (void)ioctl(fb_fd, MTKFB_RESET_UPDATESPEED, 0);
-        y1_logf("[lcd-y1] lcd_enable(ON): MTKFB_POWERON ret=%d (errno=%d)\n",
-                r_pon, err_pon);
+        sysfs_set_string("/proc/dispsys/eco_mode", "0\n");
+        (void)ioctl(fb_fd, FBIOBLANK, VESA_NO_BLANKING);
+        (void)ioctl(fb_fd, MTKFB_POWERON, 0);
         send_event(LCD_EVENT_ACTIVATION, NULL);
         lcd_update();
     } else {
-        unsigned long speed = 1;
-        (void)ioctl(fb_fd, MTKFB_CHANGE_UPDATESPEED, &speed);
-        y1_logf("[lcd-y1] lcd_enable(OFF): throttled MTKFB scan-out to 1 Hz\n");
+        sysfs_set_string("/proc/dispsys/eco_mode", "1\n");
+        (void)ioctl(fb_fd, FBIOBLANK, VESA_POWERDOWN);
+        (void)ioctl(fb_fd, MTKFB_POWEROFF, 0);
     }
 }
 
@@ -283,20 +281,23 @@ void y1_set_display_power_saving(bool enable)
     y1_logf("[lcd-y1] y1_set_display_power_saving(%d) called (prev=%d, fb_fd=%d)\n",
             (int)enable, (int)y1_display_powersave, fb_fd);
     y1_display_powersave = enable;
+    sysfs_set_string("/proc/dispsys/eco_mode", enable ? "1\n" : "0\n");
+    sysfs_set_string("/proc/mtk_smi/eco_mode", enable ? "1\n" : "0\n");
     if (fb_fd >= 0) {
         bool previous_internal_refresh = y1_internal_aod_refresh;
         y1_internal_aod_refresh = true;
         if (enable) {
-            unsigned long speed = 1;
-            int r_spd = ioctl(fb_fd, MTKFB_CHANGE_UPDATESPEED, &speed);
-            int err_spd = errno;
-            y1_logf("[lcd-y1] MTKFB_CHANGE_UPDATESPEED(1) ret=%d (errno=%d)\n", r_spd, err_spd);
+            static bool spd_unsupported = false;
+            if (!spd_unsupported) {
+                unsigned long speed = 1;
+                if (ioctl(fb_fd, MTKFB_CHANGE_UPDATESPEED, &speed) < 0) {
+                    spd_unsupported = true;
+                }
+            }
             last_powersave_tick = 0;
             lcd_update();
         } else {
-            int r_rst = ioctl(fb_fd, MTKFB_RESET_UPDATESPEED, 0);
-            int err_rst = errno;
-            y1_logf("[lcd-y1] MTKFB_RESET_UPDATESPEED ret=%d (errno=%d)\n", r_rst, err_rst);
+            (void)ioctl(fb_fd, MTKFB_RESET_UPDATESPEED, 0);
             lcd_update();
         }
         y1_internal_aod_refresh = previous_internal_refresh;

@@ -471,9 +471,9 @@ void backlight_hw_on(void)
         write_bl_hw(hw_val);
 #endif
     } else {
-        y1_logf("[backlight-unix] backlight_hw_on: last_bl already BACKLIGHT_POWER_ON, ensuring lcd_enable(true)\n");
 #ifdef HAVE_LCD_ENABLE
-        lcd_enable(true);
+        if (!lcd_active())
+            lcd_enable(true);
 #endif
     }
 }
@@ -613,8 +613,12 @@ void lcd_sleep(void)
      * and keypad input interrupts in 'mem', preventing the Center button from waking.
      * With SPM Deep Idle and CPU 0 at 598 MHz with CPU 1 offline, power consumption
      * is under 5 mA while keeping Center button detection fully responsive. */
+    sysfs_set_string("/sys/power/idle_state", "1\n");
     sysfs_set_string("/sys/power/dpidle_state", "cpupdn 1\n");
     sysfs_set_string("/sys/power/dpidle_state", "1\n");
+    sysfs_set_string("/sys/power/rgidle_state", "1\n");
+    sysfs_set_string("/proc/spm_fs/dpidle", "1\n");
+    sysfs_set_string("/proc/spm_fs/mcdi", "1\n");
 }
 #else
 void lcd_awake(void)

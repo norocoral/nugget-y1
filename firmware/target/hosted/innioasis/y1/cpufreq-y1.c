@@ -38,6 +38,8 @@ void y1_boot_boost_finish(void)
     }
 }
 
+static void write_sysfs_path(const char *path, const char *val);
+
 static int cpu1_is_online(void)
 {
     int online = 1;
@@ -64,9 +66,14 @@ void y1_set_screen_off_power_mode(bool screen_off)
         if (_saved_cpu1_online == -1)
             _saved_cpu1_online = cpu1_is_online();
         y1_logf("[cpufreq-y1] screen-off: clamping strictly to 598 MHz single-core (lowest VCORE)\n");
+        write_sysfs_path("/proc/cpufreq/usb_raise_freq", "0\n");
+        write_sysfs_path("/proc/cpufreq/MTK_PPM_POLICY", "DISABLE\n");
+        write_sysfs_path("/proc/cpufreq/MTK_PPM_POLICY", "0\n");
         /* 598 MHz + single core while the panel is off (play or idle). */
+        _current_cpu_mode = -1;
         y1_set_cpu_mode(Y1_CPU_POWERSAVE);
         y1_set_cpu_cores_setting(1);
+        write_sysfs_path("/proc/cpufreq/cpufreq_cur_freq", "598000\n");
     } else {
         if (_saved_cpu1_online != -1) {
             y1_set_cpu_cores_setting(_saved_cpu1_online ? 0 : 1);
@@ -120,13 +127,19 @@ void y1_set_cpu_mode(int mode)
         switch (mode) {
         case Y1_CPU_POWERSAVE:
             /* Fixed 598 MHz (Underclock / Maximum Battery Life / Lowest VCORE 1.05V) */
+            write_sysfs_path("/proc/cpufreq/usb_raise_freq", "0\n");
+            write_sysfs_path("/proc/cpufreq/MTK_PPM_POLICY", "DISABLE\n");
+            write_sysfs_path("/proc/cpufreq/MTK_PPM_POLICY", "0\n");
             write_cpu_freq_bounds(cpu, "598000\n", "598000\n");
-            write_cpu_node(cpu, "scaling_governor", "powersave\n");
+            write_cpu_node(cpu, "scaling_governor", "userspace\n");
             write_cpu_node(cpu, "scaling_setspeed", "598000\n");
+            write_sysfs_path("/proc/cpufreq/cpufreq_cur_freq", "598000\n");
             break;
 
         case Y1_CPU_BALANCED:
             /* Fixed 1.0 GHz (Normal / Balanced) */
+            write_sysfs_path("/proc/cpufreq/MTK_PPM_POLICY", "DISABLE\n");
+            write_sysfs_path("/proc/cpufreq/MTK_PPM_POLICY", "0\n");
             write_cpu_freq_bounds(cpu, "1001000\n", "1001000\n");
             write_cpu_node(cpu, "scaling_governor", "userspace\n");
             write_cpu_node(cpu, "scaling_setspeed", "1001000\n");
@@ -149,6 +162,9 @@ void y1_set_cpu_mode(int mode)
         case Y1_CPU_DYNAMIC:
         default:
             /* Dynamic Scaling (Ondemand 598MHz - 1001MHz for optimal battery & smooth UI) */
+            write_sysfs_path("/proc/cpufreq/usb_raise_freq", "0\n");
+            write_sysfs_path("/proc/cpufreq/MTK_PPM_POLICY", "DISABLE\n");
+            write_sysfs_path("/proc/cpufreq/MTK_PPM_POLICY", "0\n");
             write_cpu_freq_bounds(cpu, "598000\n", "1001000\n");
             write_cpu_node(cpu, "scaling_governor", "ondemand\n");
             break;
@@ -180,11 +196,17 @@ void y1_set_cpu_cores_setting(int mode)
 
     /* mode 0: Dual-Core (online=1), mode 1: Single-Core (online=0) */
     if (mode == 1) {
-        /* Must lower MTK hotplug base/limit to 1 first, otherwise kernel hotplug forces CPU1 back online */
+        /* Disarm all MediaTek proprietary hotplug drivers so Core 1 stays powered down */
+        write_sysfs_path("/proc/mtk_hotplug/enable", "0\n");
+        write_sysfs_path("/sys/module/mt_hotplug_mechanism/parameters/g_enable", "0\n");
+        write_sysfs_path("/sys/devices/system/cpu/cpufreq/hotplug/cpu_hotplug_disable", "1\n");
         write_sysfs_path("/sys/devices/system/cpu/cpufreq/hotplug/cpu_num_base", "1\n");
         write_sysfs_path("/sys/devices/system/cpu/cpufreq/hotplug/cpu_num_limit", "1\n");
         write_sysfs_path("/sys/devices/system/cpu/cpu1/online", "0\n");
     } else {
+        write_sysfs_path("/sys/devices/system/cpu/cpufreq/hotplug/cpu_hotplug_disable", "0\n");
+        write_sysfs_path("/proc/mtk_hotplug/enable", "1\n");
+        write_sysfs_path("/sys/module/mt_hotplug_mechanism/parameters/g_enable", "1\n");
         write_sysfs_path("/sys/devices/system/cpu/cpufreq/hotplug/cpu_num_base", "1\n");
         write_sysfs_path("/sys/devices/system/cpu/cpufreq/hotplug/cpu_num_limit", "2\n");
         write_sysfs_path("/sys/devices/system/cpu/cpu1/online", "1\n");
