@@ -43,19 +43,19 @@
 #define VESA_POWERDOWN   4
 #endif
 
-/* MediaTek Hardware Framebuffer IOCTLs */
-#ifndef MTKFB_POWERON
-#define MTKFB_POWERON            0x4f0c /* _IO('O', 12) */
+/* MediaTek Hardware Framebuffer IOCTLs (from Y1 kernel vmlinux) */
+#undef MTKFB_POWERON
+#define MTKFB_POWERON                   0x4f48     /* _IO('O', 72) */
+#undef MTKFB_POWEROFF
+#define MTKFB_POWEROFF                  0x4f49     /* _IO('O', 73) */
+#ifndef MTKFB_GET_DEFAULT_UPDATESPEED
+#define MTKFB_GET_DEFAULT_UPDATESPEED   0x80044f48 /* _IOR('O', 72, unsigned int) */
 #endif
-#ifndef MTKFB_POWEROFF
-#define MTKFB_POWEROFF           0x4f0d /* _IO('O', 13) */
+#ifndef MTKFB_GET_CURR_UPDATESPEED
+#define MTKFB_GET_CURR_UPDATESPEED      0x80044f49 /* _IOR('O', 73, unsigned int) */
 #endif
-#ifndef MTKFB_CHANGE_UPDATESPEED
-#define MTKFB_CHANGE_UPDATESPEED 0x40044f13 /* _IOW('O', 19, unsigned long) */
-#endif
-#ifndef MTKFB_RESET_UPDATESPEED
-#define MTKFB_RESET_UPDATESPEED  0x4f35     /* _IO('O', 53) */
-#endif
+#undef MTKFB_CHANGE_UPDATESPEED
+#define MTKFB_CHANGE_UPDATESPEED        0x40044f4a /* _IOW('O', 74, unsigned int) */
 
 
 static int fb_fd = -1;
@@ -218,23 +218,23 @@ void lcd_enable(bool on)
     if (fb_fd < 0)
         return;
 
+#if LCD_DEPTH == 16
+    navigation_fade_active = false;
+#endif
     lcd_set_active(on);
     if (on) {
         sysfs_set_string("/proc/dispsys/eco_mode", "0\n");
-        (void)ioctl(fb_fd, FBIOBLANK, VESA_NO_BLANKING);
-        (void)ioctl(fb_fd, MTKFB_POWERON, 0);
         send_event(LCD_EVENT_ACTIVATION, NULL);
         lcd_update();
     } else {
         sysfs_set_string("/proc/dispsys/eco_mode", "1\n");
-        (void)ioctl(fb_fd, FBIOBLANK, VESA_POWERDOWN);
-        (void)ioctl(fb_fd, MTKFB_POWEROFF, 0);
     }
 }
 
 static bool y1_always_on_enabled = false;
 static bool y1_display_powersave = false;
 static long last_powersave_tick = 0;
+static unsigned int y1_default_updatespeed = 0;
 
 void y1_set_always_on_screen(bool on)
 {
@@ -284,20 +284,29 @@ void y1_set_display_power_saving(bool enable)
     sysfs_set_string("/proc/dispsys/eco_mode", enable ? "1\n" : "0\n");
     sysfs_set_string("/proc/mtk_smi/eco_mode", enable ? "1\n" : "0\n");
     if (fb_fd >= 0) {
+#if LCD_DEPTH == 16
+        navigation_fade_active = false;
+#endif
+        if (y1_default_updatespeed == 0) {
+            unsigned int def_speed = 0;
+            if (ioctl(fb_fd, MTKFB_GET_DEFAULT_UPDATESPEED, &def_speed) == 0 && def_speed > 0) {
+                y1_default_updatespeed = def_speed;
+            }
+        }
         bool previous_internal_refresh = y1_internal_aod_refresh;
         y1_internal_aod_refresh = true;
         if (enable) {
-            static bool spd_unsupported = false;
-            if (!spd_unsupported) {
-                unsigned long speed = 1;
-                if (ioctl(fb_fd, MTKFB_CHANGE_UPDATESPEED, &speed) < 0) {
-                    spd_unsupported = true;
-                }
-            }
+            unsigned int speed = 1;
+            int ret = ioctl(fb_fd, MTKFB_CHANGE_UPDATESPEED, &speed);
+            y1_logf("[lcd-y1] MTKFB_CHANGE_UPDATESPEED(1) ret=%d (errno=%d)\n", ret, errno);
             last_powersave_tick = 0;
             lcd_update();
         } else {
-            (void)ioctl(fb_fd, MTKFB_RESET_UPDATESPEED, 0);
+            if (y1_default_updatespeed > 0) {
+                unsigned int speed = y1_default_updatespeed;
+                int ret = ioctl(fb_fd, MTKFB_CHANGE_UPDATESPEED, &speed);
+                y1_logf("[lcd-y1] MTKFB_CHANGE_UPDATESPEED(%u) ret=%d (errno=%d)\n", speed, ret, errno);
+            }
             lcd_update();
         }
         y1_internal_aod_refresh = previous_internal_refresh;

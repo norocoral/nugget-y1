@@ -1742,7 +1742,9 @@ static void handle_avctp_pdu(const uint8_t *pdu, uint16_t len)
                     break;
             }
             if (btn != 0) {
+                sim_enter_irq_handler();
                 button_queue_post(btn, 0);
+                sim_exit_irq_handler();
             }
         }
     }

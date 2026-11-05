@@ -21,11 +21,23 @@
 #ifndef __KERNEL_UNIX_H__
 #define __KERNEL_UNIX_H__
 
-/* interrupt emulation incomplete, doesn't seem needed so far */
-#define disable_irq()
-#define enable_irq()
-#define disable_irq_save() 0
-#define restore_irq(level) (void)level
+#define HIGHEST_IRQ_LEVEL 1
+
+int set_irq_level(int level);
+void sim_enter_irq_handler(void);
+void sim_exit_irq_handler(void);
+
+#define disable_irq() \
+    ((void)set_irq_level(HIGHEST_IRQ_LEVEL))
+
+#define enable_irq() \
+    ((void)set_irq_level(0))
+
+#define disable_irq_save() \
+    set_irq_level(HIGHEST_IRQ_LEVEL)
+
+#define restore_irq(level) \
+    ((void)set_irq_level(level))
 
 void wait_for_interrupt(void);
 void interrupt(void);

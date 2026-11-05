@@ -49,9 +49,72 @@ extern bool y1_button_hold_active(void);
 
 static pthread_cond_t wfi_cond = PTHREAD_COND_INITIALIZER;
 static pthread_mutex_t wfi_mtx = PTHREAD_MUTEX_INITIALIZER;
+static volatile bool wfi_pending = false;
+
+static pthread_cond_t sim_thread_cond = PTHREAD_COND_INITIALIZER;
+static pthread_mutex_t sim_irq_mtx = PTHREAD_MUTEX_INITIALIZER;
+static volatile int interrupt_level = HIGHEST_IRQ_LEVEL;
+static int handlers_pending = 0;
+static volatile int status_reg = 0;
+static pthread_t irq_owner_thread;
+
 static unsigned int tick_interval_ms = 10;
 static pthread_t tick_thread_id;
 static bool tick_thread_started = false;
+
+int set_irq_level(int level)
+{
+    if (status_reg && pthread_equal(pthread_self(), irq_owner_thread))
+    {
+        int oldlevel = interrupt_level;
+        interrupt_level = level;
+        return oldlevel;
+    }
+
+    pthread_mutex_lock(&sim_irq_mtx);
+
+    int oldlevel = interrupt_level;
+
+    if (level != 0)
+    {
+        pthread_mutex_lock(&wfi_mtx);
+        wfi_pending = false;
+        pthread_mutex_unlock(&wfi_mtx);
+    }
+    else if (status_reg == 0 && oldlevel != 0)
+    {
+        if (handlers_pending > 0)
+            pthread_cond_broadcast(&sim_thread_cond);
+    }
+
+    interrupt_level = level;
+
+    pthread_mutex_unlock(&sim_irq_mtx);
+    return oldlevel;
+}
+
+void sim_enter_irq_handler(void)
+{
+    pthread_mutex_lock(&sim_irq_mtx);
+    handlers_pending++;
+
+    while (interrupt_level != 0 || status_reg != 0)
+        pthread_cond_wait(&sim_thread_cond, &sim_irq_mtx);
+
+    status_reg = 1;
+    irq_owner_thread = pthread_self();
+}
+
+void sim_exit_irq_handler(void)
+{
+    status_reg = 0;
+    interrupt_level = 0;
+    if (--handlers_pending > 0)
+        pthread_cond_signal(&sim_thread_cond);
+
+    pthread_mutex_unlock(&sim_irq_mtx);
+    interrupt();
+}
 
 static uint64_t monotonic_ms(void)
 {
@@ -96,21 +159,23 @@ static void *tick_worker(void *arg)
             uint64_t after_ms = monotonic_ms();
             uint64_t elapsed_ms = (after_ms > before_ms) ? (after_ms - before_ms) : iv_ms;
             long ticks_elapsed = (long)(elapsed_ms / iv_ms);
-            if (ticks_elapsed > 1)
-                current_tick += (ticks_elapsed - 1);
             if (ev > 0)
                 last_active_ms = after_ms;
 
+            sim_enter_irq_handler();
+            if (ticks_elapsed > 1)
+                current_tick += (ticks_elapsed - 1);
             call_tick_tasks();
-            interrupt();
+            sim_exit_irq_handler();
             continue;
         }
         if (!y1_is_screen_sleeping() || y1_playback_active() || y1_button_hold_active())
             last_active_ms = before_ms;
 #endif
         usleep(iv_ms * 1000U);
+        sim_enter_irq_handler();
         call_tick_tasks();
-        interrupt();
+        sim_exit_irq_handler();
     }
     return NULL;
 }
@@ -121,22 +186,26 @@ static void *tick_worker(void *arg)
  * other mechanisms could use them as well */
 void wait_for_interrupt(void)
 {
-    pthread_cond_wait(&wfi_cond, &wfi_mtx);
+    pthread_mutex_lock(&wfi_mtx);
+    if (!wfi_pending)
+        pthread_cond_wait(&wfi_cond, &wfi_mtx);
+    wfi_pending = false;
+    pthread_mutex_unlock(&wfi_mtx);
 }
 
 /*
  * Wakeup the kernel, if sleeping (shall not be called from a signal handler) */
 void interrupt(void)
 {
+    pthread_mutex_lock(&wfi_mtx);
+    wfi_pending = true;
     pthread_cond_signal(&wfi_cond);
+    pthread_mutex_unlock(&wfi_mtx);
 }
 
 void tick_start(unsigned int interval_in_ms)
 {
     tick_interval_ms = interval_in_ms ? interval_in_ms : 10;
-
-    /* Grab the mutex already now and leave it to this thread. */
-    pthread_mutex_lock(&wfi_mtx);
 
     if (!tick_thread_started)
     {
@@ -160,7 +229,11 @@ static void timer_cb(union sigval arg)
 {
     /* check for spurious callbacks [arg.sival_ptr] */
     if (global_timer_callback && global_timer_callback == arg.sival_ptr)
+    {
+        sim_enter_irq_handler();
         global_timer_callback();
+        sim_exit_irq_handler();
+    }
 }
 
 bool timer_register(int reg_prio, void (*unregister_callback)(void),

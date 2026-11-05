@@ -220,6 +220,11 @@ static void log_battery_diagnostics(void)
                      entry->d_name);
             read_text_file(path, current, sizeof(current));
         }
+        if (current[0] == '\0') {
+            snprintf(path, sizeof(path), "/sys/class/power_supply/%s/BatteryAverageCurrent",
+                     entry->d_name);
+            read_text_file(path, current, sizeof(current));
+        }
         snprintf(path, sizeof(path), "/sys/class/power_supply/%s/temp",
                  entry->d_name);
         read_text_file(path, temperature, sizeof(temperature));
@@ -795,11 +800,27 @@ static void optimize_power_and_battery(void)
     write_sysfs("/sys/module/mt_hotplug_mechanism/parameters/g_enable", "0\n");
     write_sysfs("/sys/devices/system/cpu/cpufreq/hotplug/cpu_hotplug_disable", "1\n");
 
-    /* 3. Enable MT6572 SPM idle modes at boot */
+    /* 3. Enable MT6572 SPM idle modes at boot & configure dpidle power collapse */
+    write_sysfs("/proc/spm_fs/dpidle", "1 cpu_pdn\n");
+    write_sysfs("/proc/spm_fs/dpidle", "1 infra_pdn\n");
     write_sysfs("/sys/power/idle_state", "1\n");
     write_sysfs("/sys/power/dpidle_state", "cpupdn 1\n");
+    /* Clear non-display peripheral clock bits from dpidle_condition_mask via
+     * enable_dpidle_by_bit ('enable <clock_id>') so USB gadget / BTIF / PWM / APDMA
+     * do not block SPM Deep Idle when the screen is off:
+     * 34=APDMA, 48=PWM, 49=UART0, 50=UART1, 51=BTIF, 52=USB, 53=FHCTL */
+    write_sysfs("/sys/power/dpidle_state", "enable 34\n");
+    write_sysfs("/sys/power/dpidle_state", "enable 48\n");
+    write_sysfs("/sys/power/dpidle_state", "enable 49\n");
+    write_sysfs("/sys/power/dpidle_state", "enable 50\n");
+    write_sysfs("/sys/power/dpidle_state", "enable 51\n");
+    write_sysfs("/sys/power/dpidle_state", "enable 52\n");
+    write_sysfs("/sys/power/dpidle_state", "enable 53\n");
     write_sysfs("/sys/power/dpidle_state", "1\n");
     write_sysfs("/sys/power/rgidle_state", "1\n");
+    /* Hold a userspace wakelock so kernel autosleep does not freeze userspace
+     * threads when we trigger early_suspend ('mem' -> /sys/power/state) */
+    write_sysfs("/sys/power/wake_lock", "rockbox_active\n");
 
     /* 4. Linux Kernel Scheduler & VM dirty page flush tuning */
     write_sysfs("/proc/sys/kernel/sched_tunable_scaling", "0\n");
@@ -854,7 +875,8 @@ static void optimize_power_and_battery(void)
     /* 8. MediaTek Dynamic Clock Management (DCM) & Low Power Mode (LPM) */
     write_sysfs("/proc/dcm/dcm_enable", "1\n");
     write_sysfs("/proc/lpm/lpm_enable", "1\n");
-    write_sysfs("/proc/spm_fs/dpidle", "1\n");
+    write_sysfs("/proc/spm_fs/dpidle", "1 cpu_pdn\n");
+    write_sysfs("/proc/spm_fs/dpidle", "1 infra_pdn\n");
     write_sysfs("/proc/spm_fs/mcdi", "1\n");
 
     /* 9. Suppress kernel console wakeups, printk spam & watchdog timers */

@@ -823,6 +823,19 @@ static inline void do_key_lock(bool lock)
     waiting_second_center_click = false;
     right_seeking = false;
     left_seeking = false;
+    if (!lock)
+    {
+        y1_set_touch_scanning(true);
+    }
+    else if (!has_flag(action_last.softlock_mask, SEL_ACTION_ENABLED) ||
+              has_flag(action_last.softlock_mask, SEL_ACTION_NOTOUCH))
+    {
+        y1_set_touch_scanning(false);
+    }
+    else
+    {
+        y1_set_touch_scanning(true);
+    }
 #endif
 #if defined(HAVE_TOUCHPAD) || defined(HAVE_TOUCHSCREEN)
  /* disable touch device on keylock if std behavior or selected disable touch */
@@ -1172,17 +1185,21 @@ static inline int do_backlight(action_last_t *last, action_cur_t *cur, int actio
     return action;
 #else
 #if defined(INNIOASIS_Y1)
+    if (action == ACTION_NONE)
+        return action;
     if ((action & (SYS_EVENT|BUTTON_MULTIMEDIA)) == 0 &&
         (last->keys_locked || Y1_IS_SCREEN_SLEEPING()))
     {
-        /* On Y1, when in HOLD mode or screen is sleeping, non-center buttons NEVER wake backlight */
-        action_handle_backlight(false, true);
+        /* On Y1, when in HOLD mode or screen is sleeping, non-center buttons NEVER wake backlight.
+         * button_tick() already suppresses backlight_on() while sleeping, so do NOT arm
+         * the 5-second ignore_backlight_on timer here. */
         return action;
     }
 #endif
     if (!has_flag(last->backlight_mask, SEL_ACTION_ENABLED)
         || (action & (SYS_EVENT|BUTTON_MULTIMEDIA)) != 0
-        || action == ACTION_REDRAW)
+        || action == ACTION_REDRAW
+        || action == ACTION_NONE)
     {
         return action;
     }
@@ -1222,7 +1239,11 @@ static inline int do_backlight(action_last_t *last, action_cur_t *cur, int actio
 
     if (action != ACTION_NONE && bl_activate)
     {
+#if defined(INNIOASIS_Y1)
+        action_handle_backlight(true, false);
+#else
         action_handle_backlight(true, true);
+#endif
         /* Handle first keypress enables backlight only */
         if (has_flag(last->backlight_mask, SEL_ACTION_FFKEYPRESS) && bl_is_off)
         {
@@ -1230,10 +1251,12 @@ static inline int do_backlight(action_last_t *last, action_cur_t *cur, int actio
             last->button = BUTTON_NONE | BUTTON_REL;
         }
     }
+#if !defined(INNIOASIS_Y1)
     else
     {
         action_handle_backlight(false, true);/* set ignore next true */
     }
+#endif
 
     return action;
 #endif /* !HAVE_BACKLIGHT */
@@ -1263,21 +1286,16 @@ static int get_action_worker(action_last_t *last, action_cur_t *cur)
     static bool center_unheld_screen = false;
 #endif
 
-#if defined(INNIOASIS_Y1)
-    extern void y1_backlight_idle_check(void);
-    extern void y1_aod_notify_event(void);
-    y1_backlight_idle_check();
-#endif
-
     send_event(GUI_EVENT_ACTIONUPDATE, NULL);
 
     /*if button = none/special; returns immediately*/
     if (action_poll_button(last, cur))
     {
 #if defined(INNIOASIS_Y1) && !defined(BOOTLOADER)
-        if (cur->button != BUTTON_NONE &&
+        if ((cur->button & BUTTON_MULTIMEDIA) != 0 &&
             !(cur->button & (BUTTON_REL | BUTTON_REPEAT))) {
             extern void y1_aod_activity_notify(void);
+            extern void y1_aod_notify_event(void);
             y1_aod_activity_notify();
             y1_aod_notify_event();
         }
@@ -1519,6 +1537,10 @@ static int get_action_worker(action_last_t *last, action_cur_t *cur)
         waiting_second_center_click = false;
         right_seeking = false;
         left_seeking = false;
+        if (!(cur->button & BUTTON_REL)) {
+            extern void y1_aod_activity_notify(void);
+            y1_aod_activity_notify();
+        }
 #endif
         /* Backlight is ON and keys are not locked */
         if (center_unheld_screen)
@@ -1847,7 +1869,11 @@ int get_action_statuscode(int *button)
 void set_selective_backlight_actions(bool selective, unsigned int mask,
                                                               bool filter_fkp)
 {
+#if defined(INNIOASIS_Y1)
+    action_handle_backlight(true, false);
+#else
     action_handle_backlight(true, selective);
+#endif
     if (selective) /* we will handle filter_first_keypress here so turn it off*/
     {
         set_backlight_filter_keypress(false);/* turnoff ffkp in button.c */

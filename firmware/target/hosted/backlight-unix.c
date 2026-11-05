@@ -29,6 +29,7 @@
 #include <string.h>
 #include <stdio.h>
 #include "config.h"
+#include "backlight.h"
 #include "backlight-target.h"
 #include "sysfs.h"
 #include "panic.h"
@@ -102,8 +103,55 @@ static int last_bl = -1;
 #include "lcd-target.h"
 #include "innioasis/y1/bt-y1.h"
 #include "innioasis/y1/y1-log.h"
+#include "action.h"
 extern void y1_enter_hold_mode(void);
+extern void y1_backlight_wake_thread(void);
 static int bl_fd = -1;
+static bool y1_kernel_early_suspended = false;
+
+static void y1_enter_kernel_early_suspend(void)
+{
+    /* Hold userspace wakelock so kernel autosleep does not freeze userspace
+     * threads (audio playback, double-click Center button timer, sleep timer),
+     * while writing 'mem' to /sys/power/state to run early_suspend callbacks:
+     * - mtkfb_early_suspend: powers off LCD panel, display engine, 60Hz VSync,
+     *   and gates off all 25 MMSYS0/MMSYS1/DBI display clocks (unblocking dpidle)
+     * - tpd_suspend: puts APT32F touch controller into low-power sleep (reg 5=1)
+     * - mali_early_suspend_handler: powers off Mali-400 GPU */
+    sysfs_set_string("/sys/power/wake_lock", "rockbox_active\n");
+
+    sysfs_set_string("/proc/spm_fs/dpidle", "1 cpu_pdn\n");
+    sysfs_set_string("/proc/spm_fs/dpidle", "1 infra_pdn\n");
+    sysfs_set_string("/sys/power/idle_state", "1\n");
+    sysfs_set_string("/sys/power/dpidle_state", "cpupdn 1\n");
+    sysfs_set_string("/sys/power/dpidle_state", "1\n");
+    sysfs_set_string("/sys/power/rgidle_state", "1\n");
+
+    int mem_fd = open("/sys/power/state", O_WRONLY | O_CLOEXEC);
+    if (mem_fd >= 0) {
+        (void)!write(mem_fd, "mem\n", 4);
+        close(mem_fd);
+        y1_kernel_early_suspended = true;
+        y1_logf("[backlight-unix] entered kernel early_suspend ('mem' -> /sys/power/state)\n");
+    }
+}
+
+static void y1_exit_kernel_early_suspend(void)
+{
+    int on_fd = open("/sys/power/state", O_WRONLY | O_CLOEXEC);
+    if (on_fd >= 0) {
+        (void)!write(on_fd, "on\n", 3);
+        close(on_fd);
+        y1_logf("[backlight-unix] backlight_hw_on: wrote 'on' to /sys/power/state\n");
+    }
+    if (y1_kernel_early_suspended) {
+        /* Wait for mtkfb_late_resume (which has a 20ms internal msleep) to finish
+         * enabling display clocks and clearing is_early_suspended before FB/BL writes */
+        usleep(35000);
+        y1_kernel_early_suspended = false;
+    }
+    y1_set_touch_scanning(true);
+}
 
 enum y1_aod_pause_state {
     Y1_AOD_PAUSE_IDLE,
@@ -144,6 +192,12 @@ static void write_bl_hw(int val)
         int len = snprintf(buf, sizeof(buf), "%d\n", val);
         lseek(bl_fd, 0, SEEK_SET);
         ssize_t w = write(bl_fd, buf, len);
+        if (w < 0) {
+            close(bl_fd);
+            bl_fd = open(sysfs_bl_brightness, O_WRONLY | O_CLOEXEC);
+            if (bl_fd >= 0)
+                w = write(bl_fd, buf, len);
+        }
         y1_logf("[backlight-unix] write_bl_hw(%d): bl_fd=%d, written=%d (errno=%d)\n",
                 val, bl_fd, (int)w, errno);
     } else {
@@ -154,8 +208,9 @@ static void write_bl_hw(int val)
 
 static int y1_aod_brightness_level(void)
 {
+    int base = backlight_brightness > 0 ? backlight_brightness : current_brightness;
     int brightness = global_settings.aod_brightness < 0 ?
-                     current_brightness / 2 :
+                     base / 2 :
                      global_settings.aod_brightness;
     brightness = MAX(0, MIN(brightness, 100));
     return (brightness * 255) / 100;
@@ -256,6 +311,7 @@ static void y1_aod_resume_from_off(void)
         return;
 
     last_bl = BACKLIGHT_POWER_REDUCED;
+    y1_exit_kernel_early_suspend();
     y1_enter_hold_mode();
     y1_set_screen_off_power_mode(true);
     y1_aod_set_level(0);
@@ -333,6 +389,7 @@ void y1_aod_notify_event(void)
     if (!y1_should_always_on())
         return;
     y1_aod_event_pending = true;
+    y1_backlight_wake_thread();
 }
 
 static bool y1_aod_event_allowed(void)
@@ -350,6 +407,7 @@ static void y1_aod_event_wake(void)
 
     if (last_bl == BACKLIGHT_POWER_OFF)
     {
+        y1_exit_kernel_early_suspend();
         y1_enter_hold_mode();
         y1_set_screen_off_power_mode(true);
         lcd_enable(true);
@@ -441,6 +499,10 @@ void backlight_hw_on(void)
             last_bl, current_brightness);
     if (last_bl != BACKLIGHT_POWER_ON) {
 #if defined(BACKLIGHT_INNIOASIS)
+        y1_aod_event_pending = false;
+        y1_aod_event_active = false;
+        y1_aod_event_fading = false;
+        y1_aod_pause_state = Y1_AOD_PAUSE_IDLE;
         if (y1_is_always_on_screen() || y1_is_display_power_saving()) {
             y1_logf("[backlight-unix] backlight_hw_on: resetting powersave\n");
             y1_set_display_power_saving(false);
@@ -451,22 +513,16 @@ void backlight_hw_on(void)
         if (sysfs_bl_power)
             sysfs_set_int(sysfs_bl_power, last_bl);
 #if defined(BACKLIGHT_INNIOASIS)
-        /* Writing 'on' to /sys/power/state wakes the kernel earlysuspend subsystem
-         * and triggers mtkfb_late_resume (DISP_PowerEnable(TRUE), DISP_PanelEnable(TRUE)) */
-        int on_fd = open("/sys/power/state", O_WRONLY | O_CLOEXEC);
-        if (on_fd >= 0) {
-            (void)!write(on_fd, "on\n", 3);
-            close(on_fd);
-            y1_logf("[backlight-unix] backlight_hw_on: wrote 'on' to /sys/power/state\n");
-        }
-        y1_set_touch_scanning(true);
+        y1_exit_kernel_early_suspend();
 #endif
 #ifdef HAVE_LCD_ENABLE
         y1_logf("[backlight-unix] backlight_hw_on: calling lcd_enable(true)\n");
         lcd_enable(true);
 #endif
 #if defined(BACKLIGHT_INNIOASIS)
-        int hw_val = current_brightness > 0 ? (current_brightness * 255) / 100 : (DEFAULT_BRIGHTNESS_SETTING * 255) / 100;
+        int target_br = current_brightness > 0 ? current_brightness :
+                        (backlight_brightness > 0 ? backlight_brightness : DEFAULT_BRIGHTNESS_SETTING);
+        int hw_val = (target_br * 255) / 100;
         y1_logf("[backlight-unix] backlight_hw_on: write_bl_hw(%d)\n", hw_val);
         write_bl_hw(hw_val);
 #endif
@@ -500,6 +556,8 @@ void backlight_hw_off(void)
              * 3. Turn off button backlight
              * 4. Enable power saving mode on the display (1 FPS refresh rate)
              * Keep LCD panel active (do not suspend) */
+            if (y1_kernel_early_suspended)
+                y1_exit_kernel_early_suspend();
 #ifdef HAVE_LCD_ENABLE
             y1_logf("[backlight-unix] backlight_hw_off: AOD mode -> lcd_enable(true)\n");
             lcd_enable(true);
@@ -521,6 +579,7 @@ void backlight_hw_off(void)
 #ifdef HAVE_LCD_ENABLE
         lcd_enable(false);
 #endif
+        y1_enter_kernel_early_suspend();
     }
 #else
     if (last_bl != BACKLIGHT_POWER_REDUCED) {
@@ -535,6 +594,19 @@ void backlight_hw_off(void)
 }
 
 #if defined(BACKLIGHT_INNIOASIS)
+bool y1_backlight_needs_polling(void)
+{
+    if (y1_aod_event_pending || y1_aod_event_active || y1_aod_event_fading)
+        return true;
+    if (last_bl == BACKLIGHT_POWER_REDUCED)
+        return true;
+    if (global_settings.always_on_screen &&
+        global_settings.aod_playback_only &&
+        y1_aod_pause_state == Y1_AOD_PAUSE_OFF)
+        return true;
+    return false;
+}
+
 void y1_backlight_idle_check(void)
 {
     if (y1_aod_event_update())
@@ -580,8 +652,7 @@ void backlight_hw_brightness(int brightness)
 void lcd_awake(void)
 {
     y1_logf("[backlight-unix] lcd_awake() called\n");
-    sysfs_set_string("/sys/power/state", "on");
-    y1_set_touch_scanning(true);
+    y1_exit_kernel_early_suspend();
 #ifdef HAVE_LCD_ENABLE
     lcd_enable(true);
 #endif
@@ -593,7 +664,7 @@ void lcd_sleep(void)
             (int)y1_bt_is_receiver_mode(), (int)y1_should_always_on(), (int)y1_playback_active(),
             (int)y1_aod_pause_state);
     if (y1_bt_is_receiver_mode() ||
-        y1_should_always_on() || y1_playback_active() ||
+        y1_should_always_on() ||
         y1_aod_pause_state == Y1_AOD_PAUSE_HOLD ||
         y1_aod_pause_state == Y1_AOD_PAUSE_FADE_OUT)
         return;
@@ -603,22 +674,8 @@ void lcd_sleep(void)
     lcd_enable(false);
 #endif
 
-    /* Keep touch scanning enabled so the Center button can wake the device.
-     * Software keylock in apps/action.c discards all other button presses
-     * or scroll wheel movements while the screen is off. */
-    y1_set_touch_scanning(true);
-
-    /* Request MT6572 SPM Deep Idle for ultra-low standby current (< 5 mA).
-     * We avoid kernel Suspend-to-RAM ('mem') because MT6572 kernel suspends touch
-     * and keypad input interrupts in 'mem', preventing the Center button from waking.
-     * With SPM Deep Idle and CPU 0 at 598 MHz with CPU 1 offline, power consumption
-     * is under 5 mA while keeping Center button detection fully responsive. */
-    sysfs_set_string("/sys/power/idle_state", "1\n");
-    sysfs_set_string("/sys/power/dpidle_state", "cpupdn 1\n");
-    sysfs_set_string("/sys/power/dpidle_state", "1\n");
-    sysfs_set_string("/sys/power/rgidle_state", "1\n");
-    sysfs_set_string("/proc/spm_fs/dpidle", "1\n");
-    sysfs_set_string("/proc/spm_fs/mcdi", "1\n");
+    if (!y1_kernel_early_suspended)
+        y1_enter_kernel_early_suspend();
 }
 #else
 void lcd_awake(void)

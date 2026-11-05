@@ -555,12 +555,35 @@ static void remote_backlight_update_state(void)
 }
 #endif /* HAVE_REMOTE_LCD */
 
+#if defined(INNIOASIS_Y1)
+extern bool y1_backlight_needs_polling(void);
+void y1_backlight_wake_thread(void)
+{
+    queue_post(&backlight_queue, SYS_TIMEOUT, 0);
+}
+#endif
+
 static void backlight_queue_wait(struct queue_event *ev)
 {
 #if  (CONFIG_BACKLIGHT_FADING == BACKLIGHT_FADING_SW_SETTING) \
     || (CONFIG_BACKLIGHT_FADING == BACKLIGHT_FADING_SW_HW_REG)
     if (backlight_fading_state != NOT_FADING)
         queue_wait_w_tmo(&backlight_queue, ev, FADE_DELAY);
+    else
+#endif
+#if defined(INNIOASIS_Y1)
+    if (backlight_timer <= 0
+#ifdef HAVE_LCD_SLEEP
+        && lcd_sleep_timer <= 0
+#endif
+#ifdef HAVE_BUTTON_LIGHT
+        && buttonlight_timer <= 0 && buttonlight_ignored_timer <= 0
+#endif
+        && backlight_ignored_timer <= 0
+        && !y1_backlight_needs_polling())
+    {
+        queue_wait(&backlight_queue, ev);
+    }
     else
 #endif
         queue_wait_w_tmo(&backlight_queue, ev, BACKLIGHT_THREAD_TIMEOUT);
@@ -837,6 +860,10 @@ void backlight_on_ignore(bool value, int timeout)
 {
     ignore_backlight_on = value;
     backlight_ignored_timer = timeout;
+#if defined(INNIOASIS_Y1)
+    if (value && timeout > 0)
+        queue_post(&backlight_queue, SYS_TIMEOUT, 0);
+#endif
 }
 
 void backlight_off(void)
@@ -880,6 +907,7 @@ int backlight_get_current_timeout(void)
 void backlight_set_timeout(int value)
 {
     backlight_timeout_normal = HZ * value;
+    queue_remove_from_head(&backlight_queue, BACKLIGHT_TMO_CHANGED);
     queue_post(&backlight_queue, BACKLIGHT_TMO_CHANGED, 0);
 }
 
@@ -887,6 +915,7 @@ void backlight_set_timeout(int value)
 void backlight_set_timeout_plugged(int value)
 {
     backlight_timeout_plugged = HZ * value;
+    queue_remove_from_head(&backlight_queue, BACKLIGHT_TMO_CHANGED);
     queue_post(&backlight_queue, BACKLIGHT_TMO_CHANGED, 0);
 }
 #endif /* CONFIG_CHARGING */
@@ -1027,6 +1056,7 @@ void backlight_set_brightness(int val)
     else if (val > MAX_BRIGHTNESS_SETTING)
         val = MAX_BRIGHTNESS_SETTING;
 
+    queue_remove_from_head(&backlight_queue, BACKLIGHT_BRIGHTNESS_CHANGED);
     queue_post(&backlight_queue, BACKLIGHT_BRIGHTNESS_CHANGED, val);
 }
 #endif /* HAVE_BACKLIGHT_BRIGHTNESS */
