@@ -50,10 +50,11 @@ void backlight_set_fade_out(bool value);
 
 void backlight_set_timeout_plugged(int value);
 
-#ifdef HAS_BUTTON_HOLD
+#if defined(HAS_BUTTON_HOLD) || defined(INNIOASIS_Y1)
 void backlight_hold_changed(bool hold_button);
 #endif
 void backlight_set_on_button_hold(int index);
+void backlight_set_timeout_on_hold(int value);
 
 #if defined(HAVE_LCD_SLEEP) && defined(HAVE_LCD_SLEEP_SETTING)
 void lcd_set_sleep_after_backlight_off(int timeout_seconds);

@@ -55,6 +55,18 @@ static bool mfb_waiting_5s = false;
 static long mfb_hold_2s_tick = 0;
 static long mfb_last_pmic_check = 0;
 
+/* Double-click MENU button tracking for HOLD mode toggle */
+static bool menu_is_down = false;
+static long menu_press_tick = 0;
+static long menu_release_tick = 0;
+static int  menu_click_count = 0;
+static bool menu_double_clicked = false;
+static bool menu_long_press_fired = false;
+static long menu_next_repeat_tick = 0;
+
+extern bool is_keys_locked(void);
+extern void backlight_on(void);
+
 /* Physical Play/Pause 10-second hold forces immediate system poweroff. */
 static bool phys_play_is_down = false;
 static long phys_play_press_tick = 0;
@@ -128,6 +140,47 @@ static void y1_trigger_mfb_action(int action_setting)
 static void y1_mfb_tick(void)
 {
     long now = current_tick;
+
+    /* 0. Handle MENU button hold for Quickscreen */
+    if (menu_is_down && menu_click_count == 1)
+    {
+        if (!menu_long_press_fired)
+        {
+            if (TIME_AFTER(now, menu_press_tick + (HZ * 28 / 100)))
+            {
+                menu_long_press_fired = true;
+                menu_click_count = 0;
+                /* Post pre-button then repeat event to trigger Quickscreen */
+                button_queue_post(BUTTON_MENU, 0);
+                button_queue_post(BUTTON_MENU | BUTTON_REPEAT, 0);
+                menu_next_repeat_tick = now + (HZ * 15 / 100);
+            }
+        }
+        else
+        {
+            if (TIME_AFTER(now, menu_next_repeat_tick))
+            {
+                menu_next_repeat_tick = now + (HZ * 15 / 100);
+                button_queue_post(BUTTON_MENU | BUTTON_REPEAT, 0);
+            }
+        }
+    }
+    /* Handle MENU single click timeout:
+     * 120ms when unlocked (down from 250ms) for snappy, instantaneous Back/Menu response.
+     * When locked, single-click is dropped so screen stays dark and quiet. */
+    else if (!menu_is_down && menu_click_count == 1)
+    {
+        int single_click_timeout = is_keys_locked() ? (HZ * 25 / 100) : (HZ * 12 / 100);
+        if (TIME_AFTER(now, menu_release_tick + single_click_timeout))
+        {
+            menu_click_count = 0;
+            if (!is_keys_locked())
+            {
+                button_queue_post(BUTTON_MENU, 0);
+                button_queue_post(BUTTON_MENU | BUTTON_REL, 0);
+            }
+        }
+    }
 
     /* This tick task runs independently of UI actions, including in HOLD. */
     if (phys_play_is_down && !phys_play_poweroff_fired)
@@ -213,6 +266,64 @@ static void y1_mfb_tick(void)
 
 bool button_handle_key_event(int keycode, int value, bool is_accdet)
 {
+    /*
+     * Double click the MENU button at any time to toggle lock (HOLD).
+     * Single click opens Menu / Back. Long press triggers Quickscreen.
+     */
+    if (!is_accdet && (keycode == KEY_BACK || keycode == 158 ||
+                       keycode == KEY_MENU || keycode == 139))
+    {
+        long now = current_tick;
+        if (value == 1) /* Key DOWN */
+        {
+            if (!menu_is_down)
+            {
+                menu_is_down = true;
+                menu_press_tick = now;
+                menu_long_press_fired = false;
+
+                int double_click_window = is_keys_locked() ? (HZ * 35 / 100) : (HZ * 22 / 100);
+                if (menu_click_count == 1 && TIME_BEFORE(now, menu_release_tick + double_click_window))
+                {
+                    /* Double click confirmed: toggle HOLD via main queue */
+                    menu_click_count = 0;
+                    menu_double_clicked = true;
+                    y1_kmsg_log("[button-y1] MENU double-click -> toggle HOLD\n");
+                    button_queue_post(BUTTON_MULTIMEDIA_KEYLOCK, 0);
+                    button_queue_post(BUTTON_MULTIMEDIA_KEYLOCK | BUTTON_REL, 0);
+                    return true;
+                }
+                else
+                {
+                    menu_click_count = 1;
+                }
+            }
+            return true;
+        }
+        else if (value == 0) /* Key UP */
+        {
+            if (menu_is_down)
+            {
+                menu_is_down = false;
+                menu_release_tick = now;
+                if (menu_double_clicked)
+                {
+                    menu_double_clicked = false;
+                    return true;
+                }
+                if (menu_long_press_fired)
+                {
+                    menu_long_press_fired = false;
+                    menu_click_count = 0;
+                    button_queue_post(BUTTON_MENU | BUTTON_REL, 0);
+                    return true;
+                }
+            }
+            return true;
+        }
+        return true;
+    }
+
     /* Track physical Play/Pause button hold for 10s power-off */
     if (!is_accdet && (keycode == KEY_PLAYPAUSE || keycode == 164 ||
                        keycode == KEY_PLAY || keycode == 207 ||
@@ -365,7 +476,8 @@ bool button_handle_key_event(int keycode, int value, bool is_accdet)
 
 bool y1_button_hold_active(void)
 {
-    return phys_play_is_down || mfb_is_down || mfb_waiting_5s || (mfb_click_count > 0);
+    return phys_play_is_down || menu_is_down || (menu_click_count > 0) ||
+           mfb_is_down || mfb_waiting_5s || (mfb_click_count > 0);
 }
 
 void y1_mfb_init(void)

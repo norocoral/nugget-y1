@@ -68,26 +68,6 @@ Y1 diagnostic logging is disabled by default. Enable **Settings -> Nugget -> Dev
 
 ---
 
-## Hardware Controls
-
-| Control | Action | Function |
-| :--- | :--- | :--- |
-| Click Wheel | Rotate | Scroll lists / adjust volume in WPS |
-| Center Button | Short Press | Select / activate menu item |
-| Center Button | Long Press (1s) | Open Context Menu for active track/file |
-| Center Button | Short Press (Screen Off) | Unhold and wake screen (click is cleanly swallowed) |
-| Center Button | Long Press (1s on USB screen) | Eject Mass Storage and switch to Charge-Only mode |
-| Menu Button | Short Press | Return to parent menu / back |
-| Menu Button | Long Press | Open Rockbox Quick Screen settings |
-| Play Button | Short Press | Play / Pause toggle |
-| Play Button | Long Press | Stop playback |
-| Left Button | Short Press | Rewind to track start if $\ge 3\text{s}$; skip to previous track if $< 3\text{s}$ |
-| Left Button | Long Press | Seek backward |
-| Right Button | Short Press | Skip to next track |
-| Right Button | Long Press | Seek forward |
-| Side Buttons | Press | Volume Up / Down (1 dB steps) |
-| Headphone Remote (MFB) | In-line Clicks | Single, double, triple clicks & hold actions (configurable in Settings) |
-
 ## Diagnostic Logging
 
 Y1 diagnostic logging is disabled by default. Enable **Settings -> Nugget -> Device -> Diagnostic Logging** to append init, display, audio, Bluetooth, button, and suspend diagnostics to `/mnt/sdcard/y1_debug.txt`. The setting is stored in `.rockbox/config.cfg`; `/init` reads it at boot to decide whether to output startup diagnostics.
@@ -101,10 +81,10 @@ Y1 diagnostic logging is disabled by default. Enable **Settings -> Nugget -> Dev
 | Click Wheel | Rotate | Scroll lists / adjust volume in WPS |
 | Center Button | Short Press | Select / activate menu item |
 | Center Button | Long Press (1s) | Open Context Menu for active track/file |
-| Center Button | Short Press (Screen Off) | Unhold and wake screen (click is cleanly swallowed) |
 | Center Button | Long Press (1s on USB screen) | Eject Mass Storage and switch to Charge-Only mode |
-| Menu Button | Short Press | Return to parent menu / back |
-| Menu Button | Long Press | Open Rockbox Quick Screen settings |
+| Menu Button | Short Press | Return to parent menu / back (low-latency 120ms release) |
+| Menu Button | Double-Click | Toggle Key Lock (HOLD mode) on / off |
+| Menu Button | Long Press (280ms) | Open Rockbox Quick Screen settings |
 | Play Button | Short Press | Play / Pause toggle |
 | Play Button | Long Press | Stop playback |
 | Left Button | Short Press | Rewind to track start if $\ge 3\text{s}$; skip to previous track if $< 3\text{s}$ |
@@ -113,4 +93,26 @@ Y1 diagnostic logging is disabled by default. Enable **Settings -> Nugget -> Dev
 | Right Button | Long Press | Seek forward |
 | Side Buttons | Press | Volume Up / Down (1 dB steps) |
 | Headphone Remote (MFB) | In-line Clicks | Single, double, triple clicks & hold actions (configurable in Settings) |
+
+---
+
+## iPod Classic HOLD & Backlight Subsystem
+
+Nugget for Y1 replicates the classic iPod HOLD and backlight experience:
+
+- **Toggling HOLD (Lock / Unlock):**
+  - Rapidly double-click the **MENU** button at any time to toggle HOLD mode.
+  - Double-click detection uses a 350ms window when locked and drops unhandled single clicks, preventing pocket wakes. When unlocked, single-click Menu has a swift 120ms release threshold for crisp menu navigation.
+- **When Locked (HOLD Active):**
+  - **Button Protection:** Blocks all wheel scrolls and buttons (unless allowed by *Advanced Key Lock*).
+  - **Hold Light Setting:**
+    - `Off` *(Default)*: Complete pocket blackout; all button presses are ignored without waking the screen.
+    - `On` *(or Brightness %)*: Pressing any button wakes the backlight to view track/status without executing actions.
+  - **Backlight on Lock Timeout:** Configurable up to **5 hours** (Off, Always On, 1s–45s, 1m–45m, 1h–5h). Applying lock immediately transitions to the lock timeout and brightness.
+  - **Backlight on Lock Rules:** Select conditions under which the backlight remains active while locked (`Always`, `Playing only`, or `WPS only`).
+- **When Unlocked (Normal Operation):**
+  - **First Keypress Enables Backlight Only:**
+    - `No` *(Default)*: Pressing a button when screen is off immediately performs the action (e.g. skip track, toggle pause) AND lights up the display simultaneously.
+    - `Yes`: The first button press only wakes the display backlight (intercepting the action). Subsequent presses perform actions normally.
+  - **Backlight Idle Timeout:** Controlled by the standard Backlight Timeout setting during UI browsing.
 

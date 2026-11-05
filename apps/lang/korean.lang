@@ -18451,3 +18451,261 @@
     *: "모던 스타일 사용"
   </voice>
 </phrase>
+<phrase>
+  id: LANG_BACKLIGHT_ON_BUTTON_HOLD_TIMEOUT
+  desc: in lcd settings
+  user: core
+  <source>
+    *: "Backlight on Lock Timeout"
+    hold_button: "Backlight on Hold Timeout"
+  </source>
+  <dest>
+    *: "잠금 시 백라이트 시간"
+    hold_button: "홀드 시 백라이트 시간"
+  </dest>
+  <voice>
+    *: "잠금 시 백라이트 시간"
+    hold_button: "홀드 시 백라이트 시간"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_BACKLIGHT_ON_BUTTON_HOLD_RULES
+  desc: in lcd settings
+  user: core
+  <source>
+    *: "Backlight on Lock Rules"
+    hold_button: "Backlight on Hold Rules"
+  </source>
+  <dest>
+    *: "잠금 시 백라이트 조건"
+    hold_button: "홀드 시 백라이트 조건"
+  </dest>
+  <voice>
+    *: "잠금 시 백라이트 조건"
+    hold_button: "홀드 시 백라이트 조건"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_PLAYING_ONLY
+  desc: in lcd settings
+  user: core
+  <source>
+    *: "Playing only"
+  </source>
+  <dest>
+    *: "재생 중에만"
+  </dest>
+  <voice>
+    *: "재생 중에만"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_WPS_ONLY
+  desc: in lcd settings
+  user: core
+  <source>
+    *: "WPS only"
+  </source>
+  <dest>
+    *: "재생 화면에서만"
+  </dest>
+  <voice>
+    *: "재생 화면에서만"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_BT_CODEC
+  desc: in Settings -> Bluetooth
+  user: core
+  <source>
+    *: "Codec"
+  </source>
+  <dest>
+    *: "코덱"
+  </dest>
+  <voice>
+    *: "코덱"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_BT_STATUS
+  desc: in Settings -> Bluetooth
+  user: core
+  <source>
+    *: "Status"
+  </source>
+  <dest>
+    *: "상태"
+  </dest>
+  <voice>
+    *: "상태"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_BT_STATUS_INIT
+  desc: in Settings -> Bluetooth
+  user: core
+  <source>
+    *: "Initializing..."
+  </source>
+  <dest>
+    *: "초기화 중..."
+  </dest>
+  <voice>
+    *: "초기화 중"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_BT_STATUS_READY
+  desc: in Settings -> Bluetooth
+  user: core
+  <source>
+    *: "Ready (Idle)"
+  </source>
+  <dest>
+    *: "대기 중"
+  </dest>
+  <voice>
+    *: "대기 중"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_BT_CONNECTING_STATUS
+  desc: in Settings -> Bluetooth
+  user: core
+  <source>
+    *: "Connecting..."
+  </source>
+  <dest>
+    *: "연결 중..."
+  </dest>
+  <voice>
+    *: "연결 중"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_BT_CONNECTED_STATUS
+  desc: in Settings -> Bluetooth
+  user: core
+  <source>
+    *: "Connected"
+  </source>
+  <dest>
+    *: "연결됨"
+  </dest>
+  <voice>
+    *: "연결됨"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_BT_STATUS_STREAMING
+  desc: in Settings -> Bluetooth
+  user: core
+  <source>
+    *: "Streaming"
+  </source>
+  <dest>
+    *: "스트리밍 중"
+  </dest>
+  <voice>
+    *: "스트리밍 중"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_BT_STATUS_ERROR
+  desc: in Settings -> Bluetooth
+  user: core
+  <source>
+    *: "Hardware Error"
+  </source>
+  <dest>
+    *: "하드웨어 오류"
+  </dest>
+  <voice>
+    *: "하드웨어 오류"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_BT_NO_PAIRED
+  desc: in Settings -> Bluetooth
+  user: core
+  <source>
+    *: "No paired devices"
+  </source>
+  <dest>
+    *: "페어링된 기기 없음"
+  </dest>
+  <voice>
+    *: "페어링된 기기 없음"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_BT_CONNECTED_SHORT
+  desc: in Settings -> Bluetooth
+  user: core
+  <source>
+    *: "Connected"
+  </source>
+  <dest>
+    *: "연결됨"
+  </dest>
+  <voice>
+    *: "연결됨"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_BT_CONNECTING_FMT
+  desc: in Settings -> Bluetooth
+  user: core
+  <source>
+    *: "Connecting to %s..."
+  </source>
+  <dest>
+    *: "%s에 연결 중..."
+  </dest>
+  <voice>
+    *: "연결 중"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_BT_CONNECTED_FMT
+  desc: in Settings -> Bluetooth
+  user: core
+  <source>
+    *: "Connected: %s"
+  </source>
+  <dest>
+    *: "%s에 연결됨"
+  </dest>
+  <voice>
+    *: "연결됨"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_BT_SEARCHING
+  desc: in Settings -> Bluetooth
+  user: core
+  <source>
+    *: "Searching for devices..."
+  </source>
+  <dest>
+    *: "기기 검색 중..."
+  </dest>
+  <voice>
+    *: "기기 검색 중"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_BT_NO_DEVICES_FOUND
+  desc: in Settings -> Bluetooth
+  user: core
+  <source>
+    *: "No devices found (Select to rescan)"
+  </source>
+  <dest>
+    *: "검색된 기기 없음 (선택 시 재검색)"
+  </dest>
+  <voice>
+    *: "검색된 기기 없음"
+  </voice>
+</phrase>

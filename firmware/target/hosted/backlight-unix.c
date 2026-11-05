@@ -70,16 +70,10 @@ static const char * const sysfs_bl_power =
 #endif
 
 static int current_brightness = DEFAULT_BRIGHTNESS_SETTING;
-#if defined(BACKLIGHT_INNIOASIS)
-static long y1_aod_last_activity_tick;
-#endif
 
 bool backlight_hw_init(void)
 {
     current_brightness = DEFAULT_BRIGHTNESS_SETTING;
-#if defined(BACKLIGHT_INNIOASIS)
-    y1_aod_last_activity_tick = current_tick;
-#endif
     backlight_hw_on();
     backlight_hw_brightness(DEFAULT_BRIGHTNESS_SETTING);
 #ifdef HAVE_BUTTON_LIGHT
@@ -104,8 +98,7 @@ static int last_bl = -1;
 #include "innioasis/y1/bt-y1.h"
 #include "innioasis/y1/y1-log.h"
 #include "action.h"
-extern void y1_enter_hold_mode(void);
-extern void y1_backlight_wake_thread(void);
+
 static int bl_fd = -1;
 static bool y1_kernel_early_suspended = false;
 
@@ -153,34 +146,6 @@ static void y1_exit_kernel_early_suspend(void)
     y1_set_touch_scanning(true);
 }
 
-enum y1_aod_pause_state {
-    Y1_AOD_PAUSE_IDLE,
-    Y1_AOD_PAUSE_HOLD,
-    Y1_AOD_PAUSE_FADE_OUT,
-    Y1_AOD_PAUSE_OFF,
-    Y1_AOD_PAUSE_FADE_IN
-};
-
-static enum y1_aod_pause_state y1_aod_pause_state;
-static int y1_aod_level;
-static int y1_aod_fade_start_level;
-static int y1_aod_fade_target_level;
-static long y1_aod_pause_tick;
-static long y1_aod_fade_start_tick;
-static long y1_aod_last_fade_tick;
-static volatile bool y1_aod_event_pending;
-static bool y1_aod_event_active;
-static bool y1_aod_event_fading;
-static long y1_aod_event_deadline;
-
-#define Y1_AOD_PAUSE_DELAY (HZ * 15)
-#define Y1_AOD_EVENT_DURATION (HZ * 15)
-#define Y1_AOD_FADE_DURATION (HZ * 3 / 4)
-#if HZ < 20
-#define Y1_AOD_FADE_INTERVAL 1
-#else
-#define Y1_AOD_FADE_INTERVAL (HZ / 20)
-#endif
 
 static void write_bl_hw(int val)
 {
@@ -206,278 +171,18 @@ static void write_bl_hw(int val)
     }
 }
 
-static int y1_aod_brightness_level(void)
+int y1_get_effective_brightness(void)
 {
-    int base = backlight_brightness > 0 ? backlight_brightness : current_brightness;
-    int brightness = global_settings.aod_brightness < 0 ?
-                     base / 2 :
-                     global_settings.aod_brightness;
-    brightness = MAX(0, MIN(brightness, 100));
-    return (brightness * 255) / 100;
-}
-
-static int y1_aod_timeout_seconds(void)
-{
-    static const int timeout_seconds[] = {
-        0, 5 * 60, 10 * 60, 30 * 60, 60 * 60, 2 * 60 * 60, 5 * 60 * 60
-    };
-    int choice = global_settings.aod_timeout;
-
-    if (choice < 0 || (unsigned)choice >= ARRAYLEN(timeout_seconds))
-        return 0;
-
-    return timeout_seconds[choice];
-}
-
-bool y1_aod_timeout_expired(void)
-{
-    int timeout = y1_aod_timeout_seconds();
-    return timeout > 0 &&
-           TIME_AFTER(current_tick, y1_aod_last_activity_tick + timeout * HZ);
-}
-
-void y1_aod_activity_notify(void)
-{
-    y1_aod_last_activity_tick = current_tick;
-}
-
-void y1_aod_user_wake(void)
-{
-    y1_aod_activity_notify();
-    y1_aod_pause_state = Y1_AOD_PAUSE_IDLE;
-}
-
-void y1_aod_timeout_setting_changed(int choice)
-{
-    (void)choice;
-    y1_aod_activity_notify();
-}
-
-static void y1_aod_set_level(int level)
-{
-    if (level < 0)
-        level = 0;
-    if (level > 255)
-        level = 255;
-    y1_aod_level = level;
-    write_bl_hw(level);
-}
-
-void y1_aod_brightness_setting_changed(int brightness)
-{
-    (void)brightness;
-    if (last_bl == BACKLIGHT_POWER_REDUCED && y1_should_always_on())
-        y1_aod_set_level(y1_aod_brightness_level());
-}
-
-static void y1_aod_begin_fade(int target)
-{
-    y1_aod_fade_start_level = y1_aod_level;
-    y1_aod_fade_target_level = target;
-    y1_aod_fade_start_tick = current_tick;
-    y1_aod_last_fade_tick = current_tick - Y1_AOD_FADE_INTERVAL;
-}
-
-static void y1_aod_start_fade(int target)
-{
-    y1_aod_begin_fade(target);
-    y1_aod_pause_state = target ? Y1_AOD_PAUSE_FADE_IN :
-                                  Y1_AOD_PAUSE_FADE_OUT;
-}
-
-static bool y1_aod_update_fade(void)
-{
-    if (TIME_BEFORE(current_tick,
-                    y1_aod_last_fade_tick + Y1_AOD_FADE_INTERVAL))
-        return false;
-
-    y1_aod_last_fade_tick = current_tick;
-    long elapsed = current_tick - y1_aod_fade_start_tick;
-    if (elapsed >= Y1_AOD_FADE_DURATION) {
-        y1_aod_set_level(y1_aod_fade_target_level);
-        return true;
+    if (is_keys_locked() && global_settings.backlight_on_button_hold >= 3) {
+        static const int hold_brightness_table[] = {
+            0, 0, 0, 1, 5, 10, 15, 20, 25, 30, 40, 50, 60, 70, 80, 90, 100
+        };
+        int idx = global_settings.backlight_on_button_hold;
+        if (idx < (int)(sizeof(hold_brightness_table)/sizeof(hold_brightness_table[0])))
+            return hold_brightness_table[idx];
     }
-
-    int delta = y1_aod_fade_target_level - y1_aod_fade_start_level;
-    int level = y1_aod_fade_start_level +
-                (int)((long long)delta * elapsed / Y1_AOD_FADE_DURATION);
-    y1_aod_set_level(level);
-    return false;
-}
-
-static void y1_aod_resume_from_off(void)
-{
-    if (!global_settings.always_on_screen || !y1_should_always_on())
-        return;
-
-    last_bl = BACKLIGHT_POWER_REDUCED;
-    y1_exit_kernel_early_suspend();
-    y1_enter_hold_mode();
-    y1_set_screen_off_power_mode(true);
-    y1_aod_set_level(0);
-    lcd_enable(true);
-    y1_set_display_power_saving(true);
-    y1_aod_start_fade(y1_aod_brightness_level());
-}
-
-static bool y1_aod_pause_update(void)
-{
-    if (!global_settings.always_on_screen ||
-        !global_settings.aod_playback_only ||
-        (global_settings.aod_wps_only &&
-         get_current_activity() != ACTIVITY_WPS)) {
-        y1_aod_pause_state = Y1_AOD_PAUSE_IDLE;
-        return false;
-    }
-
-    bool playing = y1_playback_active();
-    if (playing) {
-        if (y1_aod_pause_state == Y1_AOD_PAUSE_HOLD) {
-            y1_aod_pause_state = Y1_AOD_PAUSE_IDLE;
-            y1_set_display_power_saving(true);
-            return true;
-        }
-        if (y1_aod_pause_state == Y1_AOD_PAUSE_FADE_OUT ||
-            y1_aod_pause_state == Y1_AOD_PAUSE_OFF) {
-            if (last_bl == BACKLIGHT_POWER_OFF)
-                y1_aod_resume_from_off();
-            else {
-                y1_set_display_power_saving(true);
-                y1_aod_start_fade(y1_aod_brightness_level());
-            }
-            return true;
-        }
-        if (y1_aod_pause_state == Y1_AOD_PAUSE_FADE_IN) {
-            if (y1_aod_update_fade())
-                y1_aod_pause_state = Y1_AOD_PAUSE_IDLE;
-            return true;
-        }
-        return false;
-    }
-
-    if (y1_aod_pause_state == Y1_AOD_PAUSE_IDLE &&
-        last_bl == BACKLIGHT_POWER_REDUCED &&
-        y1_is_display_power_saving()) {
-        y1_set_display_power_saving(false);
-        y1_aod_pause_tick = current_tick;
-        y1_aod_pause_state = Y1_AOD_PAUSE_HOLD;
-        return true;
-    }
-
-    if (y1_aod_pause_state == Y1_AOD_PAUSE_HOLD) {
-        if (TIME_AFTER(current_tick,
-                       y1_aod_pause_tick + Y1_AOD_PAUSE_DELAY))
-            y1_aod_start_fade(0);
-        return true;
-    }
-
-    if (y1_aod_pause_state == Y1_AOD_PAUSE_FADE_OUT) {
-        if (y1_aod_update_fade()) {
-            y1_aod_pause_state = Y1_AOD_PAUSE_OFF;
-            backlight_hw_off();
-        }
-        return true;
-    }
-
-    return y1_aod_pause_state == Y1_AOD_PAUSE_OFF;
-}
-
-void y1_aod_notify_event(void)
-{
-    if (!global_settings.always_on_screen || !global_settings.aod_important_events)
-        return;
-    if (!y1_should_always_on())
-        return;
-    y1_aod_event_pending = true;
-    y1_backlight_wake_thread();
-}
-
-static bool y1_aod_event_allowed(void)
-{
-    if (!global_settings.always_on_screen)
-        return false;
-
-    return y1_should_always_on();
-}
-
-static void y1_aod_event_wake(void)
-{
-    if (!global_settings.always_on_screen || !y1_should_always_on())
-        return;
-
-    if (last_bl == BACKLIGHT_POWER_OFF)
-    {
-        y1_exit_kernel_early_suspend();
-        y1_enter_hold_mode();
-        y1_set_screen_off_power_mode(true);
-        lcd_enable(true);
-        last_bl = BACKLIGHT_POWER_REDUCED;
-        y1_aod_set_level(y1_aod_brightness_level());
-    }
-    else if (y1_aod_level == 0)
-        y1_aod_set_level(y1_aod_brightness_level());
-
-    y1_set_display_power_saving(false);
-}
-
-static void y1_aod_event_restore_idle(void)
-{
-    if (last_bl != BACKLIGHT_POWER_REDUCED)
-        return;
-
-    if (y1_should_always_on())
-    {
-        y1_set_display_power_saving(true);
-        y1_set_screen_off_power_mode(true);
-    }
-    else
-        backlight_hw_off();
-}
-
-static bool y1_aod_event_update(void)
-{
-    if (y1_aod_event_pending) {
-        y1_aod_event_pending = false;
-        if (global_settings.aod_important_events &&
-            y1_aod_event_allowed() &&
-            (last_bl == BACKLIGHT_POWER_REDUCED ||
-             last_bl == BACKLIGHT_POWER_OFF)) {
-            y1_aod_event_wake();
-            y1_aod_event_deadline = current_tick + Y1_AOD_EVENT_DURATION;
-            y1_aod_event_active = true;
-            y1_aod_event_fading = false;
-        }
-    }
-
-    if (!y1_aod_event_active)
-        return false;
-
-    if (!global_settings.aod_important_events ||
-        !y1_aod_event_allowed()) {
-        y1_aod_event_active = false;
-        y1_aod_event_fading = false;
-        y1_aod_event_restore_idle();
-        return false;
-    }
-
-    if (last_bl != BACKLIGHT_POWER_REDUCED) {
-        y1_aod_event_active = false;
-        y1_aod_event_fading = false;
-        return false;
-    }
-
-    if (!y1_aod_event_fading &&
-        TIME_AFTER(current_tick, y1_aod_event_deadline)) {
-        y1_aod_begin_fade(0);
-        y1_aod_event_fading = true;
-    }
-
-    if (y1_aod_event_fading && y1_aod_update_fade()) {
-        y1_aod_event_active = false;
-        y1_aod_event_fading = false;
-        y1_aod_event_restore_idle();
-    }
-    return true;
+    return current_brightness > 0 ? current_brightness :
+           (backlight_brightness > 0 ? backlight_brightness : DEFAULT_BRIGHTNESS_SETTING);
 }
 #endif
 
@@ -498,30 +203,19 @@ void backlight_hw_on(void)
     y1_logf("[backlight-unix] backlight_hw_on() called (last_bl=%d, current_brightness=%d)\n",
             last_bl, current_brightness);
     if (last_bl != BACKLIGHT_POWER_ON) {
-#if defined(BACKLIGHT_INNIOASIS)
-        y1_aod_event_pending = false;
-        y1_aod_event_active = false;
-        y1_aod_event_fading = false;
-        y1_aod_pause_state = Y1_AOD_PAUSE_IDLE;
-        if (y1_is_always_on_screen() || y1_is_display_power_saving()) {
-            y1_logf("[backlight-unix] backlight_hw_on: resetting powersave\n");
-            y1_set_display_power_saving(false);
-        }
-        y1_set_screen_off_power_mode(false);
-#endif
         last_bl = BACKLIGHT_POWER_ON;
         if (sysfs_bl_power)
             sysfs_set_int(sysfs_bl_power, last_bl);
 #if defined(BACKLIGHT_INNIOASIS)
         y1_exit_kernel_early_suspend();
+        y1_set_screen_off_power_mode(false);
 #endif
 #ifdef HAVE_LCD_ENABLE
         y1_logf("[backlight-unix] backlight_hw_on: calling lcd_enable(true)\n");
         lcd_enable(true);
 #endif
 #if defined(BACKLIGHT_INNIOASIS)
-        int target_br = current_brightness > 0 ? current_brightness :
-                        (backlight_brightness > 0 ? backlight_brightness : DEFAULT_BRIGHTNESS_SETTING);
+        int target_br = y1_get_effective_brightness();
         int hw_val = (target_br * 255) / 100;
         y1_logf("[backlight-unix] backlight_hw_on: write_bl_hw(%d)\n", hw_val);
         write_bl_hw(hw_val);
@@ -531,55 +225,23 @@ void backlight_hw_on(void)
         if (!lcd_active())
             lcd_enable(true);
 #endif
+#if defined(BACKLIGHT_INNIOASIS)
+        int target_br = y1_get_effective_brightness();
+        int hw_val = (target_br * 255) / 100;
+        write_bl_hw(hw_val);
+#endif
     }
 }
 
 void backlight_hw_off(void)
 {
 #if defined(BACKLIGHT_INNIOASIS)
-    int target_bl = y1_should_always_on() ? BACKLIGHT_POWER_REDUCED : BACKLIGHT_POWER_OFF;
-    y1_logf("[backlight-unix] backlight_hw_off() called (last_bl=%d, target_bl=%d, should_aod=%d)\n",
-            last_bl, target_bl, (int)y1_should_always_on());
-    if (last_bl != target_bl) {
-        int prev_bl = last_bl;
-        last_bl = target_bl;
-        if (prev_bl == BACKLIGHT_POWER_ON || prev_bl == -1) {
-            /* Apply HOLD mode immediately when screen goes idle */
-            y1_enter_hold_mode();
-            y1_set_screen_off_power_mode(true);
-        }
-        if (target_bl == BACKLIGHT_POWER_REDUCED) {
-            /* Always On Screen mode:
-             * Instead of turning off backlight completely:
-             * 1. Ensure LCD is active (in case we are waking into AOD from screen-off)
-             * 2. Reduce brightness to 50% of the current brightness
-             * 3. Turn off button backlight
-             * 4. Enable power saving mode on the display (1 FPS refresh rate)
-             * Keep LCD panel active (do not suspend) */
-            if (y1_kernel_early_suspended)
-                y1_exit_kernel_early_suspend();
-#ifdef HAVE_LCD_ENABLE
-            y1_logf("[backlight-unix] backlight_hw_off: AOD mode -> lcd_enable(true)\n");
-            lcd_enable(true);
-#endif
-            int hw_val = y1_aod_brightness_level();
-            y1_aod_level = hw_val;
-            y1_logf("[backlight-unix] backlight_hw_off: AOD brightness write_bl_hw(%d)\n", hw_val);
-            write_bl_hw(hw_val);
-            y1_set_display_power_saving(true);
-            return;
-        }
-        if (y1_is_display_power_saving()) {
-            y1_set_display_power_saving(false);
-        }
-        y1_logf("[backlight-unix] backlight_hw_off: Screen Off -> write_bl_hw(0), lcd_enable(false)\n");
+    y1_logf("[backlight-unix] backlight_hw_off() called (last_bl=%d)\n", last_bl);
+    if (last_bl != BACKLIGHT_POWER_OFF) {
+        last_bl = BACKLIGHT_POWER_OFF;
         write_bl_hw(0);
         if (sysfs_bl_power)
             sysfs_set_int(sysfs_bl_power, last_bl);
-#ifdef HAVE_LCD_ENABLE
-        lcd_enable(false);
-#endif
-        y1_enter_kernel_early_suspend();
     }
 #else
     if (last_bl != BACKLIGHT_POWER_REDUCED) {
@@ -592,36 +254,6 @@ void backlight_hw_off(void)
     }
 #endif
 }
-
-#if defined(BACKLIGHT_INNIOASIS)
-bool y1_backlight_needs_polling(void)
-{
-    if (y1_aod_event_pending || y1_aod_event_active || y1_aod_event_fading)
-        return true;
-    if (last_bl == BACKLIGHT_POWER_REDUCED)
-        return true;
-    if (global_settings.always_on_screen &&
-        global_settings.aod_playback_only &&
-        y1_aod_pause_state == Y1_AOD_PAUSE_OFF)
-        return true;
-    return false;
-}
-
-void y1_backlight_idle_check(void)
-{
-    if (y1_aod_event_update())
-        return;
-
-    if (y1_aod_pause_update())
-        return;
-
-    int target_bl = y1_should_always_on() ? BACKLIGHT_POWER_REDUCED :
-                                            BACKLIGHT_POWER_OFF;
-    if ((last_bl == BACKLIGHT_POWER_REDUCED ||
-         last_bl == BACKLIGHT_POWER_OFF) && last_bl != target_bl)
-        backlight_hw_off();
-}
-#endif
 
 void backlight_hw_brightness(int brightness)
 {
@@ -636,11 +268,9 @@ void backlight_hw_brightness(int brightness)
 
 #if defined(BACKLIGHT_INNIOASIS)
     if (last_bl == BACKLIGHT_POWER_ON || last_bl == -1) {
-        int hw_val = (brightness * 255) / 100;
+        int eff = y1_get_effective_brightness();
+        int hw_val = (eff * 255) / 100;
         write_bl_hw(hw_val);
-    } else if (last_bl == BACKLIGHT_POWER_REDUCED && y1_should_always_on()) {
-        y1_aod_level = y1_aod_brightness_level();
-        write_bl_hw(y1_aod_level);
     }
 #else
     sysfs_set_int(sysfs_bl_brightness, brightness);
@@ -653,6 +283,7 @@ void lcd_awake(void)
 {
     y1_logf("[backlight-unix] lcd_awake() called\n");
     y1_exit_kernel_early_suspend();
+    y1_set_screen_off_power_mode(false);
 #ifdef HAVE_LCD_ENABLE
     lcd_enable(true);
 #endif
@@ -660,19 +291,13 @@ void lcd_awake(void)
 
 void lcd_sleep(void)
 {
-    y1_logf("[backlight-unix] lcd_sleep() called (receiver=%d, should_aod=%d, playing=%d, aod_pause_state=%d)\n",
-            (int)y1_bt_is_receiver_mode(), (int)y1_should_always_on(), (int)y1_playback_active(),
-            (int)y1_aod_pause_state);
-    if (y1_bt_is_receiver_mode() ||
-        y1_should_always_on() ||
-        y1_aod_pause_state == Y1_AOD_PAUSE_HOLD ||
-        y1_aod_pause_state == Y1_AOD_PAUSE_FADE_OUT)
-        return;
-
+    y1_logf("[backlight-unix] lcd_sleep() called (last_bl=%d)\n", last_bl);
 #ifdef HAVE_LCD_ENABLE
     y1_logf("[backlight-unix] lcd_sleep: calling lcd_enable(false)\n");
     lcd_enable(false);
 #endif
+
+    y1_set_screen_off_power_mode(true);
 
     if (!y1_kernel_early_suspended)
         y1_enter_kernel_early_suspend();

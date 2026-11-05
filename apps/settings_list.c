@@ -91,9 +91,6 @@ static void bt_receiver_full_volume_setting_changed(bool enabled)
 }
 extern void y1_set_resolution_setting(int mode);
 extern void y1_apply_resolution_setting(int mode);
-extern void y1_set_always_on_screen(bool on);
-extern void y1_aod_brightness_setting_changed(int brightness);
-extern void y1_aod_timeout_setting_changed(int timeout);
 #endif
 
 #define UNUSED {.RESERVED=NULL}
@@ -339,6 +336,10 @@ static const char off_number_spell[] = "off,number,spell";
 static const int timeout_sec_common[] = {-1,0,1,2,3,4,5,6,7,8,9,10,15,20,25,30,
                                         45,60,90,120,180,240,300,600,900,1200,
                                         1500,1800,2700,3600,4500,5400,6300,7200};
+static const int timeout_sec_hold[] = {-1,0,1,2,3,4,5,6,7,8,9,10,15,20,25,30,
+                                       45,60,90,120,180,240,300,600,900,1200,
+                                       1500,1800,2700,3600,5400,7200,9000,10800,
+                                       12600,14400,16200,18000};
 #if defined(HAVE_RECORDING)
 static const int time_recording_trigger[] = {0,1,2,5,10,15,20,25,30,60,120,300,600};
 #endif
@@ -557,26 +558,6 @@ static const char* formatter_time_unit_0_is_off(char *buffer, size_t buffer_size
         return str(LANG_OFF);
     return buffer;
 }
-
-#if defined(INNIOASIS_Y1)
-static const char* formatter_aod_brightness(char *buffer, size_t buffer_size,
-                                            int value, const char *unit)
-{
-    if (value < 0)
-        return str(LANG_AUTO);
-
-    snprintf(buffer, buffer_size, "%d%s", value, unit);
-    return buffer;
-}
-
-static int32_t getlang_aod_brightness(int value, int unit)
-{
-    if (value < 0)
-        return LANG_AUTO;
-
-    return TALK_ID(value, unit);
-}
-#endif
 
 static int32_t getlang_time_unit_0_is_off(int value, int unit)
 {
@@ -1526,7 +1507,7 @@ const struct settings_list settings[] = {
 
 #ifdef HAVE_BACKLIGHT
     OFFON_SETTING(0, bl_filter_first_keypress,
-                  LANG_BACKLIGHT_FILTER_FIRST_KEYPRESS, true,
+                  LANG_BACKLIGHT_FILTER_FIRST_KEYPRESS, false,
                   "backlight filters first keypress", NULL),
 #ifdef HAVE_REMOTE_LCD
     OFFON_SETTING(0, remote_bl_filter_first_keypress,
@@ -2185,14 +2166,36 @@ const struct settings_list settings[] = {
 #ifdef HAVE_BACKLIGHT
     CHOICE_SETTING(0, backlight_on_button_hold,
                    LANG_BACKLIGHT_ON_BUTTON_HOLD,
-#ifdef HAS_BUTTON_HOLD
+#if defined(HAS_BUTTON_HOLD) || defined(INNIOASIS_Y1)
                    1,
 #else
                    0,
 #endif
-                   "backlight on button hold", "normal,off,on",
-                   backlight_set_on_button_hold, 3,
-                   ID2P(LANG_NORMAL), ID2P(LANG_OFF), ID2P(LANG_ON)),
+                   "backlight on button hold",
+                   "normal,off,on,1%,5%,10%,15%,20%,25%,30%,40%,50%,60%,70%,80%,90%,100%",
+                   backlight_set_on_button_hold, 17,
+                   ID2P(LANG_NORMAL), ID2P(LANG_OFF), ID2P(LANG_ON),
+                   (const unsigned char*)"1%", (const unsigned char*)"5%",
+                   (const unsigned char*)"10%", (const unsigned char*)"15%",
+                   (const unsigned char*)"20%", (const unsigned char*)"25%",
+                   (const unsigned char*)"30%", (const unsigned char*)"40%",
+                   (const unsigned char*)"50%", (const unsigned char*)"60%",
+                   (const unsigned char*)"70%", (const unsigned char*)"80%",
+                   (const unsigned char*)"90%", (const unsigned char*)"100%"),
+
+    TABLE_SETTING_LIST(F_TIME_SETTING | F_ALLOW_ARBITRARY_VALS,
+                    backlight_on_button_hold_timeout, LANG_BACKLIGHT_ON_BUTTON_HOLD_TIMEOUT,
+                    DEFAULT_BACKLIGHT_TIMEOUT, "backlight timeout on hold",
+                    off_on, UNIT_SEC, formatter_time_unit_0_is_always,
+                    getlang_time_unit_0_is_always, backlight_set_timeout_on_hold,
+                    38, timeout_sec_hold),
+    CHOICE_SETTING(0, backlight_on_button_hold_rules,
+                   LANG_BACKLIGHT_ON_BUTTON_HOLD_RULES, 0,
+                   "backlight on button hold rules",
+                   "off,playing only,wps only", NULL, 3,
+                   ID2P(LANG_OFF),
+                   ID2P(LANG_PLAYING_ONLY),
+                   ID2P(LANG_WPS_ONLY)),
 
 #ifdef HAVE_LCD_SLEEP_SETTING
     TABLE_SETTING_LIST(F_TIME_SETTING | F_ALLOW_ARBITRARY_VALS,
@@ -2668,57 +2671,6 @@ const struct settings_list settings[] = {
                    "Normal (480x360)",
                    "Classic (320x240 stretched)"),
     OFFON_SETTING(0,
-                  always_on_screen,
-                  LANG_ALWAYS_ON_SCREEN,
-                  false,
-                  "always on screen",
-                  y1_set_always_on_screen),
-    OFFON_SETTING(0,
-                  aod_wps_only,
-                  LANG_Y1_AOD_WPS_ONLY,
-                  true,
-                  "aod wps only",
-                  NULL),
-    OFFON_SETTING(0,
-                  aod_playback_only,
-                  LANG_Y1_AOD_PLAYBACK_ONLY,
-                  false,
-                  "aod playback only",
-                  NULL),
-    OFFON_SETTING(0,
-                  aod_important_events,
-                  LANG_Y1_AOD_IMPORTANT_EVENTS,
-                  false,
-                  "aod important events",
-                  NULL),
-    INT_SETTING(0,
-                aod_brightness,
-                LANG_Y1_AOD_BRIGHTNESS,
-                -1,
-                "aod brightness",
-                UNIT_PERCENT,
-                -1,
-                100,
-                1,
-                formatter_aod_brightness,
-                getlang_aod_brightness,
-                y1_aod_brightness_setting_changed),
-    CHOICE_SETTING(0,
-                   aod_timeout,
-                   LANG_Y1_AOD_TIMEOUT,
-                   0,
-                   "aod timeout",
-                   "off,5m,10m,30m,1hr,2hr,5hr",
-                   y1_aod_timeout_setting_changed,
-                   7,
-                   ID2P(LANG_OFF),
-                   ID2P(LANG_Y1_AOD_TIMEOUT_5M),
-                   ID2P(LANG_Y1_AOD_TIMEOUT_10M),
-                   ID2P(LANG_Y1_AOD_TIMEOUT_30M),
-                   ID2P(LANG_Y1_AOD_TIMEOUT_1H),
-                   ID2P(LANG_Y1_AOD_TIMEOUT_2H),
-                   ID2P(LANG_Y1_AOD_TIMEOUT_5H)),
-    OFFON_SETTING(0,
                   scroll_abc,
                   LANG_Y1_SCROLL_ABC,
                   true,
@@ -2799,12 +2751,6 @@ const struct settings_list settings[] = {
                    NULL,
                    10,
                    MFB_ACTION_CHOICES),
-    OFFON_SETTING(0,
-                  double_click_unhold,
-                  LANG_Y1_DOUBLE_CLICK_UNHOLD,
-                  true,
-                  "double click unhold",
-                  NULL),
     OFFON_SETTING(0,
                   bt_enabled,
                   LANG_Y1_BLUETOOTH,

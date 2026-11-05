@@ -811,8 +811,6 @@ long gui_wps_show(void)
         if (y1_bt_is_receiver_mode() && update_receiver_track()) {
             state->id3 = &bt_receiver_track;
             update = true;
-            extern void y1_aod_notify_event(void);
-            y1_aod_notify_event();
         }
         uint32_t receiver_art_generation =
             y1_bt_receiver_art_generation();
@@ -824,8 +822,6 @@ long gui_wps_show(void)
         uint8_t receiver_play_status = y1_bt_receiver_get_play_status();
         if (y1_audio_status != last_y1_audio_status ||
             receiver_play_status != last_receiver_play_status) {
-            extern void y1_aod_notify_event(void);
-            y1_aod_notify_event();
             last_y1_audio_status = y1_audio_status;
             last_receiver_play_status = receiver_play_status;
         }
@@ -873,10 +869,6 @@ long gui_wps_show(void)
         else
         {
             gwps_caption_backlight(state);
-#if defined(INNIOASIS_Y1)
-            extern void y1_backlight_idle_check(void);
-            y1_backlight_idle_check();
-#endif
 
             FOR_NB_SCREENS(i)
             {
@@ -1283,13 +1275,6 @@ struct wps_state *get_wps_state(void)
 static void track_info_callback(unsigned short id, void *param)
 {
     struct wps_state *state = get_wps_state();
-
-#if defined(INNIOASIS_Y1)
-    if (id == PLAYBACK_EVENT_TRACK_CHANGE || id == PLAYBACK_EVENT_TRACK_SKIP) {
-        extern void y1_aod_notify_event(void);
-        y1_aod_notify_event();
-    }
-#endif
 
     if (id == PLAYBACK_EVENT_TRACK_CHANGE || id == PLAYBACK_EVENT_CUR_TRACK_READY)
     {

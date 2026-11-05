@@ -40,8 +40,6 @@ void interrupt(void);
 #if defined(INNIOASIS_Y1)
 #include "innioasis/y1/bt-y1.h"
 extern bool y1_is_screen_sleeping(void);
-extern bool y1_is_display_power_saving(void);
-extern bool y1_should_always_on(void);
 extern bool y1_playback_active(void);
 extern int  y1_wait_for_input_events(int timeout_ms);
 extern bool y1_button_hold_active(void);
@@ -128,7 +126,7 @@ static bool y1_can_deep_idle_tick(uint64_t now_ms, uint64_t last_active_ms)
 {
     if (now_ms - last_active_ms < 5000ULL)
         return false;
-    if (!y1_is_screen_sleeping() || y1_is_display_power_saving() || y1_should_always_on())
+    if (!y1_is_screen_sleeping())
         return false;
     if (y1_playback_active() || y1_bt_is_receiver_mode() || y1_bt_is_scanning())
         return false;

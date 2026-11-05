@@ -23,6 +23,8 @@
 #if !defined(BOOTLOADER)
 #include "settings.h"
 #include "action.h"
+#include "audio.h"
+#include "misc.h"
 #include "../apps/gui/skin_engine/skin_engine.h"
 #endif
 #include <stdlib.h>
@@ -125,6 +127,7 @@ static int backlight_timeout_normal = 5*HZ;
 #if CONFIG_CHARGING
 static int backlight_timeout_plugged = 5*HZ;
 #endif
+static int backlight_timeout_on_hold = 5*HZ;
 static int backlight_on_button_hold = 0;
 static void backlight_handle_timeout(void);
 
@@ -579,8 +582,7 @@ static void backlight_queue_wait(struct queue_event *ev)
 #ifdef HAVE_BUTTON_LIGHT
         && buttonlight_timer <= 0 && buttonlight_ignored_timer <= 0
 #endif
-        && backlight_ignored_timer <= 0
-        && !y1_backlight_needs_polling())
+        && backlight_ignored_timer <= 0)
     {
         queue_wait(&backlight_queue, ev);
     }
@@ -747,10 +749,6 @@ static void backlight_timeout_handler(void)
         }
     }
 #endif /* HAVE_LCD_SLEEP */
-#if defined(INNIOASIS_Y1)
-    extern void y1_backlight_idle_check(void);
-    y1_backlight_idle_check();
-#endif
 #ifdef HAVE_REMOTE_LCD
     if(remote_backlight_timer > 0)
     {
@@ -884,17 +882,35 @@ bool is_backlight_on(bool ignore_always_off)
 /* return value in ticks; 0 means always on, <0 means always off */
 int backlight_get_current_timeout(void)
 {
-    if ((backlight_on_button_hold != 0)
+    if (
 #if (defined(HAVE_REMOTE_LCD_AS_MAIN) && defined(HAS_REMOTE_BUTTON_HOLD))
-        && remote_button_hold()
+        remote_button_hold()
 #elif defined(HAS_BUTTON_HOLD)
-        && button_hold()
+        button_hold()
 #else
-        && is_keys_locked()
+        is_keys_locked()
 #endif
         )
-        return (backlight_on_button_hold == 2) ? 0 : -1;
-        /* always on or always off */
+    {
+#ifndef BOOTLOADER
+        if (global_settings.backlight_on_button_hold_rules == 1) /* Playing only */
+        {
+            if (!(audio_status() & AUDIO_STATUS_PLAY))
+                return -1;
+        }
+        else if (global_settings.backlight_on_button_hold_rules == 2) /* WPS only */
+        {
+            if (get_current_activity() != ACTIVITY_WPS)
+                return -1;
+        }
+#endif
+
+        if (backlight_on_button_hold == 1) /* Off */
+            return -1;
+
+        /* All other hold modes (Normal, On, 1%..100%) follow Backlight on Lock Timeout */
+        return backlight_timeout_on_hold;
+    }
     else
 #if CONFIG_CHARGING
         if (power_input_present())
@@ -902,6 +918,19 @@ int backlight_get_current_timeout(void)
         else
 #endif
             return backlight_timeout_normal;
+}
+
+void backlight_set_timeout_on_hold(int value)
+{
+    if (value < 0)
+        backlight_timeout_on_hold = -1;
+    else if (value == 0)
+        backlight_timeout_on_hold = 0;
+    else
+        backlight_timeout_on_hold = HZ * value;
+
+    queue_remove_from_head(&backlight_queue, BACKLIGHT_TMO_CHANGED);
+    queue_post(&backlight_queue, BACKLIGHT_TMO_CHANGED, 0);
 }
 
 void backlight_set_timeout(int value)
@@ -920,27 +949,32 @@ void backlight_set_timeout_plugged(int value)
 }
 #endif /* CONFIG_CHARGING */
 
-#ifdef HAS_BUTTON_HOLD
+#if defined(HAS_BUTTON_HOLD) || defined(INNIOASIS_Y1)
 /* Hold button change event handler. */
 void backlight_hold_changed(bool hold_button)
 {
 #ifndef BOOTLOADER
     skin_request_update_locked(hold_button);
 #endif
-    if (!hold_button || (backlight_on_button_hold > 0))
+    if (!hold_button || (backlight_on_button_hold != 1))
     {
-        /* if unlocked or override in effect */
-
-        /*backlight_on(); REMOVED*/
+        /* If unlocked, or locked with hold backlight enabled:
+         * Update state immediately with the new timeout and brightness */
         queue_remove_from_head(&backlight_queue, BACKLIGHT_ON);
         queue_post(&backlight_queue, BACKLIGHT_ON, 0);
     }
+    else
+    {
+        /* Locked and Hold Light is OFF: immediately turn off backlight */
+        queue_remove_from_head(&backlight_queue, BACKLIGHT_OFF);
+        queue_post(&backlight_queue, BACKLIGHT_OFF, 0);
+    }
 }
-#endif /* HAS_BUTTON_HOLD */
+#endif /* HAS_BUTTON_HOLD || INNIOASIS_Y1 */
 
 void backlight_set_on_button_hold(int index)
 {
-    if ((unsigned)index >= 3)
+    if ((unsigned)index >= 17)
         /* if given a weird value, use default */
         index = 0;
 

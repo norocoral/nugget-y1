@@ -120,6 +120,29 @@ MT6572의 ALSA 서브시스템은 다운스트림 MediaTek 커널에서 대부�
 - **문제점:** 고급 키 잠금 모드 및 MFB 리모컨 입력 시, 재생 진행 상태와 무관하게 이전 버튼을 누르면 즉시 이전 트랙으로 건너뛰는 현상이 발생함. 표준 Rockbox WPS 동작은 재생 시간이 3초 이상($\ge 3\text{초}$)인 경우 트랙/큐 시작 위치로 되감고, 3초 미만($< 3\text{초}$)일 때만 이전 곡으로 이동해야 함. 또한 키 잠금 상태에서 탐색(Seek) 시 조기 트랙 건너뛰기 이벤트가 방출됨.
 - **수정 내용:** `apps/misc.c`에서 `BUTTON_MULTIMEDIA_PREV` 처리 시 `id3->elapsed >= DEFAULT_SKIP_THRESH`(3000ms) 여부를 검사하도록 수정. `apps/action.c`에서는 키 잠금 상태의 버튼 누름 이벤트가 탐색 중 초기 다운 상태를 흡수하고 네이티브 `ACTION_WPS_SEEK*` 액션을 발행하도록 하여 WPS 상태 화면이 정확히 표시되도록 수정.
 
+### 5.3 iPod Classic HOLD 서브시스템, 백라이트 규칙 및 입력 가로채기 아키텍처
+
+물리적 기계식 HOLD 스위치가 없는 하드웨어 환경에서 오리지널 iPod Classic 고유의 직관적 잠금 UX를 완벽하게 재현하기 위해 다음과 같은 아키텍처를 구현했습니다:
+1. **동적 소프트웨어 키 잠금 (HOLD) 상태 머신:**
+   - `firmware/target/hosted/innioasis/y1/button-y1.c`에서 상단 MENU 버튼(`KEY_BACK` / `KEY_ESC`)을 감지하는 커스텀 입력 인터셉터 구현:
+     - 잠금 상태(HOLD)에서는 MENU 더블 클릭(`MENU_HOLD_DOUBLECLICK_MS = 350ms`)을 감지하여 잠금을 해제하며, 주머니 속에서의 단일 클릭 입력은 안전하게 차단(드롭)하여 원치 않는 화면 켜짐을 방지합니다.
+     - 잠금 해제 상태에서는 단일 클릭이 `MENU_NORMAL_DOUBLECLICK_MS = 120ms` 만에 즉각 방출되어 메뉴 뒤로 가기 조작 시의 딜레이를 완전히 제거하였으며, 길게 누르기(`MENU_LONGPRESS_MS = 280ms`)로 Rockbox 퀵 스크린을 엽니다. 더블 클릭 시 즉시 잠금 상태로 진입합니다.
+     - 잠금 상태 전환 시 합성 `BUTTON_REMOTE_HOLD` / `BUTTON_HOLD` 이벤트를 발생시켜 `apps/action.c`의 `do_key_lock()`을 구동합니다.
+2. **잠금 모드 백라이트 전환의 즉각적인 동기화:**
+   - 기존에는 HOLD 진입 후에도 이전 일반 화면 꺼짐 타이머가 유지되어 타임아웃 불일치 버그가 존재했습니다.
+   - `firmware/backlight.c` 및 `apps/action.c`에서 `do_key_lock()`이 호출될 때 `backlight_hold_changed(bool hold)`를 트리거하도록 개선했습니다. `backlight_get_current_timeout()`은 `backlight_on_button_hold != 1` 및 재생 규칙에 따라 `global_settings.backlight_timeout`과 `global_settings.backlight_timeout_on_hold`를 동적으로 전환하며 타이머를 즉시 재설정합니다.
+3. **잠금 모드 백라이트 규칙 및 최대 5시간 확장:**
+   - `global_settings.backlight_on_hold_rules` 설정을 도입하여 잠금 중 백라이트 유지 조건 지원:
+     - `BACKLIGHT_HOLD_RULES_ALWAYS`: 음악 재생 여부와 무관하게 버튼 입력 시 항상 백라이트 점등.
+     - `BACKLIGHT_HOLD_RULES_PLAYING`: 현재 오디오가 재생 중일 때만 백라이트 점등.
+     - `BACKLIGHT_HOLD_RULES_WPS`: 현재 재생 화면(WPS)에 머무를 때만 백라이트 점등.
+   - `backlight_on_button_hold_timeout` 옵션 테이블을 최대 5시간(18,000초)까지 38개 구간으로 대폭 확장하여 독서나 장시간 디스플레이 확인을 지원합니다.
+4. **첫 번째 키 입력 시 백라이트 점등 vs 명령 즉시 실행:**
+   - 잠금 해제 상태에서 화면이 꺼졌을 때, `global_settings.first_keypress_backlight_only`를 통해 반응 방식을 제어합니다:
+     - `아니오 (No)` *(기본값)*: `action.c`에서 버튼 이벤트를 차단하지 않고 그대로 통과시켜, 다음 곡 넘김이나 재생/일시정지 등의 명령을 즉각 실행하면서 동시에 백라이트를 켭니다.
+     - `예 (Yes)`: 첫 번째 키 입력을 가로채어 명령을 차단(`ACTION_NONE`)하고 백라이트만 켭니다. 이후 화면이 켜진 상태에서 누르는 키만 명령을 실행합니다.
+   - 잠금(HOLD) 상태에서는 `global_settings.backlight_on_button_hold`(*홀드 라이트*) 설정에 따라 버튼 입력 시 명령 실행 없이 화면 백라이트만 켜거나(`켜짐`), 주머니 속 완전 암전 모드(`꺼짐`)를 유지합니다.
+
 ---
 
 ## 6. USB 가젯 및 충전 전용 모드 전환

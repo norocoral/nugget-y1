@@ -754,6 +754,8 @@ struct user_settings
     int  bl_selective_actions_mask;/* mask of actions that will not enable backlight */
     int backlight_on_button_hold; /* what to do with backlight when hold
                                      switch is on */
+    int backlight_on_button_hold_timeout; /* backlight timeout while locked: -1=never, 0=always, or secs */
+    int backlight_on_button_hold_rules;   /* backlight on hold rule: 0=off, 1=playing only, 2=wps only */
 #ifdef HAVE_LCD_SLEEP_SETTING
     int lcd_sleep_after_backlight_off; /* when to put lcd to sleep after backlight
                                           has turned off:  -1=never, 0=always,
@@ -954,12 +956,6 @@ struct user_settings
     bool y1_screen_off_cpu_save;
     bool y1_logging_enabled;
     int y1_screen_resolution;
-    bool always_on_screen;
-    bool aod_wps_only;
-    bool aod_playback_only;
-    bool aod_important_events;
-    int aod_brightness;
-    int aod_timeout;
     bool scroll_abc;
     bool keyclick_wheel_only;
     bool keyclick_list_edge;
@@ -969,7 +965,6 @@ struct user_settings
     int mfb_triple_click;
     int mfb_hold_2s;
     int mfb_hold_5s;
-    bool double_click_unhold;
     bool bt_enabled;
     bool bt_receiver_auto_start;
     bool bt_receiver_auto_connect;

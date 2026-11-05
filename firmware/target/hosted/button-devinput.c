@@ -34,6 +34,7 @@
 #include "kernel.h"
 #include "sysfs.h"
 #include "button.h"
+#include "settings.h"
 #include "panic.h"
 #if defined(INNIOASIS_Y1)
 #include "innioasis/y1/button-target.h"
@@ -447,12 +448,14 @@ int button_read_device(BDATA)
     }
 
 #ifdef HAVE_SCROLLWHEEL
-    /* Reset backlight and poweroff timers only when not in HOLD / sleep mode */
+    /* Reset backlight and poweroff timers */
     if (wheel_ticks) {
-#if defined(INNIOASIS_Y1)
-        extern bool y1_is_display_power_saving(void);
         extern bool is_keys_locked(void);
-        if (is_backlight_on(false) && !y1_is_display_power_saving() && !is_keys_locked()) {
+        extern bool y1_is_screen_sleeping(void);
+        bool bl_off = !is_backlight_on(true) || y1_is_screen_sleeping();
+        bool hold_light_on = (backlight_get_current_timeout() >= 0);
+
+        if (!is_keys_locked()) {
 #ifdef HAVE_BACKLIGHT
             backlight_on();
 #endif
@@ -460,16 +463,24 @@ int button_read_device(BDATA)
             buttonlight_on();
 #endif
             reset_poweroff_timer();
-        }
-#else
+
+            if (bl_off && global_settings.bl_filter_first_keypress) {
+                /* "First Keypress Enables Backlight Only" == YES:
+                 * block scroll wheel command when waking from screen-off */
+                wheel_ticks = 0;
+            }
+        } else {
+            /* Locked */
+            if (hold_light_on) {
 #ifdef HAVE_BACKLIGHT
-        backlight_on();
+                backlight_on();
 #endif
 #ifdef HAVE_BUTTON_LIGHT
-        buttonlight_on();
+                buttonlight_on();
 #endif
-        reset_poweroff_timer();
-#endif
+                reset_poweroff_timer();
+            }
+        }
     }
 
     if (wheel_ticks > 0)

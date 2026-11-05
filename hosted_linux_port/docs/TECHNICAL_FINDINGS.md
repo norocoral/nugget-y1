@@ -120,6 +120,29 @@ Inputs are mapped from Linux input events:
 - **Issue:** In Advanced Key Lock and via the MFB remote, pressing Previous skipped immediately to the previous track regardless of playback progress. Standard Rockbox WPS behavior rewinds to the track/cue start if elapsed time is $\ge 3\text{ seconds}$, skipping to the previous track only if $< 3\text{ seconds}$. Seeking in Key Lock also emitted premature skip events.
 - **Fix:** In `apps/misc.c`, `BUTTON_MULTIMEDIA_PREV` checks `id3->elapsed >= DEFAULT_SKIP_THRESH` (3000ms). In `apps/action.c`, Key Lock button press events swallow the initial down state during seek and dispatch native `ACTION_WPS_SEEK*` actions so the WPS status displays correctly.
 
+### 5.3 iPod Classic HOLD Subsystem, Backlight Rules & Input Interception Architecture
+
+To deliver an authentic iPod Classic user experience on hardware without a mechanical HOLD switch:
+1. **Dynamic Software Key Lock (HOLD) State Machine:**
+   - In `firmware/target/hosted/innioasis/y1/button-y1.c`, the top MENU button (`KEY_BACK` / `KEY_ESC`) drives an input interceptor:
+     - When locked, double-clicking MENU (`MENU_HOLD_DOUBLECLICK_MS = 350ms`) toggles key lock off. Stray single-clicks are swallowed to prevent unintentional screen wake in pockets.
+     - When unlocked, single-click MENU releases in `MENU_NORMAL_DOUBLECLICK_MS = 120ms` for crisp menu navigation, while long-press (`MENU_LONGPRESS_MS = 280ms`) opens the Rockbox Quickscreen. Double-clicking MENU locks the device immediately.
+     - Lock toggling dispatches synthetic `BUTTON_REMOTE_HOLD` / `BUTTON_HOLD` events processed by `do_key_lock()` in `apps/action.c`.
+2. **Immediate Lock Mode Backlight Transitions:**
+   - Previous implementations left the normal screen timeout running after engaging HOLD.
+   - In `firmware/backlight.c` and `apps/action.c`, `do_key_lock()` now triggers `backlight_hold_changed(bool hold)`. `backlight_get_current_timeout()` dynamically switches between `global_settings.backlight_timeout` and `global_settings.backlight_timeout_on_hold` based on `backlight_on_button_hold != 1` and playback hold rules. The timer resets immediately upon toggling lock.
+3. **Backlight on Lock Rules & Extended Timeouts:**
+   - `global_settings.backlight_on_hold_rules` supports:
+     - `BACKLIGHT_HOLD_RULES_ALWAYS`: Backlight illuminates on button wake regardless of playback.
+     - `BACKLIGHT_HOLD_RULES_PLAYING`: Backlight only wakes if audio is actively playing.
+     - `BACKLIGHT_HOLD_RULES_WPS`: Backlight only wakes if currently on the WPS (While Playing Screen).
+   - `backlight_on_button_hold_timeout` table was expanded to 38 entries spanning from 1 second up to 5 hours (18,000s), enabling long display sessions while locked.
+4. **First Keypress Wake vs Action Execution:**
+   - When unlocked and the backlight is off, `global_settings.first_keypress_backlight_only` governs wake behavior:
+     - `NO` (Default): `action.c` allows the keypress event to flow through normally, executing the playback action (e.g. Next track, Play/Pause) while simultaneously triggering `backlight_on()`.
+     - `YES`: The first keypress event is intercepted and blocked (`ACTION_NONE`), only lighting up the display. Subsequent keypresses execute actions.
+   - When locked, `global_settings.backlight_on_button_hold` (*Hold Light*) determines whether presses illuminate the screen (`ON` / brightness value) without executing actions, or keep the display completely dark (`OFF`).
+
 ---
 
 ## 6. USB Gadget & Charge-Only Switching

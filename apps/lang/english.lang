@@ -18507,3 +18507,261 @@
     *: "Use modern scheme"
   </voice>
 </phrase>
+<phrase>
+  id: LANG_BACKLIGHT_ON_BUTTON_HOLD_TIMEOUT
+  desc: in lcd settings
+  user: core
+  <source>
+    *: "Backlight on Lock Timeout"
+    hold_button: "Backlight on Hold Timeout"
+  </source>
+  <dest>
+    *: "Backlight on Lock Timeout"
+    hold_button: "Backlight on Hold Timeout"
+  </dest>
+  <voice>
+    *: "Backlight on Lock Timeout"
+    hold_button: "Backlight on hold timeout"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_BACKLIGHT_ON_BUTTON_HOLD_RULES
+  desc: in lcd settings
+  user: core
+  <source>
+    *: "Backlight on Lock Rules"
+    hold_button: "Backlight on Hold Rules"
+  </source>
+  <dest>
+    *: "Backlight on Lock Rules"
+    hold_button: "Backlight on Hold Rules"
+  </dest>
+  <voice>
+    *: "Backlight on Lock Rules"
+    hold_button: "Backlight on hold rules"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_PLAYING_ONLY
+  desc: in lcd settings
+  user: core
+  <source>
+    *: "Playing only"
+  </source>
+  <dest>
+    *: "Playing only"
+  </dest>
+  <voice>
+    *: "Playing only"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_WPS_ONLY
+  desc: in lcd settings
+  user: core
+  <source>
+    *: "WPS only"
+  </source>
+  <dest>
+    *: "WPS only"
+  </dest>
+  <voice>
+    *: "WPS only"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_BT_CODEC
+  desc: in Settings -> Bluetooth
+  user: core
+  <source>
+    *: "Codec"
+  </source>
+  <dest>
+    *: "Codec"
+  </dest>
+  <voice>
+    *: "Codec"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_BT_STATUS
+  desc: in Settings -> Bluetooth
+  user: core
+  <source>
+    *: "Status"
+  </source>
+  <dest>
+    *: "Status"
+  </dest>
+  <voice>
+    *: "Status"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_BT_STATUS_INIT
+  desc: in Settings -> Bluetooth
+  user: core
+  <source>
+    *: "Initializing..."
+  </source>
+  <dest>
+    *: "Initializing..."
+  </dest>
+  <voice>
+    *: "Initializing"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_BT_STATUS_READY
+  desc: in Settings -> Bluetooth
+  user: core
+  <source>
+    *: "Ready (Idle)"
+  </source>
+  <dest>
+    *: "Ready (Idle)"
+  </dest>
+  <voice>
+    *: "Ready"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_BT_CONNECTING_STATUS
+  desc: in Settings -> Bluetooth
+  user: core
+  <source>
+    *: "Connecting..."
+  </source>
+  <dest>
+    *: "Connecting..."
+  </dest>
+  <voice>
+    *: "Connecting"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_BT_CONNECTED_STATUS
+  desc: in Settings -> Bluetooth
+  user: core
+  <source>
+    *: "Connected"
+  </source>
+  <dest>
+    *: "Connected"
+  </dest>
+  <voice>
+    *: "Connected"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_BT_STATUS_STREAMING
+  desc: in Settings -> Bluetooth
+  user: core
+  <source>
+    *: "Streaming"
+  </source>
+  <dest>
+    *: "Streaming"
+  </dest>
+  <voice>
+    *: "Streaming"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_BT_STATUS_ERROR
+  desc: in Settings -> Bluetooth
+  user: core
+  <source>
+    *: "Hardware Error"
+  </source>
+  <dest>
+    *: "Hardware Error"
+  </dest>
+  <voice>
+    *: "Hardware Error"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_BT_NO_PAIRED
+  desc: in Settings -> Bluetooth
+  user: core
+  <source>
+    *: "No paired devices"
+  </source>
+  <dest>
+    *: "No paired devices"
+  </dest>
+  <voice>
+    *: "No paired devices"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_BT_CONNECTED_SHORT
+  desc: in Settings -> Bluetooth
+  user: core
+  <source>
+    *: "Connected"
+  </source>
+  <dest>
+    *: "Connected"
+  </dest>
+  <voice>
+    *: "Connected"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_BT_CONNECTING_FMT
+  desc: in Settings -> Bluetooth
+  user: core
+  <source>
+    *: "Connecting to %s..."
+  </source>
+  <dest>
+    *: "Connecting to %s..."
+  </dest>
+  <voice>
+    *: "Connecting"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_BT_CONNECTED_FMT
+  desc: in Settings -> Bluetooth
+  user: core
+  <source>
+    *: "Connected: %s"
+  </source>
+  <dest>
+    *: "Connected: %s"
+  </dest>
+  <voice>
+    *: "Connected"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_BT_SEARCHING
+  desc: in Settings -> Bluetooth
+  user: core
+  <source>
+    *: "Searching for devices..."
+  </source>
+  <dest>
+    *: "Searching for devices..."
+  </dest>
+  <voice>
+    *: "Searching for devices"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_Y1_BT_NO_DEVICES_FOUND
+  desc: in Settings -> Bluetooth
+  user: core
+  <source>
+    *: "No devices found (Select to rescan)"
+  </source>
+  <dest>
+    *: "No devices found (Select to rescan)"
+  </dest>
+  <voice>
+    *: "No devices found"
+  </voice>
+</phrase>

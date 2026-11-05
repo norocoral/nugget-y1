@@ -23,7 +23,7 @@ Nugget for Y1 is an open-source custom firmware for the Innioasis Y1 digital aud
 | Volume Scale | OS master volume | Unstable with multi-output | **Rockbox logarithmic (-74 dB to +6 dB)** |
 | Display Modes | 480x360 only | 480x360 only | **480x360 Native + 320x240 Classic Mode** |
 | iPod Theme Compatibility | Incompatible | Requires 480x360 assets | **Native iPod Classic theme support** |
-| Key Lock Mode | None | None | **Auto-HOLD with Advanced Key Lock** |
+| Key Lock Mode | None | None | **iPod Classic HOLD with Hold Light & Advanced Key Lock** |
 | USB Connection | Android MTP / Mass Storage | Android Mass Storage | **Mass Storage** |
 
 ---
@@ -93,10 +93,10 @@ Same navigation scheme as the iPod Classic, with dedicated hardware additions:
 | Click Wheel | Rotate | Scroll lists / adjust volume in WPS |
 | Center Button | Short Press | Select / activate menu item |
 | Center Button | Long Press (1s) | Open Context Menu for active track/file |
-| Center Button | Short Press (Screen Off) | Unhold and wake screen (click is cleanly swallowed) |
 | Center Button | Long Press (1s on USB screen) | Eject Mass Storage and switch to Charge-Only mode |
-| Menu Button | Short Press | Return to parent menu / back |
-| Menu Button | Long Press | Open Rockbox Quick Screen settings |
+| Menu Button | Short Press | Return to parent menu / back (low-latency 120ms release) |
+| Menu Button | Double-Click | Toggle Key Lock (HOLD mode) on / off |
+| Menu Button | Long Press (280ms) | Open Rockbox Quick Screen settings |
 | Play Button | Short Press | Play / Pause toggle |
 | Play Button | Long Press | Stop playback |
 | Left Button | Short Press | Rewind to track start if $\ge 3\text{s}$; skip to previous track if $< 3\text{s}$ |
@@ -105,6 +105,28 @@ Same navigation scheme as the iPod Classic, with dedicated hardware additions:
 | Right Button | Long Press | Seek forward |
 | Side Buttons | Press | Volume Up / Down (1 dB steps) |
 | Headphone Remote (MFB) | In-line Clicks | Single, double, triple clicks & hold actions (configurable in Settings) |
+
+---
+
+### iPod Classic HOLD & Backlight Subsystem
+
+Nugget for Y1 provides an authentic iPod Classic HOLD experience tailored for the Y1's button layout:
+
+- **Toggling HOLD (Lock / Unlock):**
+  - Quickly double-click the **MENU** button at any time to toggle HOLD mode on or off.
+  - Double-clicking is responsive and has a generous 350ms window when locked. When unlocked, single-click MENU fires after a short 120ms window to keep menu back-navigation snappy and lag-free.
+- **When Locked (HOLD Active):**
+  - **Button Protection:** All wheel scrolls and button commands are locked against accidental pocket presses (unless explicitly exempted via *Advanced Key Lock* for Volume, Play/Pause, or Track Skip).
+  - **Hold Light Setting:**
+    - `Off` *(Default)*: Full pocket stealth mode. Button presses and wheel movements are completely ignored; the display stays dark.
+    - `On` *(or Brightness %)*: Pressing any button wakes the backlight so you can check the time or currently playing track, without triggering any playback commands.
+  - **Backlight on Lock Timeout:** Configurable up to **5 hours** (Off, Always On, 1s–45s, 1m–45m, 1h–5h). Entering HOLD mode immediately applies the lock timeout and brightness.
+  - **Backlight on Lock Rules:** Choose under which conditions the backlight remains active while locked (`Always`, `Playing only`, or `WPS only`).
+- **When Unlocked (Normal Operation):**
+  - **First Keypress Enables Backlight Only:**
+    - `No` *(Default)*: When the backlight has turned off, pressing a button (such as Next or Play/Pause) immediately executes the media command AND illuminates the screen simultaneously.
+    - `Yes`: When dark, the first button press only turns on the backlight without executing the command, preventing unintended skips. Subsequent presses execute actions normally.
+  - **Backlight Idle Timeout:** Governed by the standard Backlight Timeout setting during active navigation.
 
 ---
 

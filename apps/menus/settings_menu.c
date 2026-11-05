@@ -440,14 +440,8 @@ MENUITEM_SETTING(bt_selective_actions,
 MENUITEM_FUNCTION(sel_softlock_mask, 0, ID2P(LANG_SETTINGS),
                   selectivesoftlock_set_mask, selectivesoftlock_callback,
                   Icon_Menu_setting);
-#if defined(INNIOASIS_Y1)
-MENUITEM_SETTING(y1_double_click_unhold_item, &global_settings.double_click_unhold, NULL);
-MAKE_MENU(sel_softlock, ID2P(LANG_SOFTLOCK_SELECTIVE),
-          NULL, Icon_Menu_setting, &bt_selective_actions, &sel_softlock_mask, &y1_double_click_unhold_item);
-#else
 MAKE_MENU(sel_softlock, ID2P(LANG_SOFTLOCK_SELECTIVE),
           NULL, Icon_Menu_setting, &bt_selective_actions, &sel_softlock_mask);
-#endif
 #endif /* !HAS_BUTTON_HOLD */
 
 #if defined(DX50) || defined(DX90)
@@ -460,12 +454,6 @@ MENUITEM_SETTING(governor, &global_settings.governor, NULL);
 #include "list.h"
 
 MENUITEM_SETTING(y1_screen_res_setting, &global_settings.y1_screen_resolution, NULL);
-MENUITEM_SETTING(y1_always_on_screen_item, &global_settings.always_on_screen, NULL);
-MENUITEM_SETTING(y1_aod_wps_item, &global_settings.aod_wps_only, NULL);
-MENUITEM_SETTING(y1_aod_playback_item, &global_settings.aod_playback_only, NULL);
-MENUITEM_SETTING(y1_aod_important_events_item, &global_settings.aod_important_events, NULL);
-MENUITEM_SETTING(y1_aod_brightness_item, &global_settings.aod_brightness, NULL);
-MENUITEM_SETTING(y1_aod_timeout_item, &global_settings.aod_timeout, NULL);
 MENUITEM_SETTING(y1_scroll_abc_item, &global_settings.scroll_abc, NULL);
 MENUITEM_SETTING(y1_cpu_mode_setting, &global_settings.y1_cpu_mode, NULL);
 MENUITEM_SETTING(y1_cpu_cores_setting, &global_settings.y1_cpu_cores, NULL);
@@ -526,11 +514,38 @@ static int keyclick_custom_sound_clear(void)
 static struct y1_bt_device ui_bt_devs[Y1_BT_MAX_DEVICES];
 static int ui_bt_dev_count = 0;
 
+static const char *y1_bt_get_localized_status(void)
+{
+    static char status_buf[80];
+    enum y1_bt_state st = y1_bt_get_state();
+    const char *conn_name = y1_bt_get_connected_name();
+    const char *dev_name = (conn_name && conn_name[0]) ? conn_name : (const char *)str(LANG_DEVICE);
+
+    switch (st) {
+        case Y1_BT_STATE_OFF:        return (const char *)str(LANG_OFF);
+        case Y1_BT_STATE_INIT:       return (const char *)str(LANG_Y1_BT_STATUS_INIT);
+        case Y1_BT_STATE_IDLE:       return (const char *)str(LANG_Y1_BT_STATUS_READY);
+        case Y1_BT_STATE_SCANNING:   return (const char *)str(LANG_Y1_BT_SEARCHING);
+        case Y1_BT_STATE_CONNECTING: return (const char *)str(LANG_Y1_BT_CONNECTING_STATUS);
+        case Y1_BT_STATE_CONNECTED:
+            snprintf(status_buf, sizeof(status_buf), "%s: %s",
+                     str(LANG_Y1_BT_CONNECTED_SHORT), dev_name);
+            return status_buf;
+        case Y1_BT_STATE_STREAMING:
+            snprintf(status_buf, sizeof(status_buf), "%s (%s): %s",
+                     str(LANG_Y1_BT_STATUS_STREAMING),
+                     y1_bt_get_active_device_codec() == Y1_BT_CODEC_SBC_XQ ? "SBC XQ" : "SBC", dev_name);
+            return status_buf;
+        case Y1_BT_STATE_ERROR:      return (const char *)str(LANG_Y1_BT_STATUS_ERROR);
+        default:                     return (const char *)str(LANG_UNKNOWN);
+    }
+}
+
 static char *y1_bt_status_getname(int selected_item, void *data, char *buffer, size_t buffer_len)
 {
     (void)selected_item;
     (void)data;
-    snprintf(buffer, buffer_len, "Status: %s", y1_bt_get_status_str());
+    snprintf(buffer, buffer_len, "%s: %s", str(LANG_Y1_BT_STATUS), y1_bt_get_localized_status());
     return buffer;
 }
 
@@ -543,7 +558,7 @@ static int y1_bt_status_speak(int selected_item, void *data)
 
 static int y1_bt_status_action(void)
 {
-    splashf(HZ * 2, "Bluetooth: %s", y1_bt_get_status_str());
+    splashf(HZ * 2, "%s: %s", str(LANG_Y1_BLUETOOTH), y1_bt_get_localized_status());
     return 0;
 }
 
@@ -556,13 +571,13 @@ static const char *y1_bt_paired_list_get_name(int selected_item, void *data,
 {
     (void)data;
     if (ui_bt_dev_count == 0)
-        return "No paired devices";
+        return str(LANG_Y1_BT_NO_PAIRED);
     if (selected_item < 0 || selected_item >= ui_bt_dev_count)
         return "";
 
     const struct y1_bt_device *d = &ui_bt_devs[selected_item];
     if (d->connected)
-        snprintf(buffer, buffer_len, "[Connected] %s", d->name);
+        snprintf(buffer, buffer_len, "[%s] %s", str(LANG_Y1_BT_CONNECTED_SHORT), d->name);
     else
         snprintf(buffer, buffer_len, "%s", d->name);
     return buffer;
@@ -637,13 +652,13 @@ static int menu_y1_bt_device_list(bool remove_only)
             } else if (sel >= 0 && sel < ui_bt_dev_count) {
                 struct y1_bt_device target = ui_bt_devs[sel];
                 y1_bt_connect_device(target.bdaddr);
-                splashf(HZ, "Connecting to %s...", target.name);
+                splashf(HZ, str(LANG_Y1_BT_CONNECTING_FMT), target.name);
 
                 for (int w = 0; w < 14; w++) {
                     sleep(HZ / 2);
                     enum y1_bt_state st = y1_bt_get_state();
                     if (st == Y1_BT_STATE_STREAMING || st == Y1_BT_STATE_CONNECTED) {
-                        splashf(HZ, "Connected: %s", target.name);
+                        splashf(HZ, str(LANG_Y1_BT_CONNECTED_FMT), target.name);
                         break;
                     }
                 }
@@ -677,8 +692,8 @@ static const char *y1_bt_new_list_get_name(int selected_item, void *data,
     (void)data;
     if (ui_bt_dev_count == 0) {
         if (y1_bt_is_scanning())
-            return "Searching for devices...";
-        return "No devices found (Select to rescan)";
+            return str(LANG_Y1_BT_SEARCHING);
+        return str(LANG_Y1_BT_NO_DEVICES_FOUND);
     }
     if (selected_item < 0 || selected_item >= ui_bt_dev_count)
         return "";
@@ -805,7 +820,7 @@ static int menu_y1_bt_codec_action(void)
     int cur_codec = y1_bt_get_active_device_codec();
 
     gui_synclist_init(&codec_list, y1_bt_codec_list_get_name, NULL, false, 1, NULL);
-    gui_synclist_set_title(&codec_list, "Codec", Icon_NOICON);
+    gui_synclist_set_title(&codec_list, str(LANG_Y1_BT_CODEC), Icon_NOICON);
     gui_synclist_set_nb_items(&codec_list, 2);
     gui_synclist_select_item(&codec_list,
                              cur_codec == Y1_BT_CODEC_SBC_XQ ? 1 : 0);
@@ -831,7 +846,7 @@ static int menu_y1_bt_codec_action(void)
     return 0;
 }
 
-MENUITEM_FUNCTION(y1_bt_codec_item, 0, "Codec",
+MENUITEM_FUNCTION(y1_bt_codec_item, 0, ID2P(LANG_Y1_BT_CODEC),
                   menu_y1_bt_codec_action, NULL, Icon_NOICON);
 MENUITEM_FUNCTION(y1_bt_paired_item, 0, ID2P(LANG_Y1_BT_PAIRED_DEVICES),
                   menu_y1_bt_paired_action, NULL, Icon_NOICON);
@@ -867,16 +882,9 @@ MAKE_MENU(nugget_headphone_menu, ID2P(LANG_Y1_HEADPHONE_REMOTE), 0, Icon_NOICON,
 
 MAKE_MENU(nugget_device_menu, ID2P(LANG_DEVICE), 0, Icon_NOICON,
           &y1_screen_res_setting,
-          &y1_always_on_screen_item,
-          &y1_aod_wps_item,
-          &y1_aod_playback_item,
-          &y1_aod_important_events_item,
-          &y1_aod_brightness_item,
-          &y1_aod_timeout_item,
           &y1_scroll_abc_item,
           &y1_rich_album_view_item,
           &y1_modern_scheme_item,
-          &y1_double_click_unhold_item,
           &y1_cpu_mode_setting,
           &y1_cpu_cores_setting,
           &y1_screen_off_cpu_save_item,

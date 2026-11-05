@@ -32,14 +32,6 @@
 #include "serial.h"
 #include "power.h"
 #include "powermgmt.h"
-#if defined(INNIOASIS_Y1)
-#include "innioasis/y1/y1-log.h"
-#include "innioasis/y1/lcd-target.h"
-extern bool is_keys_locked(void);
-static inline bool y1_screen_sleeping(void) {
-    return y1_is_screen_sleeping() || is_keys_locked();
-}
-#endif
 #if defined(HAVE_SDL)
 #include <SDL.h>
 #if (SDL_MAJOR_VERSION > 1)
@@ -179,7 +171,8 @@ static bool filter_first_keypress_enabled(int button, int data)
 {
 #if defined(INNIOASIS_Y1)
     return filter_first_keypress_disabled(button, data);
-#elif defined(HAVE_TRANSFLECTIVE_LCD) && defined(HAVE_LCD_SLEEP)
+#else
+#if defined(HAVE_TRANSFLECTIVE_LCD) && defined(HAVE_LCD_SLEEP)
     if (is_backlight_on(false) && lcd_active())
 #else
     if (is_backlight_on(false))
@@ -188,6 +181,7 @@ static bool filter_first_keypress_enabled(int button, int data)
         return filter_first_keypress_disabled(button, data);
     }
     return true;
+#endif
 }
 
 #ifdef HAVE_REMOTE_LCD
@@ -386,15 +380,8 @@ static void button_tick(void)
                         else
 #endif
                         {
-#if defined(INNIOASIS_Y1)
-                            if (!y1_screen_sleeping()) {
-                                backlight_on();
-                                buttonlight_on();
-                            }
-#else
                             backlight_on();
                             buttonlight_on();
-#endif
                         }
 #endif
                     }
@@ -412,17 +399,13 @@ static void button_tick(void)
                     {
                         skip_release = keypress_filter_fn(btn, data);
 #if defined(INNIOASIS_Y1)
-                        if (y1_screen_sleeping()) {
-                            y1_logf("[button] keypress btn=0x%x while sleeping (bl_on=%d, powersave=%d, locked=%d)\n",
-                                    btn, (int)is_backlight_on(false), (int)y1_is_display_power_saving(), (int)is_keys_locked());
-                        } else {
+                        extern bool is_keys_locked(void);
+                        if (!is_keys_locked() || (backlight_get_current_timeout() >= 0))
+#endif
+                        {
                             backlight_on();
                             buttonlight_on();
                         }
-#else
-                        backlight_on();
-                        buttonlight_on();
-#endif
                     }
 #else /* no backlight, nothing to skip */
                     button_queue_try_post(btn, data);

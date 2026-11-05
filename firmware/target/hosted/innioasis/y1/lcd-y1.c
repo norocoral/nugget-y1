@@ -70,8 +70,6 @@ static int blue_shift = 0;
 static uint32_t rgb565_lut[65536] __attribute__((aligned(64)));
 static bool lut_inited = false;
 static uint32_t sw_backbuf[480 * 360] __attribute__((aligned(64)));
-static bool y1_lowpower_refresh;
-static bool y1_internal_aod_refresh;
 #if LCD_DEPTH == 16
 static fb_data navigation_old_frame[LCD_WIDTH * LCD_HEIGHT];
 static long navigation_fade_start;
@@ -231,24 +229,6 @@ void lcd_enable(bool on)
     }
 }
 
-static bool y1_always_on_enabled = false;
-static bool y1_display_powersave = false;
-static long last_powersave_tick = 0;
-static unsigned int y1_default_updatespeed = 0;
-
-void y1_set_always_on_screen(bool on)
-{
-    y1_logf("[lcd-y1] y1_set_always_on_screen(%d)\n", (int)on);
-    y1_always_on_enabled = on;
-    if (on)
-        y1_aod_activity_notify();
-}
-
-bool y1_is_always_on_screen(void)
-{
-    return y1_always_on_enabled;
-}
-
 bool y1_playback_active(void)
 {
     int stat = audio_status();
@@ -257,65 +237,6 @@ bool y1_playback_active(void)
         return play_status == 1 || play_status == 3 || play_status == 4;
     }
     return (stat & AUDIO_STATUS_PLAY) && !(stat & AUDIO_STATUS_PAUSE);
-}
-
-bool y1_should_always_on(void)
-{
-    if (!global_settings.always_on_screen)
-        return false;
-
-    if (y1_aod_timeout_expired())
-        return false;
-
-    if (global_settings.aod_wps_only && get_current_activity() != ACTIVITY_WPS)
-        return false;
-
-    if (global_settings.aod_playback_only && !y1_playback_active())
-        return false;
-
-    return true;
-}
-
-void y1_set_display_power_saving(bool enable)
-{
-    y1_logf("[lcd-y1] y1_set_display_power_saving(%d) called (prev=%d, fb_fd=%d)\n",
-            (int)enable, (int)y1_display_powersave, fb_fd);
-    y1_display_powersave = enable;
-    sysfs_set_string("/proc/dispsys/eco_mode", enable ? "1\n" : "0\n");
-    sysfs_set_string("/proc/mtk_smi/eco_mode", enable ? "1\n" : "0\n");
-    if (fb_fd >= 0) {
-#if LCD_DEPTH == 16
-        navigation_fade_active = false;
-#endif
-        if (y1_default_updatespeed == 0) {
-            unsigned int def_speed = 0;
-            if (ioctl(fb_fd, MTKFB_GET_DEFAULT_UPDATESPEED, &def_speed) == 0 && def_speed > 0) {
-                y1_default_updatespeed = def_speed;
-            }
-        }
-        bool previous_internal_refresh = y1_internal_aod_refresh;
-        y1_internal_aod_refresh = true;
-        if (enable) {
-            unsigned int speed = 1;
-            int ret = ioctl(fb_fd, MTKFB_CHANGE_UPDATESPEED, &speed);
-            y1_logf("[lcd-y1] MTKFB_CHANGE_UPDATESPEED(1) ret=%d (errno=%d)\n", ret, errno);
-            last_powersave_tick = 0;
-            lcd_update();
-        } else {
-            if (y1_default_updatespeed > 0) {
-                unsigned int speed = y1_default_updatespeed;
-                int ret = ioctl(fb_fd, MTKFB_CHANGE_UPDATESPEED, &speed);
-                y1_logf("[lcd-y1] MTKFB_CHANGE_UPDATESPEED(%u) ret=%d (errno=%d)\n", speed, ret, errno);
-            }
-            lcd_update();
-        }
-        y1_internal_aod_refresh = previous_internal_refresh;
-    }
-}
-
-bool y1_is_display_power_saving(void)
-{
-    return y1_display_powersave;
 }
 
 static int y1_resolution_mode = 0; /* 0 = Normal (480x360), 1 = Classic (320x240 stretched) */
@@ -327,12 +248,10 @@ void y1_set_resolution_setting(int mode)
 
 void lcd_update(void)
 {
-    y1_lowpower_refresh = y1_display_powersave;
     if (y1_resolution_mode == 1)
         lcd_update_rect(0, 0, 320, 240);
     else
         lcd_update_rect(0, 0, LCD_WIDTH, LCD_HEIGHT);
-    y1_lowpower_refresh = false;
 }
 
 #if LCD_DEPTH == 16
@@ -426,25 +345,6 @@ void lcd_update_rect(int x, int y, int width, int height)
 #endif
 
 redraw_navigation_fade:
-    if (y1_display_powersave) {
-        if (!y1_should_always_on()) {
-            y1_display_powersave = false;
-            backlight_hw_off();
-            return;
-        }
-        /* When display is in Always-On Screen power saving mode:
-         * Rate-limit updates to at most once per second (1 FPS).
-         * This saves 97% of memory bus bandwidth and GPU/DDP power consumption. */
-        if (last_powersave_tick != 0 && TIME_BEFORE(current_tick, last_powersave_tick + HZ)) {
-            return;
-        }
-        last_powersave_tick = current_tick;
-        /* In 1 FPS AOD mode, update the full screen cleanly */
-        x = 0;
-        y = 0;
-        width = (y1_resolution_mode == 1) ? 320 : LCD_WIDTH;
-        height = (y1_resolution_mode == 1) ? 240 : LCD_HEIGHT;
-    }
 
     int stride = finfo.line_length;
     if (stride == 0) {

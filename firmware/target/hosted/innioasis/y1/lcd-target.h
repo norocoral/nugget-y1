@@ -25,16 +25,7 @@ extern fb_data *framebuffer;
 extern void lcd_set_active(bool active);
 extern bool y1_display_raw_screen(const char *name);
 extern void y1_set_resolution_setting(int mode);
-extern void y1_set_always_on_screen(bool on);
-extern bool y1_is_always_on_screen(void);
-extern bool y1_should_always_on(void);
-extern void y1_set_display_power_saving(bool enable);
-extern bool y1_is_display_power_saving(void);
 extern bool y1_playback_active(void);
-extern void y1_backlight_idle_check(void);
-extern void y1_aod_notify_event(void);
-extern void y1_aod_activity_notify(void);
-extern bool y1_aod_timeout_expired(void);
 extern bool y1_is_backlight_active(void);
 extern bool y1_is_screen_sleeping(void);
 
