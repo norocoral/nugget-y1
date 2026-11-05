@@ -1327,7 +1327,12 @@ static int get_action_worker(action_last_t *last, action_cur_t *cur)
             int raw_btn = cur->button & ~(BUTTON_REPEAT | BUTTON_REL);
             if (raw_btn != 0 && (cur->button & (SYS_EVENT | BUTTON_MULTIMEDIA)) == 0)
             {
-                backlight_on();
+#ifdef BUTTON_SCROLL_FWD
+                if (raw_btn != BUTTON_SCROLL_FWD && raw_btn != BUTTON_SCROLL_BACK)
+#endif
+                {
+                    backlight_on();
+                }
                 reset_poweroff_timer();
             }
         }

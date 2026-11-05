@@ -18709,3 +18709,31 @@
     *: "검색된 기기 없음"
   </voice>
 </phrase>
+<phrase>
+  id: LANG_BOOTLOADER_MENU
+  desc: in Settings -> Nugget
+  user: core
+  <source>
+    *: "Bootloader Menu"
+  </source>
+  <dest>
+    *: "부트로더 메뉴"
+  </dest>
+  <voice>
+    *: "부트로더 메뉴"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_REBOOT_TO_ANDROID
+  desc: in Settings -> Nugget / System
+  user: core
+  <source>
+    *: "Reboot to Android"
+  </source>
+  <dest>
+    *: "안드로이드로 재부팅"
+  </dest>
+  <voice>
+    *: "안드로이드로 재부팅"
+  </voice>
+</phrase>

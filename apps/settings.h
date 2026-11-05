@@ -955,6 +955,7 @@ struct user_settings
     int y1_cpu_cores;
     bool y1_screen_off_cpu_save;
     bool y1_logging_enabled;
+    bool bootloader_menu;
     int y1_screen_resolution;
     bool scroll_abc;
     bool keyclick_wheel_only;

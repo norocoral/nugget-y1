@@ -36,8 +36,48 @@ bool backdrop_load(const char* filename, char *backdrop_buffer)
     ret = read_bmp_file(filename, &bm, LCD_BACKDROP_BYTES,
                         FORMAT_NATIVE | FORMAT_DITHER, NULL);
 
-    return ((ret > 0)
-            && (bm.width == LCD_WIDTH) && (bm.height == LCD_HEIGHT));
+    if (ret <= 0 || bm.width <= 0 || bm.height <= 0)
+        return false;
+
+    if (bm.width != LCD_WIDTH || bm.height != LCD_HEIGHT)
+    {
+        int src_w = bm.width;
+        int src_h = bm.height;
+        fb_data *fb = (fb_data *)backdrop_buffer;
+
+        if (src_w * src_h <= LCD_WIDTH * LCD_HEIGHT)
+        {
+            /* Upscaling (e.g. 320x240 -> 480x360): iterate backward */
+            for (int y = LCD_HEIGHT - 1; y >= 0; y--)
+            {
+                int sy = (y * src_h) / LCD_HEIGHT;
+                int dst_row = y * LCD_WIDTH;
+                int src_row = sy * src_w;
+                for (int x = LCD_WIDTH - 1; x >= 0; x--)
+                {
+                    int sx = (x * src_w) / LCD_WIDTH;
+                    fb[dst_row + x] = fb[src_row + sx];
+                }
+            }
+        }
+        else
+        {
+            /* Downscaling (source is larger than screen): iterate forward */
+            for (int y = 0; y < LCD_HEIGHT; y++)
+            {
+                int sy = (y * src_h) / LCD_HEIGHT;
+                int dst_row = y * LCD_WIDTH;
+                int src_row = sy * src_w;
+                for (int x = 0; x < LCD_WIDTH; x++)
+                {
+                    int sx = (x * src_w) / LCD_WIDTH;
+                    fb[dst_row + x] = fb[src_row + sx];
+                }
+            }
+        }
+    }
+
+    return true;
 }
   
   
@@ -60,8 +100,47 @@ bool remote_backdrop_load(const char *filename, char* backdrop_buffer)
     bm.data = backdrop_buffer;
     ret = read_bmp_file(filename, &bm, REMOTE_LCD_BACKDROP_BYTES,
                         FORMAT_NATIVE | FORMAT_DITHER | FORMAT_REMOTE, NULL);
-    return ((ret > 0)
-            && (bm.width == LCD_REMOTE_WIDTH) && (bm.height == LCD_REMOTE_HEIGHT));
+
+    if (ret <= 0 || bm.width <= 0 || bm.height <= 0)
+        return false;
+
+    if (bm.width != LCD_REMOTE_WIDTH || bm.height != LCD_REMOTE_HEIGHT)
+    {
+        int src_w = bm.width;
+        int src_h = bm.height;
+        fb_remote_data *fb = (fb_remote_data *)backdrop_buffer;
+
+        if (src_w * src_h <= LCD_REMOTE_WIDTH * LCD_REMOTE_HEIGHT)
+        {
+            for (int y = LCD_REMOTE_HEIGHT - 1; y >= 0; y--)
+            {
+                int sy = (y * src_h) / LCD_REMOTE_HEIGHT;
+                int dst_row = y * LCD_REMOTE_WIDTH;
+                int src_row = sy * src_w;
+                for (int x = LCD_REMOTE_WIDTH - 1; x >= 0; x--)
+                {
+                    int sx = (x * src_w) / LCD_REMOTE_WIDTH;
+                    fb[dst_row + x] = fb[src_row + sx];
+                }
+            }
+        }
+        else
+        {
+            for (int y = 0; y < LCD_REMOTE_HEIGHT; y++)
+            {
+                int sy = (y * src_h) / LCD_REMOTE_HEIGHT;
+                int dst_row = y * LCD_REMOTE_WIDTH;
+                int src_row = sy * src_w;
+                for (int x = 0; x < LCD_REMOTE_WIDTH; x++)
+                {
+                    int sx = (x * src_w) / LCD_REMOTE_WIDTH;
+                    fb[dst_row + x] = fb[src_row + sx];
+                }
+            }
+        }
+    }
+
+    return true;
 }
 
 void remote_backdrop_show(char *backdrop_buffer)

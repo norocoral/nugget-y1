@@ -731,6 +731,27 @@ void backlight_thread(void)
 
 static void backlight_timeout_handler(void)
 {
+#if defined(INNIOASIS_Y1) || defined(HAS_BUTTON_HOLD)
+    if (
+#if (defined(HAVE_REMOTE_LCD_AS_MAIN) && defined(HAS_REMOTE_BUTTON_HOLD))
+        remote_button_hold()
+#elif defined(HAS_BUTTON_HOLD)
+        button_hold()
+#else
+        is_keys_locked()
+#endif
+    ) {
+        int cur_tmo = backlight_get_current_timeout();
+        if (cur_tmo < 0) {
+            if (backlight_timer != 0 || is_backlight_on(false)) {
+                backlight_timer = 0;
+                do_backlight_off();
+            }
+            return;
+        }
+    }
+#endif
+
     if(backlight_timer > 0)
     {
         backlight_timer -= BACKLIGHT_THREAD_TIMEOUT;
@@ -895,7 +916,7 @@ int backlight_get_current_timeout(void)
 #ifndef BOOTLOADER
         if (global_settings.backlight_on_button_hold_rules == 1) /* Playing only */
         {
-            if (!(audio_status() & AUDIO_STATUS_PLAY))
+            if (!(audio_status() & AUDIO_STATUS_PLAY) || (audio_status() & AUDIO_STATUS_PAUSE))
                 return -1;
         }
         else if (global_settings.backlight_on_button_hold_rules == 2) /* WPS only */
@@ -929,6 +950,12 @@ void backlight_set_timeout_on_hold(int value)
     else
         backlight_timeout_on_hold = HZ * value;
 
+    queue_remove_from_head(&backlight_queue, BACKLIGHT_TMO_CHANGED);
+    queue_post(&backlight_queue, BACKLIGHT_TMO_CHANGED, 0);
+}
+
+void backlight_recheck_hold_rules(void)
+{
     queue_remove_from_head(&backlight_queue, BACKLIGHT_TMO_CHANGED);
     queue_post(&backlight_queue, BACKLIGHT_TMO_CHANGED, 0);
 }

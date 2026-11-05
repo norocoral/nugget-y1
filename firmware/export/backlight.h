@@ -55,6 +55,7 @@ void backlight_hold_changed(bool hold_button);
 #endif
 void backlight_set_on_button_hold(int index);
 void backlight_set_timeout_on_hold(int value);
+void backlight_recheck_hold_rules(void);
 
 #if defined(HAVE_LCD_SLEEP) && defined(HAVE_LCD_SLEEP_SETTING)
 void lcd_set_sleep_after_backlight_off(int timeout_seconds);

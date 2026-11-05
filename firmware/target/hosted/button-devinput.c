@@ -456,12 +456,14 @@ int button_read_device(BDATA)
         bool hold_light_on = (backlight_get_current_timeout() >= 0);
 
         if (!is_keys_locked()) {
+            if (bl_off) {
 #ifdef HAVE_BACKLIGHT
-            backlight_on();
+                backlight_on();
 #endif
 #ifdef HAVE_BUTTON_LIGHT
-            buttonlight_on();
+                buttonlight_on();
 #endif
+            }
             reset_poweroff_timer();
 
             if (bl_off && global_settings.bl_filter_first_keypress) {
@@ -472,12 +474,14 @@ int button_read_device(BDATA)
         } else {
             /* Locked */
             if (hold_light_on) {
+                if (bl_off) {
 #ifdef HAVE_BACKLIGHT
-                backlight_on();
+                    backlight_on();
 #endif
 #ifdef HAVE_BUTTON_LIGHT
-                buttonlight_on();
+                    buttonlight_on();
 #endif
+                }
                 reset_poweroff_timer();
             }
         }
@@ -485,11 +489,9 @@ int button_read_device(BDATA)
 
     if (wheel_ticks > 0)
     {
-        if (wheel_ticks > 4)
-            wheel_ticks = 4;
         while (wheel_ticks-- > 0)
         {
-            if (button_queue_empty())
+            if (!button_queue_full())
                 button_queue_post(BUTTON_SCROLL_FWD, 0);
             else
                 break;
@@ -497,11 +499,9 @@ int button_read_device(BDATA)
     }
     else if (wheel_ticks < 0)
     {
-        if (wheel_ticks < -4)
-            wheel_ticks = -4;
         while (wheel_ticks++ < 0)
         {
-            if (button_queue_empty())
+            if (!button_queue_full())
                 button_queue_post(BUTTON_SCROLL_BACK, 0);
             else
                 break;

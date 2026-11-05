@@ -18765,3 +18765,31 @@
     *: "No devices found"
   </voice>
 </phrase>
+<phrase>
+  id: LANG_BOOTLOADER_MENU
+  desc: in Settings -> Nugget
+  user: core
+  <source>
+    *: "Bootloader Menu"
+  </source>
+  <dest>
+    *: "Bootloader Menu"
+  </dest>
+  <voice>
+    *: "Bootloader Menu"
+  </voice>
+</phrase>
+<phrase>
+  id: LANG_REBOOT_TO_ANDROID
+  desc: in Settings -> Nugget / System
+  user: core
+  <source>
+    *: "Reboot to Android"
+  </source>
+  <dest>
+    *: "Reboot to Android"
+  </dest>
+  <voice>
+    *: "Reboot to Android"
+  </voice>
+</phrase>

@@ -50,6 +50,9 @@
 #include "general.h"
 #include "iap-usb.h"
 #include <stdio.h>
+#ifdef HAVE_BACKLIGHT
+#include "backlight.h"
+#endif
 
 #ifdef HAVE_TAGCACHE
 #include "tagcache.h"
@@ -3109,6 +3112,9 @@ static void audio_start_playback(const struct audio_resume_info *resume_info,
         /* Update our state */
         play_status = PLAY_PLAYING;
         iap_on_play_status(play_status);
+#ifdef HAVE_BACKLIGHT
+        backlight_recheck_hold_rules();
+#endif
     }
 
     /* Codec's position should be available as soon as it knows it */
@@ -3197,6 +3203,9 @@ static void audio_stop_playback(void)
     ff_rw_mode = false;
     play_status = PLAY_STOPPED;
     iap_on_play_status(play_status);
+#ifdef HAVE_BACKLIGHT
+    backlight_recheck_hold_rules();
+#endif
 
     wipe_track_metadata(true);
 #ifdef HAVE_ALBUMART
@@ -3219,6 +3228,9 @@ static void audio_on_pause(bool pause)
 
     play_status = pause ? PLAY_PAUSED : PLAY_PLAYING;
     iap_on_play_status(play_status);
+#ifdef HAVE_BACKLIGHT
+    backlight_recheck_hold_rules();
+#endif
 
     if (!pause && codec_skip_pending)
     {

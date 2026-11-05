@@ -82,13 +82,8 @@ static uint16_t histogram[HISTOGRAM_BUCKETS];
 
 static bool colors_locked(void)
 {
-#if defined(INNIOASIS_Y1)
-    return is_keys_locked();
-#elif defined(HAS_BUTTON_HOLD)
-    return button_hold();
-#else
+    /* Do not force disable color transitions when Lock is enabled */
     return false;
-#endif
 }
 
 static int compute_luminance(int r8, int g8, int b8)
