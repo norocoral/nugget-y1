@@ -100,6 +100,7 @@ static int last_bl = -1;
 #include "action.h"
 
 static int bl_fd = -1;
+static int last_hw_val = -1;
 static bool y1_kernel_early_suspended = false;
 
 static void y1_enter_kernel_early_suspend(void)
@@ -125,6 +126,7 @@ static void y1_enter_kernel_early_suspend(void)
         (void)!write(mem_fd, "mem\n", 4);
         close(mem_fd);
         y1_kernel_early_suspended = true;
+        last_hw_val = -1;
         y1_logf("[backlight-unix] entered kernel early_suspend ('mem' -> /sys/power/state)\n");
     }
 }
@@ -142,6 +144,7 @@ static void y1_exit_kernel_early_suspend(void)
          * enabling display clocks and clearing is_early_suspended before FB/BL writes */
         usleep(35000);
         y1_kernel_early_suspended = false;
+        last_hw_val = -1;
     }
     y1_set_touch_scanning(true);
 }
@@ -149,6 +152,9 @@ static void y1_exit_kernel_early_suspend(void)
 
 static void write_bl_hw(int val)
 {
+    if (val == last_hw_val && bl_fd >= 0)
+        return;
+
     if (bl_fd < 0) {
         bl_fd = open(sysfs_bl_brightness, O_WRONLY | O_CLOEXEC);
     }
@@ -163,8 +169,8 @@ static void write_bl_hw(int val)
             if (bl_fd >= 0)
                 w = write(bl_fd, buf, len);
         }
-        y1_logf("[backlight-unix] write_bl_hw(%d): bl_fd=%d, written=%d (errno=%d)\n",
-                val, bl_fd, (int)w, errno);
+        if (w >= 0)
+            last_hw_val = val;
     } else {
         y1_logf("[backlight-unix] write_bl_hw(%d) ERROR: failed to open %s (errno=%d)\n",
                 val, sysfs_bl_brightness ? sysfs_bl_brightness : "NULL", errno);
@@ -200,8 +206,6 @@ bool y1_is_screen_sleeping(void)
 
 void backlight_hw_on(void)
 {
-    y1_logf("[backlight-unix] backlight_hw_on() called (last_bl=%d, current_brightness=%d)\n",
-            last_bl, current_brightness);
     if (last_bl != BACKLIGHT_POWER_ON) {
         last_bl = BACKLIGHT_POWER_ON;
         if (sysfs_bl_power)
@@ -211,13 +215,11 @@ void backlight_hw_on(void)
         y1_set_screen_off_power_mode(false);
 #endif
 #ifdef HAVE_LCD_ENABLE
-        y1_logf("[backlight-unix] backlight_hw_on: calling lcd_enable(true)\n");
         lcd_enable(true);
 #endif
 #if defined(BACKLIGHT_INNIOASIS)
         int target_br = y1_get_effective_brightness();
         int hw_val = (target_br * 255) / 100;
-        y1_logf("[backlight-unix] backlight_hw_on: write_bl_hw(%d)\n", hw_val);
         write_bl_hw(hw_val);
 #endif
     } else {

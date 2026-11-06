@@ -483,6 +483,9 @@ int button_read_device(BDATA)
 #endif
                 }
                 reset_poweroff_timer();
+            } else {
+                /* Hold Light OFF: ignore wheel ticks completely while locked */
+                wheel_ticks = 0;
             }
         }
     }

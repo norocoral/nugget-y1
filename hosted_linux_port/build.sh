@@ -485,6 +485,11 @@ if ((${#RAW_ASSETS[@]})); then
     cp "${RAW_ASSETS[@]}" "$SD_STAGE/.rockbox/"
 fi
 
+# Bundle stock Android ramdisk for direct Android boot from Bootloader Menu
+if [[ -f "$SCRIPT_DIR/stock_unpacked/ramdisk.cpio.gz" ]]; then
+    cp "$SCRIPT_DIR/stock_unpacked/ramdisk.cpio.gz" "$SD_STAGE/.rockbox/ramdisk_android.cpio.gz"
+fi
+
 # Add Bluetooth blobs.
 BT_ASSETS=()
 if [[ -d "$SCRIPT_DIR/bt_blobs" ]]; then
@@ -499,7 +504,7 @@ cd "$SD_STAGE"
 
 zip -u -q "$SCRIPT_DIR/rockbox_sdcard.zip" .rockbox/rockbox
 
-for asset in .rockbox/*.raw .rockbox/bt/* .rockbox/lib/* .rockbox/bin/* Videos; do
+for asset in .rockbox/*.raw .rockbox/*.cpio.gz .rockbox/bt/* .rockbox/lib/* .rockbox/bin/* Videos; do
     [[ -e "$asset" ]] || continue
     zip -u -q -r "$SCRIPT_DIR/rockbox_sdcard.zip" "$asset"
 done

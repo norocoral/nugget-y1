@@ -72,11 +72,7 @@
                                 |BACKLIGHT_FADING_SW_HW_REG \
                                 |BACKLIGHT_FADING_PWM) )
 
-#if defined(INNIOASIS_Y1)
-#define BACKLIGHT_THREAD_TIMEOUT (HZ / 20)
-#else
 #define BACKLIGHT_THREAD_TIMEOUT HZ
-#endif
 
 enum {
     BACKLIGHT_ON,
@@ -450,6 +446,14 @@ static void backlight_setup_fade_up(void)
     {
         if (backlight_fading_state == NOT_FADING)
         {
+#if defined(INNIOASIS_Y1)
+            extern bool y1_is_backlight_active(void);
+            if (y1_is_backlight_active())
+            {
+                backlight_hw_on();
+                return;
+            }
+#endif
             /* make sure the backlight is at lowest level */
             backlight_hw_on();
         }

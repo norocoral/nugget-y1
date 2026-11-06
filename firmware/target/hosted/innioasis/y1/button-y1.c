@@ -555,12 +555,6 @@ int button_map(int keycode)
             break;
     }
 
-    if (mapped) {
-        char kbuf[64];
-        snprintf(kbuf, sizeof(kbuf), "[button-y1] keycode=%d -> button=0x%04x\n", keycode, mapped);
-        y1_kmsg_log(kbuf);
-    }
-
     return mapped;
 }
 

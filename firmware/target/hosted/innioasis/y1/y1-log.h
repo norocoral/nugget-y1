@@ -9,28 +9,46 @@
 
 #include "settings.h"
 
-static inline void y1_log(const char *msg)
+static inline void y1_log_raw(const char *msg, size_t len)
 {
-    if (!global_settings.y1_logging_enabled)
+    static int kfd = -1;
+    static int dfd = -1;
+
+    if (!global_settings.y1_logging_enabled) {
+        if (dfd >= 0) {
+            close(dfd);
+            dfd = -1;
+        }
+        return;
+    }
+
+    if (len == 0)
         return;
 
-    size_t len = strlen(msg);
-    if (len > 0) {
-        (void)!write(1, msg, len);
+    (void)!write(1, msg, len);
 
-        int kfd = open("/dev/kmsg", O_WRONLY | O_CLOEXEC);
-        if (kfd >= 0) {
-            (void)!write(kfd, msg, len);
-            close(kfd);
-        }
+    if (kfd < 0)
+        kfd = open("/dev/kmsg", O_WRONLY | O_CLOEXEC);
+    if (kfd >= 0)
+        (void)!write(kfd, msg, len);
 
-        int fd = open("/mnt/sdcard/y1_debug.txt",
-                      O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0666);
-        if (fd >= 0) {
-            (void)!write(fd, msg, len);
-            close(fd);
+    if (dfd < 0) {
+        dfd = open("/mnt/sdcard/y1_debug.txt",
+                   O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0666);
+    }
+    if (dfd >= 0) {
+        if (write(dfd, msg, len) < 0) {
+            close(dfd);
+            dfd = -1;
         }
     }
+}
+
+static inline void y1_log(const char *msg)
+{
+    if (!global_settings.y1_logging_enabled || !msg)
+        return;
+    y1_log_raw(msg, strlen(msg));
 }
 
 static inline void y1_logf(const char *fmt, ...)
@@ -45,20 +63,9 @@ static inline void y1_logf(const char *fmt, ...)
     va_end(ap);
 
     if (len > 0) {
-        (void)!write(1, buf, len);
-
-        int kfd = open("/dev/kmsg", O_WRONLY | O_CLOEXEC);
-        if (kfd >= 0) {
-            (void)!write(kfd, buf, len);
-            close(kfd);
-        }
-
-        int fd = open("/mnt/sdcard/y1_debug.txt",
-                      O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0666);
-        if (fd >= 0) {
-            (void)!write(fd, buf, len);
-            close(fd);
-        }
+        if ((size_t)len >= sizeof(buf))
+            len = sizeof(buf) - 1;
+        y1_log_raw(buf, (size_t)len);
     }
 }
 

@@ -42,6 +42,7 @@ static char active_ext_dev[64] = {0};
 static char early_log_buf[8192];
 static size_t early_log_len;
 static void log_line(const char *msg);
+static int is_mounted(const char *target);
 
 static int logging_enabled_from_config(void)
 {
@@ -360,15 +361,17 @@ static void log_line(const char *msg)
 
     size_t len = strlen(msg);
 
-    int fd = open("/mnt/sdcard/y1_debug.txt",
-                  O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0666);
-    if (fd >= 0) {
-        if (early_log_len > 0) {
-            (void)!write(fd, early_log_buf, early_log_len);
-            early_log_len = 0;
+    if (is_mounted("/mnt/sdcard")) {
+        int fd = open("/mnt/sdcard/y1_debug.txt",
+                      O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0666);
+        if (fd >= 0) {
+            if (early_log_len > 0) {
+                (void)!write(fd, early_log_buf, early_log_len);
+                early_log_len = 0;
+            }
+            (void)!write(fd, msg, len);
+            close(fd);
         }
-        (void)!write(fd, msg, len);
-        close(fd);
     }
 
     (void)!write(1, msg, len);
@@ -499,14 +502,14 @@ static int try_mount_storage(const char *devpath, const char *target)
 {
     mkdir(target, 0755);
 
-    /* 1. Try VFAT (UTF-8, mixed shortnames, full executable permissions for plugins, and sync flush) */
-    if (mount(devpath, target, "vfat", MS_NOATIME | MS_NODIRATIME, "utf8,shortname=mixed,umask=0000,fmask=0000,dmask=0000,flush") == 0) {
+    /* 1. Try VFAT (UTF-8, mixed shortnames, full executable permissions for plugins) */
+    if (mount(devpath, target, "vfat", MS_NOATIME | MS_NODIRATIME, "utf8,shortname=mixed,umask=0000,fmask=0000,dmask=0000") == 0) {
         return 0;
     }
-    if (mount(devpath, target, "vfat", MS_NOATIME | MS_NODIRATIME, "codepage=437,iocharset=utf8,shortname=mixed,umask=0000,fmask=0000,dmask=0000,flush") == 0) {
+    if (mount(devpath, target, "vfat", MS_NOATIME | MS_NODIRATIME, "codepage=437,iocharset=utf8,shortname=mixed,umask=0000,fmask=0000,dmask=0000") == 0) {
         return 0;
     }
-    if (mount(devpath, target, "vfat", MS_NOATIME | MS_NODIRATIME, "umask=0000,fmask=0000,dmask=0000,flush") == 0) {
+    if (mount(devpath, target, "vfat", MS_NOATIME | MS_NODIRATIME, "umask=0000,fmask=0000,dmask=0000") == 0) {
         return 0;
     }
     if (mount(devpath, target, "vfat", MS_NOATIME | MS_NODIRATIME, "") == 0) {
@@ -729,23 +732,6 @@ static void mount_storage_at_boot(int verbose)
         unlink("/mnt/external_sd");
         (void)!symlink("/mnt/extsd", "/mnt/external_sd");
     }
-
-    /* Keep the PC mass-storage gadget backed by the boot-mounted SD card. */
-    if (access("/sys/class/android_usb/android0/f_mass_storage/lun0/file", F_OK) == 0) {
-        const char *lun_target = NULL;
-        if (access("/dev/block/mmcblk1", F_OK) == 0) {
-            lun_target = "/dev/block/mmcblk1";
-        } else if (active_sd_dev[0]) {
-            lun_target = active_sd_dev;
-        }
-
-        if (lun_target) {
-            char buf[128];
-            snprintf(buf, sizeof(buf), "%s\n", lun_target);
-            write_sysfs("/sys/class/android_usb/android0/f_mass_storage/lun0/file", buf);
-            write_sysfs("/sys/class/android_usb/android0/f_mass_storage/lun/file", buf);
-        }
-    }
 }
 
 static void boost_cpu_for_boot(void)
@@ -827,12 +813,13 @@ static void optimize_power_and_battery(void)
     write_sysfs("/proc/sys/kernel/sched_child_runs_first", "1\n");
     write_sysfs("/proc/sys/vm/swappiness", "0\n");
     write_sysfs("/proc/sys/vm/page-cluster", "0\n");
-    write_sysfs("/proc/sys/vm/vfs_cache_pressure", "150\n");
+    write_sysfs("/proc/sys/vm/vfs_cache_pressure", "50\n");
+    write_sysfs("/proc/sys/vm/min_free_kbytes", "1024\n");
     write_sysfs("/proc/sys/vm/dirty_background_ratio", "10\n");
     write_sysfs("/proc/sys/vm/dirty_ratio", "20\n");
     write_sysfs("/proc/sys/vm/dirty_writeback_centisecs", "60000\n");
     write_sysfs("/proc/sys/vm/dirty_expire_centisecs", "60000\n");
-    write_sysfs("/proc/sys/vm/laptop_mode", "5\n");
+    write_sysfs("/proc/sys/vm/laptop_mode", "0\n");
 
     /* 5. Storage queue schedulers, burst-read ahead, and stop card polling wakeups */
     write_sysfs("/sys/block/mmcblk0/events_dfl_poll_msecs", "0\n");
@@ -1030,12 +1017,11 @@ static void display_screen(const char *name)
 #define LINUX_REBOOT_CMD_RESTART2 0xa1b2c3d4
 #endif
 
-static void reboot_to_android(void)
-{
-    log_line("Initiating reboot to Android / Recovery...\n");
-    sync();
+static void clear_android_bcb(void);
+static void setup_usb_gadget(const char *sd_dev, const char *ext_dev);
 
-    /* Try to set Android bootloader control block (BCB) if misc or para partition exists */
+static void clear_android_bcb(void)
+{
     const char *misc_paths[] = {
         "/dev/block/platform/mtk-msdc.0/by-name/para",
         "/dev/block/platform/mtk-msdc.0/by-name/misc",
@@ -1048,21 +1034,152 @@ static void reboot_to_android(void)
         if (fd >= 0) {
             char bcb[2048];
             memset(bcb, 0, sizeof(bcb));
-            strncpy(bcb, "boot-recovery", 32);
-            strncpy(bcb + 64, "recovery\n", 64);
             (void)!write(fd, bcb, sizeof(bcb));
             close(fd);
             sync();
+        }
+    }
+}
+
+static void boot_into_android(void)
+{
+    log_line("Bootloader Menu: Booting Android...\n");
+    clear_android_bcb();
+
+    /* Check for Android stock ramdisk archive */
+    const char *ramdisk_paths[] = {
+        "/mnt/sdcard/.rockbox/ramdisk_android.cpio.gz",
+        "/mnt/sdcard/.rockbox/ramdisk.cpio.gz",
+        "/etc/ramdisk_android.cpio.gz",
+        NULL
+    };
+    const char *ramdisk_archive = NULL;
+    for (int i = 0; ramdisk_paths[i]; i++) {
+        if (access(ramdisk_paths[i], R_OK) == 0) {
+            ramdisk_archive = ramdisk_paths[i];
             break;
         }
     }
 
-    /* MTK / Android kernel reboot to recovery syscall */
-    syscall(SYS_reboot, LINUX_REBOOT_MAGIC1, LINUX_REBOOT_MAGIC2, LINUX_REBOOT_CMD_RESTART2, "recovery");
+    if (ramdisk_archive) {
+        /* Copy archive to /tmp so we can safely unmount /mnt/sdcard before extracting */
+        mkdir("/tmp", 0755);
+        int sfd = open(ramdisk_archive, O_RDONLY | O_CLOEXEC);
+        int dfd = open("/tmp/android_ramdisk.cpio.gz", O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+        if (sfd >= 0 && dfd >= 0) {
+            char cpbuf[16384];
+            ssize_t r;
+            while ((r = read(sfd, cpbuf, sizeof(cpbuf))) > 0) {
+                (void)!write(dfd, cpbuf, r);
+            }
+            ramdisk_archive = "/tmp/android_ramdisk.cpio.gz";
+        }
+        if (sfd >= 0) close(sfd);
+        if (dfd >= 0) close(dfd);
+    } else {
+        log_line("Notice: Android ramdisk archive not found.\n");
+    }
 
-    /* Fallback standard reboot */
-    reboot(RB_AUTOBOOT);
-    while (1) sleep(1);
+    log_line("Extracting Android ramdisk and handing over to Android /init...\n");
+    sync();
+
+    /* 1. Detach SD card and secondary partitions so Android vold can claim them cleanly */
+    umount2("/mnt/extsd", MNT_DETACH);
+    umount2("/mnt/sdcard", MNT_DETACH);
+
+    /* 2. Remove all user-space symlinks in / created by link_sdcard_to_root() */
+    DIR *d = opendir("/");
+    if (d) {
+        struct dirent *de;
+        while ((de = readdir(d)) != NULL) {
+            if (strcmp(de->d_name, ".") == 0 || strcmp(de->d_name, "..") == 0)
+                continue;
+            char path[512];
+            snprintf(path, sizeof(path), "/%s", de->d_name);
+            struct stat st;
+            if (lstat(path, &st) == 0 && S_ISLNK(st.st_mode)) {
+                char target[512];
+                ssize_t len = readlink(path, target, sizeof(target) - 1);
+                if (len > 0) {
+                    target[len] = '\0';
+                    /* Remove symlinks pointing into /mnt or /storage, or specific SD card paths */
+                    if (strncmp(target, "/mnt/", 5) == 0 ||
+                        strncmp(target, "/storage/", 9) == 0 ||
+                        strcmp(de->d_name, "sdcard") == 0 ||
+                        strcmp(de->d_name, ".rockbox") == 0) {
+                        unlink(path);
+                    }
+                }
+            }
+        }
+        closedir(d);
+    }
+    unlink("/sdcard");
+    unlink("/storage/sdcard0");
+    unlink("/storage/sdcard1");
+    unlink("/.rockbox");
+
+    /* 3. Clean up conflicting root directories before extracting stock Android ramdisk.
+     * /etc MUST NOT exist as a directory, otherwise Android's init.rc 'symlink /system/etc /etc'
+     * fails with EEXIST, causing vold to fail loading /etc/vold.fstab and crashing SystemServer! */
+    (void)!system("/bin/busybox rm -rf /etc");
+
+    /* Remove sbin so Android's sbin (adbd, e2fsck, meta_tst, tune2fs, ueventd, watchdogd) extracts cleanly */
+    (void)!system("/bin/busybox rm -rf /sbin");
+
+    /* Clean /mnt and /storage so Android init's 'symlink /storage/sdcard0 /mnt/sdcard' doesn't collide
+     * with the real /mnt/sdcard directory created during Nugget Linux boot */
+    (void)!system("/bin/busybox rm -rf /mnt /storage /sdcard");
+    mkdir("/mnt", 0775);
+    mkdir("/storage", 0055);
+
+    /* Replace our PID 1 /init binary prior to extraction so busybox cpio can write Android's /init */
+    rename("/init", "/init.rockbox");
+
+    /* 4. Extract stock Android ramdisk unconditionally (-i -d -u) */
+    if (ramdisk_archive) {
+        char cmd[512];
+        /* Note: -u forces unconditional overwrite; preserving kernel-created /emmc@* symlinks */
+        snprintf(cmd, sizeof(cmd),
+                 "/bin/busybox gzip -dc '%s' | (cd / && /bin/busybox cpio -idu)",
+                 ramdisk_archive);
+        (void)!system(cmd);
+        unlink("/tmp/android_ramdisk.cpio.gz");
+    }
+    unlink("/init.rockbox");
+
+    /* Remove lingering temporary files & unused Nugget rootfs directories */
+    (void)!system("/bin/busybox rm -rf /tmp /usr /var");
+
+    /* Guarantee /etc is NOT a directory (Stock ramdisk creates /etc via symlink to /system/etc) */
+    struct stat etc_st;
+    if (lstat("/etc", &etc_st) == 0 && S_ISDIR(etc_st.st_mode)) {
+        (void)!system("/bin/busybox rm -rf /etc");
+    }
+
+    /* 5. Unmount virtual filesystems that Android's /init mounts itself in early-init */
+    umount2("/dev/pts", MNT_DETACH);
+    umount2("/dev", MNT_DETACH);
+    umount2("/sys", MNT_DETACH);
+    umount2("/proc", MNT_DETACH);
+
+    /* Close all open file descriptors (except stdio) */
+    for (int fd = 3; fd < 256; fd++) {
+        close(fd);
+    }
+
+    /* Hand off PID 1 execution directly to stock Android /init */
+    (void)!chdir("/");
+    char *const init_argv[] = { "/init", NULL };
+    char *const init_envp[] = { "PATH=/sbin:/vendor/bin:/system/sbin:/system/bin:/system/xbin", NULL };
+    execve("/init", init_argv, init_envp);
+
+    sleep(2);
+}
+
+static void reboot_to_android(void)
+{
+    boot_into_android();
 }
 
 static int is_menu_button_held_at_boot(void)
@@ -1126,8 +1243,8 @@ static void run_bootloader_menu(void)
         event_fds[i] = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
     }
 
-    int selection = 0; /* 0 = Nugget, 1 = Android, 2 = Shut down */
-    const char *screens[3] = {"bootl_pick1", "bootl_pick2", "bootl_pick3"};
+    int selection = 0; /* 0 = Nugget, 1 = Android, 2 = Shut down, 3 = USB */
+    const char *screens[4] = {"bootl_pick1", "bootl_pick2", "bootl_pick3", "bootl_pick4"};
 
     display_screen(screens[selection]);
 
@@ -1168,12 +1285,12 @@ static void run_bootloader_menu(void)
 
                     /* Previous / Left / Wheel CCW */
                     if (ev.code == 105 || ev.code == 165 || ev.code == 103) {
-                        selection = (selection + 2) % 3;
+                        selection = (selection + 3) % 4;
                         display_screen(screens[selection]);
                     }
                     /* Next / Right / Wheel CW */
                     else if (ev.code == 106 || ev.code == 163 || ev.code == 108) {
-                        selection = (selection + 1) % 3;
+                        selection = (selection + 1) % 4;
                         display_screen(screens[selection]);
                     }
                     /* Confirm: Center button or Play button */
@@ -1181,25 +1298,96 @@ static void run_bootloader_menu(void)
                              ev.code == 352 || ev.code == 353 || ev.code == 314 ||
                              ev.code == 315 || ev.code == 304 || ev.code == 164 ||
                              ev.code == 207 || ev.code == 119) {
-                        for (int k = 0; k < 16; k++) {
-                            if (event_fds[k] >= 0) close(event_fds[k]);
-                        }
 
                         if (selection == 0) {
                             /* Pick 1: Nugget */
                             log_line("Bootloader Menu: Nugget selected.\n");
+                            for (int k = 0; k < 16; k++) {
+                                if (event_fds[k] >= 0) close(event_fds[k]);
+                            }
                             display_screen("boot");
                             return;
                         } else if (selection == 1) {
                             /* Pick 2: Android */
                             log_line("Bootloader Menu: Android selected.\n");
-                            reboot_to_android();
+                            for (int k = 0; k < 16; k++) {
+                                if (event_fds[k] >= 0) close(event_fds[k]);
+                            }
+                            boot_into_android();
                         } else if (selection == 2) {
                             /* Pick 3: Shut down */
                             log_line("Bootloader Menu: Shut down selected.\n");
+                            for (int k = 0; k < 16; k++) {
+                                if (event_fds[k] >= 0) close(event_fds[k]);
+                            }
                             sync();
                             reboot(RB_POWER_OFF);
                             while (1) sleep(1);
+                        } else if (selection == 3) {
+                            /* Pick 4: USB */
+                            log_line("Bootloader Menu: USB mode selected.\n");
+                            setup_usb_gadget(active_sd_dev[0] ? active_sd_dev : NULL,
+                                             active_ext_dev[0] ? active_ext_dev : NULL);
+                            display_screen("bootl_usb");
+
+                            /* Flush input events and debounce */
+                            usleep(300000);
+                            for (int k = 0; k < 16; k++) {
+                                if (event_fds[k] >= 0) {
+                                    struct input_event flush_ev;
+                                    while (read(event_fds[k], &flush_ev, sizeof(flush_ev)) == sizeof(flush_ev));
+                                }
+                            }
+
+                            /* Wait for any button press to exit USB mode */
+                            int exit_usb = 0;
+                            while (!exit_usb) {
+                                struct pollfd usb_pfd[16];
+                                nfds_t un = 0;
+                                int usb_map[16];
+                                for (int k = 0; k < 16; k++) {
+                                    if (event_fds[k] >= 0) {
+                                        usb_pfd[un].fd = event_fds[k];
+                                        usb_pfd[un].events = POLLIN;
+                                        usb_pfd[un].revents = 0;
+                                        usb_map[un] = k;
+                                        un++;
+                                    }
+                                }
+                                if (poll(usb_pfd, un, 100) > 0) {
+                                    for (nfds_t k = 0; k < un; k++) {
+                                        if (usb_pfd[k].revents & POLLIN) {
+                                            struct input_event uev;
+                                            while (read(event_fds[usb_map[k]], &uev, sizeof(uev)) == sizeof(uev)) {
+                                                if (uev.type == EV_KEY && uev.value == 1) {
+                                                    exit_usb = 1;
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                        if (exit_usb) break;
+                                    }
+                                }
+                            }
+
+                            /* Disable USB gadget */
+                            log_line("Exiting USB mode, returning to Bootloader Menu...\n");
+                            write_sysfs("/sys/class/android_usb/android0/f_mass_storage/lun0/file", "\n");
+                            write_sysfs("/sys/class/android_usb/android0/f_mass_storage/lun/file", "\n");
+                            write_sysfs("/sys/class/android_usb/android0/f_mass_storage/lun1/file", "\n");
+                            write_sysfs("/sys/class/android_usb/android0/enable", "0\n");
+                            sync();
+
+                            /* Debounce before returning to menu */
+                            usleep(200000);
+                            for (int k = 0; k < 16; k++) {
+                                if (event_fds[k] >= 0) {
+                                    struct input_event flush_ev;
+                                    while (read(event_fds[k], &flush_ev, sizeof(flush_ev)) == sizeof(flush_ev));
+                                }
+                            }
+
+                            display_screen(screens[selection]);
                         }
                     }
                 }
@@ -1404,9 +1592,17 @@ static void enable_touch_keys(void)
         (void)!write(fd, "1\n", 2);
         close(fd);
         log_line("Touch keypad scanning enabled (/proc/tpd_keys_enable).\n");
-    } else {
-        log_line("Notice: /proc/tpd_keys_enable not present.\n");
     }
+}
+
+static int is_usb_power_online(void)
+{
+    char buf[16];
+    if (read_text_file("/sys/class/power_supply/usb/online", buf, sizeof(buf)) && atoi(buf) > 0)
+        return 1;
+    if (read_text_file("/sys/class/power_supply/ac/online", buf, sizeof(buf)) && atoi(buf) > 0)
+        return 1;
+    return 0;
 }
 
 static void setup_usb_gadget(const char *sd_dev, const char *ext_dev)
@@ -1504,6 +1700,7 @@ int main(int argc, char *argv[])
 
     /* 2. Create device nodes & enable touch keys early */
     make_device_nodes();
+    clear_android_bcb();
     enable_touch_keys();
 
     int menu_held = is_menu_button_held_at_boot();
@@ -1584,8 +1781,15 @@ int main(int argc, char *argv[])
     /* 8. Hardware initialization, Bluetooth WMT/STP subsystem, & USB Gadget */
     enable_touch_keys();
     init_bluetooth_subsystem();
-    setup_usb_gadget(active_sd_dev[0] ? active_sd_dev : NULL,
-                     active_ext_dev[0] ? active_ext_dev : NULL);
+    if (is_usb_power_online() || !has_sdcard_rockbox()) {
+        setup_usb_gadget(active_sd_dev[0] ? active_sd_dev : NULL,
+                         active_ext_dev[0] ? active_ext_dev : NULL);
+    } else {
+        write_sysfs("/sys/class/android_usb/android0/f_mass_storage/lun0/file", "\n");
+        write_sysfs("/sys/class/android_usb/android0/f_mass_storage/lun/file", "\n");
+        write_sysfs("/sys/class/android_usb/android0/f_mass_storage/lun1/file", "\n");
+        write_sysfs("/sys/class/android_usb/android0/enable", "0\n");
+    }
 
     /* 8. Setup /.rockbox directory: strictly require .rockbox on MicroSD */
     int rockbox_found = 0;

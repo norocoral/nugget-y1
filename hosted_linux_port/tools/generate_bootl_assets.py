@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """
 generate_bootl_assets.py - Generate pre-composited bootloader menu raw screens
-Composites bg.png, pick1.png, pick2.png, pick3.png, and arrow.png into:
+Composites bg.png, pick1.png, pick2.png, pick3.png, pick4.png, and arrow.png into:
   - bootl_pick1.raw (Nugget selected)
   - bootl_pick2.raw (Android selected)
   - bootl_pick3.raw (Shut down selected)
-Transparent areas in sprites are #FF00FF (RGB 255, 0, 255).
+  - bootl_pick4.raw (USB selected)
+Also converts usb.png to:
+  - bootl_usb.raw
+Supports transparent PNGs with alpha channel blending.
 Pure Python implementation using standard library zlib & struct (no PIL dependency).
 Output matches 480x360 ARGB8888 (little-endian BGRA) for MT6572 /dev/graphics/fb0.
 """
@@ -111,7 +114,7 @@ def decode_png(png_path):
 
 
 def overlay_sprite(dest, dest_w, dest_h, src, src_w, src_h, dest_x, dest_y):
-    """Overlay src (RGBA) onto dest (RGBA), skipping #FF00FF and transparent pixels."""
+    """Overlay src (RGBA) onto dest (RGBA) with alpha blending."""
     for sy in range(src_h):
         dy = dest_y + sy
         if dy < 0 or dy >= dest_h:
@@ -127,17 +130,25 @@ def overlay_sprite(dest, dest_w, dest_h, src, src_w, src_h, dest_x, dest_y):
             sb = src[s_idx + 2]
             sa = src[s_idx + 3]
 
-            # Skip transparent or magenta (#FF00FF) pixels
-            if sa < 128:
+            if sa == 0:
                 continue
-            if sr >= 240 and sg <= 20 and sb >= 240:
+            # Also skip legacy pure magenta (#FF00FF)
+            if sa == 255 and sr >= 250 and sg <= 5 and sb >= 250:
                 continue
 
             d_idx = (dy * dest_w + dx) * 4
-            dest[d_idx]     = sr
-            dest[d_idx + 1] = sg
-            dest[d_idx + 2] = sb
-            dest[d_idx + 3] = 255
+            if sa == 255:
+                dest[d_idx]     = sr
+                dest[d_idx + 1] = sg
+                dest[d_idx + 2] = sb
+                dest[d_idx + 3] = 255
+            else:
+                alpha = sa / 255.0
+                inv_a = 1.0 - alpha
+                dest[d_idx]     = int(sr * alpha + dest[d_idx]     * inv_a)
+                dest[d_idx + 1] = int(sg * alpha + dest[d_idx + 1] * inv_a)
+                dest[d_idx + 2] = int(sb * alpha + dest[d_idx + 2] * inv_a)
+                dest[d_idx + 3] = 255
 
 
 def rgba_to_fb_raw(rgba_pixels, w, h):
@@ -169,9 +180,11 @@ def main():
     p1_path = os.path.join(assets_dir, 'pick1.png')
     p2_path = os.path.join(assets_dir, 'pick2.png')
     p3_path = os.path.join(assets_dir, 'pick3.png')
-    arrow_path = os.path.join(assets_dir, 'arrow.png')
+    p4_path = os.path.join(assets_dir, 'pick4.png')
+    arr_path = os.path.join(assets_dir, 'arrow.png')
+    usb_path = os.path.join(assets_dir, 'usb.png')
 
-    for p in (bg_path, p1_path, p2_path, p3_path, arrow_path):
+    for p in (bg_path, p1_path, p2_path, p3_path, p4_path, arr_path, usb_path):
         if not os.path.exists(p):
             print(f"Error: Asset '{p}' not found!")
             sys.exit(1)
@@ -180,36 +193,47 @@ def main():
     p1_w, p1_h, p1_px = decode_png(p1_path)
     p2_w, p2_h, p2_px = decode_png(p2_path)
     p3_w, p3_h, p3_px = decode_png(p3_path)
-    arr_w, arr_h, arr_px = decode_png(arrow_path)
+    p4_w, p4_h, p4_px = decode_png(p4_path)
+    arr_w, arr_h, arr_px = decode_png(arr_path)
+    usb_w, usb_h, usb_px = decode_png(usb_path)
 
-    # Base: bg + 3 icons centered horizontally:
-    # 480x360 screen. 3 * 152 = 456; (480 - 456)/4 = 6 margin.
-    # Icon 0 (Nugget): x = 6, y = 67
-    # Icon 1 (Android): x = 164, y = 67
-    # Icon 2 (Shut down): x = 322, y = 67
-    base_px = bytearray(bg_px)
-    overlay_sprite(base_px, bg_w, bg_h, p1_px, p1_w, p1_h, 6, 67)
-    overlay_sprite(base_px, bg_w, bg_h, p2_px, p2_w, p2_h, 164, 67)
-    overlay_sprite(base_px, bg_w, bg_h, p3_px, p3_w, p3_h, 322, 67)
-
+    # 3 visible slots across 480px width:
+    # Slot 0: x = 6, y = 67
+    # Slot 1: x = 164, y = 67
+    # Slot 2: x = 322, y = 67
     # Arrow (64x64) at y = 229:
-    # Under icon 0 (center 82):  x = 82 - 32 = 50
-    # Under icon 1 (center 240): x = 240 - 32 = 208
-    # Under icon 2 (center 398): x = 398 - 32 = 366
-    arrow_positions = [
-        ("bootl_pick1.raw", 50, 229),
-        ("bootl_pick2.raw", 208, 229),
-        ("bootl_pick3.raw", 366, 229)
+    # Under Slot 0: x = 50
+    # Under Slot 1: x = 208
+    # Under Slot 2: x = 366
+    pages = [
+        # (filename, [slot0_sprite, slot1_sprite, slot2_sprite], arrow_x, arrow_y)
+        ("bootl_pick1.raw", [(p1_px, p1_w, p1_h), (p2_px, p2_w, p2_h), (p3_px, p3_w, p3_h)], 50, 229),
+        ("bootl_pick2.raw", [(p1_px, p1_w, p1_h), (p2_px, p2_w, p2_h), (p3_px, p3_w, p3_h)], 208, 229),
+        ("bootl_pick3.raw", [(p2_px, p2_w, p2_h), (p3_px, p3_w, p3_h), (p4_px, p4_w, p4_h)], 208, 229),
+        ("bootl_pick4.raw", [(p2_px, p2_w, p2_h), (p3_px, p3_w, p3_h), (p4_px, p4_w, p4_h)], 366, 229),
     ]
 
-    for filename, ax, ay in arrow_positions:
-        screen_px = bytearray(base_px)
+    slot_x = [6, 164, 322]
+    slot_y = 67
+
+    for filename, slots, ax, ay in pages:
+        screen_px = bytearray(bg_px)
+        for i, (spr_px, spr_w, spr_h) in enumerate(slots):
+            overlay_sprite(screen_px, bg_w, bg_h, spr_px, spr_w, spr_h, slot_x[i], slot_y)
         overlay_sprite(screen_px, bg_w, bg_h, arr_px, arr_w, arr_h, ax, ay)
+
         raw_data = rgba_to_fb_raw(screen_px, bg_w, bg_h)
         out_path = os.path.join(out_dir, filename)
         with open(out_path, "wb") as f:
             f.write(raw_data)
         print(f"[+] Successfully generated: {out_path} ({len(raw_data)} bytes)")
+
+    # Generate bootl_usb.raw directly from usb.png
+    usb_raw = rgba_to_fb_raw(usb_px, usb_w, usb_h)
+    usb_out = os.path.join(out_dir, "bootl_usb.raw")
+    with open(usb_out, "wb") as f:
+        f.write(usb_raw)
+    print(f"[+] Successfully generated: {usb_out} ({len(usb_raw)} bytes)")
 
 if __name__ == "__main__":
     main()
