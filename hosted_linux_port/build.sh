@@ -173,6 +173,14 @@ for img in boot sdcard connect errconnect error; do
     fi
 done
 
+# Generate bootloader menu screen assets (Pick1: Nugget, Pick2: Android, Pick3: Shut down)
+if [[ -d "$SCRIPT_DIR/bootl_image_assets" ]]; then
+    echo "[*] Generating bootloader menu screen assets..."
+    python3 "$SCRIPT_DIR/tools/generate_bootl_assets.py" \
+        "$SCRIPT_DIR/bootl_image_assets" \
+        "$ROOTFS_DIR/etc"
+fi
+
 # ---------------------------------------------------------------------------
 # Compile independent native utilities in parallel
 # ---------------------------------------------------------------------------

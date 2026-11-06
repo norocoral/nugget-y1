@@ -130,6 +130,24 @@ Nugget for Y1 provides an authentic iPod Classic HOLD experience tailored for th
 
 ---
 
+### Dual-Boot Subsystem & Bootloader Menu
+
+Nugget preserves Android partitions on the internal eMMC (`SYSTEM`, `DATA`, `CACHE`), enabling seamless dual-booting:
+
+- **Bootloader Menu (Approach 2):**
+  - Loads before anything else upon device startup.
+  - Features high-resolution custom graphics:
+    - **Pick 1: Nugget** — Boots into Rockbox on the physical MicroSD card.
+    - **Pick 2: Android** — Reboots directly into Android / Recovery.
+    - **Pick 3: Shut down** — Safely powers off the device.
+  - **Navigation:** Rotate the Click Wheel or press **Left / Right** to move the selection pointer; press **Center** or **Play** to confirm.
+  - **Hardware Override:** **Holding the MENU button while booting will always show the Bootloader Menu**, regardless of whether it is enabled or disabled in settings.
+  - **Settings Toggle:** Configure under `Settings -> Nugget -> Bootloader Menu` (`Yes` / `No`). When disabled, Nugget boots instantly unless MENU is held.
+- **Reboot to Android from Rockbox (Approach 3):**
+  - Select `Settings -> Nugget -> Reboot to Android` at any time to cleanly flush data and restart directly into Android.
+
+---
+
 ## Credits
 https://github.com/nuxcodes/rockpod
 

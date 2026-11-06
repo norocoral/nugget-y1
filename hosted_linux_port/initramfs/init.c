@@ -1020,6 +1020,194 @@ static void display_screen(const char *name)
 #include <sys/syscall.h>
 #include <poll.h>
 
+#ifndef LINUX_REBOOT_MAGIC1
+#define LINUX_REBOOT_MAGIC1 0xfee1dead
+#endif
+#ifndef LINUX_REBOOT_MAGIC2
+#define LINUX_REBOOT_MAGIC2 672274793
+#endif
+#ifndef LINUX_REBOOT_CMD_RESTART2
+#define LINUX_REBOOT_CMD_RESTART2 0xa1b2c3d4
+#endif
+
+static void reboot_to_android(void)
+{
+    log_line("Initiating reboot to Android / Recovery...\n");
+    sync();
+
+    /* Try to set Android bootloader control block (BCB) if misc or para partition exists */
+    const char *misc_paths[] = {
+        "/dev/block/platform/mtk-msdc.0/by-name/para",
+        "/dev/block/platform/mtk-msdc.0/by-name/misc",
+        "/dev/misc",
+        "/dev/para",
+        NULL
+    };
+    for (int i = 0; misc_paths[i]; i++) {
+        int fd = open(misc_paths[i], O_WRONLY | O_CLOEXEC);
+        if (fd >= 0) {
+            char bcb[2048];
+            memset(bcb, 0, sizeof(bcb));
+            strncpy(bcb, "boot-recovery", 32);
+            strncpy(bcb + 64, "recovery\n", 64);
+            (void)!write(fd, bcb, sizeof(bcb));
+            close(fd);
+            sync();
+            break;
+        }
+    }
+
+    /* MTK / Android kernel reboot to recovery syscall */
+    syscall(SYS_reboot, LINUX_REBOOT_MAGIC1, LINUX_REBOOT_MAGIC2, LINUX_REBOOT_CMD_RESTART2, "recovery");
+
+    /* Fallback standard reboot */
+    reboot(RB_AUTOBOOT);
+    while (1) sleep(1);
+}
+
+static int is_menu_button_held_at_boot(void)
+{
+    int held = 0;
+    uint8_t key_bits[KEY_MAX / 8 + 1];
+
+    for (int i = 0; i < 16; i++) {
+        char path[32];
+        snprintf(path, sizeof(path), "/dev/input/event%d", i);
+        int fd = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+        if (fd < 0) continue;
+
+        memset(key_bits, 0, sizeof(key_bits));
+        if (ioctl(fd, EVIOCGKEY(sizeof(key_bits)), key_bits) >= 0) {
+            /* KEY_BACK = 158, KEY_MENU = 139 */
+            if ((key_bits[158 / 8] & (1 << (158 % 8))) ||
+                (key_bits[139 / 8] & (1 << (139 % 8)))) {
+                held = 1;
+            }
+        }
+
+        struct input_event ev;
+        while (read(fd, &ev, sizeof(ev)) == sizeof(ev)) {
+            if (ev.type == EV_KEY && (ev.code == 158 || ev.code == 139) && ev.value != 0) {
+                held = 1;
+            }
+        }
+        close(fd);
+    }
+    return held;
+}
+
+static int bootloader_menu_enabled_from_config(void)
+{
+    FILE *fp = fopen("/mnt/sdcard/.rockbox/config.cfg", "r");
+    if (!fp)
+        return 0;
+
+    char line[128];
+    char value[16];
+    int enabled = 0;
+    while (fgets(line, sizeof(line), fp)) {
+        if (sscanf(line, "bootloader menu: %15s", value) == 1) {
+            enabled = (strcmp(value, "on") == 0);
+            break;
+        }
+    }
+    fclose(fp);
+    return enabled;
+}
+
+static void run_bootloader_menu(void)
+{
+    log_line("Entering Bootloader Menu...\n");
+
+    int event_fds[16];
+    for (int i = 0; i < 16; i++) {
+        char path[32];
+        snprintf(path, sizeof(path), "/dev/input/event%d", i);
+        event_fds[i] = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+    }
+
+    int selection = 0; /* 0 = Nugget, 1 = Android, 2 = Shut down */
+    const char *screens[3] = {"bootl_pick1", "bootl_pick2", "bootl_pick3"};
+
+    display_screen(screens[selection]);
+
+    /* Debounce wait: wait 200ms before accepting confirmation */
+    usleep(200000);
+
+    /* Flush any pending press events before interactive loop */
+    for (int i = 0; i < 16; i++) {
+        if (event_fds[i] >= 0) {
+            struct input_event ev;
+            while (read(event_fds[i], &ev, sizeof(ev)) == sizeof(ev));
+        }
+    }
+
+    while (1) {
+        struct pollfd pfd[16];
+        int map_idx[16];
+        nfds_t n = 0;
+        for (int i = 0; i < 16; i++) {
+            if (event_fds[i] >= 0) {
+                pfd[n].fd = event_fds[i];
+                pfd[n].events = POLLIN;
+                pfd[n].revents = 0;
+                map_idx[n] = i;
+                n++;
+            }
+        }
+
+        if (poll(pfd, n, 100) > 0) {
+            for (nfds_t i = 0; i < n; i++) {
+                if (!(pfd[i].revents & POLLIN))
+                    continue;
+
+                struct input_event ev;
+                while (read(event_fds[map_idx[i]], &ev, sizeof(ev)) == sizeof(ev)) {
+                    if (ev.type != EV_KEY || ev.value != 1)
+                        continue;
+
+                    /* Previous / Left / Wheel CCW */
+                    if (ev.code == 105 || ev.code == 165 || ev.code == 103) {
+                        selection = (selection + 2) % 3;
+                        display_screen(screens[selection]);
+                    }
+                    /* Next / Right / Wheel CW */
+                    else if (ev.code == 106 || ev.code == 163 || ev.code == 108) {
+                        selection = (selection + 1) % 3;
+                        display_screen(screens[selection]);
+                    }
+                    /* Confirm: Center button or Play button */
+                    else if (ev.code == 232 || ev.code == 28 || ev.code == 96 ||
+                             ev.code == 352 || ev.code == 353 || ev.code == 314 ||
+                             ev.code == 315 || ev.code == 304 || ev.code == 164 ||
+                             ev.code == 207 || ev.code == 119) {
+                        for (int k = 0; k < 16; k++) {
+                            if (event_fds[k] >= 0) close(event_fds[k]);
+                        }
+
+                        if (selection == 0) {
+                            /* Pick 1: Nugget */
+                            log_line("Bootloader Menu: Nugget selected.\n");
+                            display_screen("boot");
+                            return;
+                        } else if (selection == 1) {
+                            /* Pick 2: Android */
+                            log_line("Bootloader Menu: Android selected.\n");
+                            reboot_to_android();
+                        } else if (selection == 2) {
+                            /* Pick 3: Shut down */
+                            log_line("Bootloader Menu: Shut down selected.\n");
+                            sync();
+                            reboot(RB_POWER_OFF);
+                            while (1) sleep(1);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
 static int error_screen_center_pressed(void)
 {
     static int event_fds[16];
@@ -1314,8 +1502,11 @@ int main(int argc, char *argv[])
     mkdir("/dev/pts", 0755);
     mount("devpts", "/dev/pts", "devpts", 0, NULL);
 
-    /* 2. Create device nodes */
+    /* 2. Create device nodes & enable touch keys early */
     make_device_nodes();
+    enable_touch_keys();
+
+    int menu_held = is_menu_button_held_at_boot();
 
     /* 3. Display hardware boot splash from boot.png immediately */
     display_screen("boot");
@@ -1333,6 +1524,9 @@ int main(int argc, char *argv[])
     log_line("Waiting up to 5s for physical MicroSD card (mmcblk1)...\n");
     int card_found = 0;
     for (int i = 0; i < 500; i++) {
+        if (!menu_held && is_menu_button_held_at_boot()) {
+            menu_held = 1;
+        }
         scan_proc_partitions_and_create_nodes();
         if (is_mmcblk1_in_proc_partitions()) {
             char msg[64];
@@ -1356,6 +1550,11 @@ int main(int argc, char *argv[])
         usleep(10000); /* 10ms fast poll */
     }
 
+    /* If MENU was held and card not found, allow user to boot Android or shut down */
+    if (!card_found && menu_held) {
+        run_bootloader_menu();
+    }
+
     if (!card_found) {
         log_line("Notice: MicroSD card not detected, displaying sdcard.raw...\n");
         display_screen("sdcard");
@@ -1363,6 +1562,20 @@ int main(int argc, char *argv[])
 
     /* 6. Mount physical MicroSD and its secondary partitions. */
     mount_storage_at_boot(1);
+
+    /* Check for Rockbox Reboot to Android flag */
+    if (access("/mnt/sdcard/.boot_android", F_OK) == 0) {
+        unlink("/mnt/sdcard/.boot_android");
+        sync();
+        reboot_to_android();
+    }
+
+    /* Bootloader Menu check:
+     * Holding MENU while booting will always show this menu, regardless of disablement.
+     * Otherwise, shown if enabled in settings (bootloader menu: on). */
+    if (menu_held || bootloader_menu_enabled_from_config()) {
+        run_bootloader_menu();
+    }
 
     /* 7. Apply aggressive battery and power saving optimizations */
     optimize_power_and_battery();
