@@ -1,0 +1,17 @@
+Target: innioasisy1
+Target id: 125
+Target define: -DINNIOASIS_Y1
+Memory: 256
+CPU: hosted
+Manufacturer: innioasis
+Version: v1.0.0-innioasis-261019
+Binary: rockbox
+Binary size: 1190120
+Voice format: 400
+Actual size: 1190120
+RAM usage: 273466440
+Features: backlight_brightness:crossfade:headphone_detection:hotkey:lcd_bitmap:lcd_non-mono:lcd_color:pitchscreen:multivolume:quickscreen:rtc:swcodec:tagcache:charging:large_plugin_buffer:albumart:backlight_fade_bool:scrollwheel:himem:play_frequency:perceptual_volume:codec_aac_he:utf8proc
+gcc: arm-linux-gnueabihf-gcc (Ubuntu 15.2.0-16ubuntu1) 15.2.0
+ld: GNU ld (GNU Binutils for Ubuntu) 2.46
+Host gcc: gcc (Ubuntu 15.2.0-16ubuntu1) 15.2.0
+Host system: Linux

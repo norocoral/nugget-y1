@@ -1,0 +1,36 @@
+# MediaTek stock ROM, large dumps, and unpacked flash partitions
+stock_rom/
+stock_unpacked/
+
+# Build and staging artifacts
+build/
+dist/
+rootfs/
+bootl_raw/
+*.img
+*.zip
+.sdcard-stage*
+
+# Compiled binaries and libraries
+initramfs/init
+initramfs/init.bin
+audio/unmute_eac
+video/liby1video.so
+video_cache/
+liby1/build/
+liby1/examples/hello_y1
+tools/ffmpeg
+tools/ffmpeg-armv7l
+
+# Kernel blobs and scatter files
+*.ko
+logo.bin
+*.scatter*.txt
+*MT6572*scatter*.txt
+
+# Editor and OS files
+.DS_Store
+Thumbs.db
+*.swp
+*.bak
+
