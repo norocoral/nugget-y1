@@ -40,8 +40,21 @@ static const char *find_ext_device(void)
     return NULL;
 }
 
+bool y1_usb_is_serial_active(void)
+{
+    char buf[64];
+    if (y1_sysfs_read("/sys/class/android_usb/android0/functions", buf, sizeof(buf))) {
+        if (strstr(buf, "acm") != NULL)
+            return true;
+    }
+    return false;
+}
+
 bool y1_usb_attach_mass_storage(void)
 {
+    if (y1_usb_is_serial_active())
+        return false;
+
     const char *target = find_sd_device();
     if (!target)
         return false;
@@ -77,6 +90,9 @@ bool y1_usb_attach_mass_storage(void)
 
 void y1_usb_detach_mass_storage(void)
 {
+    if (y1_usb_is_serial_active())
+        return;
+
     write_usb_line("/sys/class/android_usb/android0/f_mass_storage/lun0/file", "");
     write_usb_line("/sys/class/android_usb/android0/f_mass_storage/lun/file", "");
     write_usb_line("/sys/class/android_usb/android0/f_mass_storage/lun1/file", "");

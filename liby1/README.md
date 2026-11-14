@@ -4,7 +4,7 @@
 
 `liby1` is a tiny, zero-dependency C library that encapsulates all hardware drivers, low-level MediaTek MT6572 / MT6323 PMIC operations, and kernel interfaces for the **Innioasis Y1** digital audio player.
 
-It enables C/C++ developers to create standalone software, games, emulators, custom media players (like MeUI or Reborn), and GUI experiences for the Y1 without reverse-engineering kernel ioctls, PMIC registers, or sysfs paths. Rockbox itself uses `liby1` under the hood.
+It enables C/C++ developers to create standalone software, games, emulators, custom media players (like MeUI or RockWheel), and GUI experiences for the Y1 without reverse-engineering kernel ioctls, PMIC registers, or sysfs paths. Rockbox itself uses `liby1` under the hood.
 
 > [!TIP]
 > For the complete API reference, architecture breakdown, game loop tutorials, and porting guides, read the **[`liby1` Developer Manual & Porting Guide](../docs/LIBY1_GUIDE.md)** ([한국어](../docs/kr/LIBY1_GUIDE.md)).
@@ -19,7 +19,7 @@ The Y1 bootloader features dynamic multi-experience auto-discovery directly from
 | :--- | :--- |
 | `/mnt/sdcard/.custom/launch` | **Pick 4 in Bootloader Carousel:** User defined software (automatically discovered) |
 | `/mnt/sdcard/.meui/meui` | **Pick 2 in Bootloader Carousel:** MeUI frontend (automatically discovered) |
-| `/mnt/sdcard/.reborn/reborn` | **Pick 3 in Bootloader Carousel:** Reborn music player (automatically discovered) |
+| `/mnt/sdcard/.rockwheel/rockwheel` | **Pick 3 in Bootloader Carousel:** RockWheel music player (automatically discovered) |
 | `/mnt/sdcard/.system/app` | Standalone auto-boot application (runs at power-on without menu) |
 | `/mnt/sdcard/.system/lib/liby1.a` | Static `liby1` hardware abstraction archive for offline linking |
 | `/mnt/sdcard/.system/lib/liby1.so` | Shared dynamic hardware library |

@@ -16,6 +16,7 @@ BUILD_ROOTFS=1
 BUILD_BOOTIMG=1
 BUILD_VIDEO_LIB=1
 BUILD_ROCKBOX=1
+BUILD_ROCKWHEEL=1
 PACKAGE_SDCARD=1
 BUILD_DIST=0
 BUNDLE_BT_BLOBS=1
@@ -43,7 +44,10 @@ Options:
   --only-rootfs                      Build only liby1 and initramfs rootfs utilities
   --only-bootimg                     Build only liby1, rootfs, and boot_nugget.img
   --only-video                       Build only liby1video.so
+  --only-rockwheel                   Build only RockWheel player
   --no-rockbox                       Build standalone Y1 SDK & boot image without Rockbox
+  --no-rockwheel                     Skip RockWheel player compilation
+  --rockwheel                        Explicitly enable RockWheel compilation
   --custom-app <path>                Bundle custom ARM binary at /.system/app on SD card
   -j, --jobs <N>                     Number of parallel build jobs (0 = auto-detect)
   -h, --help                         Show this help message
@@ -60,6 +64,8 @@ while [[ $# -gt 0 ]]; do
             ;;
         --dist)
             BUILD_DIST=1
+            BUILD_ROCKBOX=1
+            BUILD_ROCKWHEEL=1
             shift
             ;;
         --only-liby1)
@@ -68,6 +74,7 @@ while [[ $# -gt 0 ]]; do
             BUILD_BOOTIMG=0
             BUILD_VIDEO_LIB=0
             BUILD_ROCKBOX=0
+            BUILD_ROCKWHEEL=0
             PACKAGE_SDCARD=0
             shift
             ;;
@@ -77,6 +84,7 @@ while [[ $# -gt 0 ]]; do
             BUILD_BOOTIMG=0
             BUILD_VIDEO_LIB=0
             BUILD_ROCKBOX=0
+            BUILD_ROCKWHEEL=0
             PACKAGE_SDCARD=0
             shift
             ;;
@@ -86,6 +94,7 @@ while [[ $# -gt 0 ]]; do
             BUILD_BOOTIMG=1
             BUILD_VIDEO_LIB=0
             BUILD_ROCKBOX=0
+            BUILD_ROCKWHEEL=0
             PACKAGE_SDCARD=0
             shift
             ;;
@@ -95,11 +104,30 @@ while [[ $# -gt 0 ]]; do
             BUILD_BOOTIMG=0
             BUILD_VIDEO_LIB=1
             BUILD_ROCKBOX=0
+            BUILD_ROCKWHEEL=0
+            PACKAGE_SDCARD=0
+            shift
+            ;;
+        --only-rockwheel)
+            BUILD_LIBY1=0
+            BUILD_ROOTFS=0
+            BUILD_BOOTIMG=0
+            BUILD_VIDEO_LIB=0
+            BUILD_ROCKBOX=0
+            BUILD_ROCKWHEEL=1
             PACKAGE_SDCARD=0
             shift
             ;;
         --no-rockbox)
             BUILD_ROCKBOX=0
+            shift
+            ;;
+        --no-rockwheel)
+            BUILD_ROCKWHEEL=0
+            shift
+            ;;
+        --rockwheel)
+            BUILD_ROCKWHEEL=1
             shift
             ;;
         --custom-app)
@@ -180,7 +208,15 @@ else
     ROCKBOX_SRC="$(cd "$SCRIPT_DIR/.." && pwd)"
 fi
 
-REBORN_SRC="${REBORN_SRC:-${WORKSPACE_ROOT:-$SCRIPT_DIR/../..}/!y2reborn/Y2Reborn}"
+if [[ -z "${ROCKWHEEL_SRC:-}" ]]; then
+    if [[ -d "${WORKSPACE_ROOT:-$SCRIPT_DIR/../..}/!rockwheel/RockWheel" ]]; then
+        ROCKWHEEL_SRC="${WORKSPACE_ROOT:-$SCRIPT_DIR/../..}/!rockwheel/RockWheel"
+    elif [[ -d "${WORKSPACE_ROOT:-$SCRIPT_DIR/../..}/!rockwheel/rockwheel" ]]; then
+        ROCKWHEEL_SRC="${WORKSPACE_ROOT:-$SCRIPT_DIR/../..}/!rockwheel/rockwheel"
+    else
+        ROCKWHEEL_SRC="${WORKSPACE_ROOT:-$SCRIPT_DIR/../..}/!rockwheel/RockWheel"
+    fi
+fi
 
 ROOTFS_DIR="$SCRIPT_DIR/rootfs"
 BUILD_DIR="$ROCKBOX_SRC/build_y1"
@@ -259,7 +295,7 @@ echo " Innioasis Y1 Modular Build System"
 echo "=========================================================="
 echo "Toolchain:      ${CC[*]}"
 echo "Parallelism:    $JOBS jobs"
-echo "Components:     liby1=$BUILD_LIBY1 rootfs=$BUILD_ROOTFS bootimg=$BUILD_BOOTIMG video=$BUILD_VIDEO_LIB rockbox=$BUILD_ROCKBOX sdcard=$PACKAGE_SDCARD"
+echo "Components:     liby1=$BUILD_LIBY1 rootfs=$BUILD_ROOTFS bootimg=$BUILD_BOOTIMG video=$BUILD_VIDEO_LIB rockbox=$BUILD_ROCKBOX rockwheel=$BUILD_ROCKWHEEL sdcard=$PACKAGE_SDCARD"
 if [[ -n "$CUSTOM_APP_BIN" ]]; then
     echo "Custom App:     $CUSTOM_APP_BIN -> /.system/app"
 fi
@@ -430,12 +466,16 @@ import os, sys, re
 bb_path = sys.argv[1]
 bin_dir = sys.argv[2]
 d = open(bb_path, "rb").read()
+bb_size = len(d)
 candidates = re.findall(b"(?:[a-z0-9_.-]{1,20}\x00){15,}", d)
 for c in candidates:
     names = [x.decode("ascii") for x in c.split(b"\x00") if x]
     if "ls" in names and "cat" in names and "grep" in names:
         for name in names:
             link_path = os.path.join(bin_dir, name)
+            if os.path.lexists(link_path):
+                if not os.path.islink(link_path) and os.path.getsize(link_path) == bb_size:
+                    os.remove(link_path)
             if not os.path.lexists(link_path):
                 os.symlink("busybox", link_path)
         print(f"[+] Installed {len(names)} BusyBox applet symlinks in /bin")
@@ -588,6 +628,68 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+# Step 3b: Configure and build RockWheel (optional, isolated in /.rockwheel)
+# ---------------------------------------------------------------------------
+
+if [[ "$BUILD_ROCKWHEEL" -eq 1 ]]; then
+    if [[ -d "$ROCKWHEEL_SRC" && -f "$ROCKWHEEL_SRC/tools/configure" ]]; then
+        echo "[3b/6] Configuring and compiling RockWheel (with liby1)..."
+        ROCKWHEEL_BUILD_DIR="$ROCKWHEEL_SRC/build_y1"
+        mkdir -p "$ROCKWHEEL_BUILD_DIR"
+        cd "$ROCKWHEEL_BUILD_DIR"
+
+        chmod +x "$ROCKWHEEL_SRC/tools/configure"
+
+        if [[ -f Makefile ]] && ! grep -Fqx 'export SHARED_CFLAGS=-fPIC -fvisibility=hidden' Makefile; then
+            echo "[*] Refreshing stale RockWheel plugin build configuration..."
+            make clean
+            "$ROCKWHEEL_SRC/tools/configure" --target=310 --type=N
+        elif [[ ! -f Makefile ]]; then
+            "$ROCKWHEEL_SRC/tools/configure" --target=310 --type=N
+        fi
+
+        if [[ ! -f Makefile ]]; then
+            echo "[!] RockWheel configuration did not generate a Makefile."
+            exit 1
+        fi
+
+        find "$ROCKWHEEL_BUILD_DIR" -type f -name '*.o' -size 0 -delete 2>/dev/null || true
+        while IFS= read -r -d '' object; do
+            if ! "$READELF" -h "$object" >/dev/null 2>&1; then
+                rm -f -- "$object"
+            fi
+        done < <(find "$ROCKWHEEL_BUILD_DIR" -type f -name '*.o' -print0)
+
+        if [[ -f "$ROCKWHEEL_BUILD_DIR/apps/features" ]]; then
+            tr '\n' ':' < "$ROCKWHEEL_BUILD_DIR/apps/features" > "$ROCKWHEEL_BUILD_DIR/apps/genlang-features.tmp"
+            if [[ ! -f "$ROCKWHEEL_BUILD_DIR/apps/genlang-features" ]] || ! cmp -s "$ROCKWHEEL_BUILD_DIR/apps/genlang-features.tmp" "$ROCKWHEEL_BUILD_DIR/apps/genlang-features"; then
+                mv -f "$ROCKWHEEL_BUILD_DIR/apps/genlang-features.tmp" "$ROCKWHEEL_BUILD_DIR/apps/genlang-features"
+                rm -f "$ROCKWHEEL_BUILD_DIR/lang/lang.h" "$ROCKWHEEL_BUILD_DIR/lang/lang_core.c" "$ROCKWHEEL_BUILD_DIR/lang_enum.h" "$ROCKWHEEL_BUILD_DIR/apps/lang/"*.lng "$ROCKWHEEL_BUILD_DIR/apps/lang/"*.vstrings
+            else
+                rm -f "$ROCKWHEEL_BUILD_DIR/apps/genlang-features.tmp"
+            fi
+        fi
+
+        if [[ ! -f "$ROCKWHEEL_BUILD_DIR/lang/lang.h" ]]; then
+            echo "[*] Generating RockWheel language header before parallel compilation..."
+            make -j1 "$ROCKWHEEL_BUILD_DIR/lang/lang.h"
+        fi
+
+        echo "[*] Building RockWheel with $JOBS parallel jobs..."
+        make -j"$JOBS"
+
+        echo "[*] Creating RockWheel base archive..."
+        make zip
+
+        cd "$SCRIPT_DIR"
+    else
+        echo "[3b/6] RockWheel source not found at $ROCKWHEEL_SRC, skipping."
+    fi
+else
+    echo "[3b/6] Skipping RockWheel compilation (BUILD_ROCKWHEEL=0)."
+fi
+
+# ---------------------------------------------------------------------------
 # Step 4: Build hardware video helper library (liby1video.so)
 # ---------------------------------------------------------------------------
 
@@ -596,6 +698,8 @@ VIDEO_SO_OUT="$SCRIPT_DIR/video/liby1video.so"
 if [[ "$BUILD_VIDEO_LIB" -eq 1 ]]; then
     echo "[4/6] Building external SD card video library (liby1video.so)..."
     "${CC[@]}" -O3 -mfpu=neon -mfloat-abi=hard -fPIC -shared \
+        -I"$SCRIPT_DIR/video" \
+        -I"$SCRIPT_DIR/video/include" \
         -Wl,-rpath,/mnt/sdcard/.system/lib:/mnt/sdcard/.rockbox/lib \
         "$SCRIPT_DIR/video/liby1video.c" \
         "$SCRIPT_DIR"/video/h264_objs/libavcodec/*.o \
@@ -628,6 +732,9 @@ if [[ "$PACKAGE_SDCARD" -eq 1 ]]; then
         "$SD_STAGE/.system/video_cache" \
         "$SD_STAGE/Videos"
 
+    # Set default player to Rockbox
+    echo "rockbox" > "$SD_STAGE/.system/default_player"
+
     # Stage liby1 SDK artifacts into /.system/lib and /.system/include
     if [[ -f "$SCRIPT_DIR/liby1/build/liby1.so" ]]; then
         cp "$SCRIPT_DIR/liby1/build/liby1.so" "$SD_STAGE/.system/lib/liby1.so"
@@ -637,6 +744,9 @@ if [[ "$PACKAGE_SDCARD" -eq 1 ]]; then
     fi
     if [[ -f "$SCRIPT_DIR/liby1/include/liby1.h" ]]; then
         cp "$SCRIPT_DIR/liby1/include/liby1.h" "$SD_STAGE/.system/include/liby1.h"
+    fi
+    if [[ -f "$SCRIPT_DIR/video/y1_video_lib.h" ]]; then
+        cp "$SCRIPT_DIR/video/y1_video_lib.h" "$SD_STAGE/.system/include/y1_video_lib.h"
     fi
 
     # Stage liby1video.so into /.system/lib/
@@ -710,21 +820,46 @@ if [[ "$PACKAGE_SDCARD" -eq 1 ]]; then
         chmod +x "$SD_STAGE/.system/app"
     fi
 
-    # Stage optional Reborn application binary at /.reborn/reborn if available
-    if [[ -d "$REBORN_SRC" ]]; then
-        reborn_bin=""
-        if [[ -f "$REBORN_SRC/target/armv7-unknown-linux-gnueabihf/release/reborn" ]]; then
-            reborn_bin="$REBORN_SRC/target/armv7-unknown-linux-gnueabihf/release/reborn"
-        elif [[ -f "$REBORN_SRC/reborn" ]]; then
-            reborn_bin="$REBORN_SRC/reborn"
+    # Stage optional RockWheel application binary at /.rockwheel/rockwheel if available
+    if [[ -d "$ROCKWHEEL_SRC" ]]; then
+        rockwheel_bin=""
+        if [[ -f "$ROCKWHEEL_SRC/build_y1/rockwheel" ]]; then
+            rockwheel_bin="$ROCKWHEEL_SRC/build_y1/rockwheel"
+        elif [[ -f "$ROCKWHEEL_SRC/rockwheel" ]]; then
+            rockwheel_bin="$ROCKWHEEL_SRC/rockwheel"
+        elif [[ -f "$ROCKWHEEL_SRC/target/armv7-unknown-linux-gnueabihf/release/rockwheel" ]]; then
+            rockwheel_bin="$ROCKWHEEL_SRC/target/armv7-unknown-linux-gnueabihf/release/rockwheel"
         fi
-        if [[ -n "$reborn_bin" ]]; then
-            echo "[*] Found Reborn binary: $reborn_bin (staging to /.reborn/reborn)"
-            mkdir -p "$SD_STAGE/.reborn"
-            cp "$reborn_bin" "$SD_STAGE/.reborn/reborn"
-            chmod +x "$SD_STAGE/.reborn/reborn"
-            if [[ -d "$REBORN_SRC/assets" ]]; then
-                cp -r "$REBORN_SRC/assets" "$SD_STAGE/.reborn/" 2>/dev/null || true
+        if [[ -n "$rockwheel_bin" ]]; then
+            echo "[*] Found RockWheel binary: $rockwheel_bin (staging to /.rockwheel/rockwheel)"
+            mkdir -p "$SD_STAGE/.rockwheel"
+            if [[ -f "$ROCKWHEEL_SRC/build_y1/rockwheel.zip" ]]; then
+                unzip -q -o "$ROCKWHEEL_SRC/build_y1/rockwheel.zip" -d "$SD_STAGE/" 2>/dev/null || true
+            elif [[ -f "$ROCKWHEEL_SRC/build_y1/rockbox.zip" ]]; then
+                unzip -q -o "$ROCKWHEEL_SRC/build_y1/rockbox.zip" -d "$SD_STAGE/" 2>/dev/null || true
+                if [[ -d "$SD_STAGE/.rockbox" && ! -d "$SD_STAGE/.rockwheel" ]]; then
+                    mv "$SD_STAGE/.rockbox" "$SD_STAGE/.rockwheel"
+                fi
+            elif [[ -d "$ROCKWHEEL_SRC/build_y1/.rockwheel" ]]; then
+                echo "[*] Staging complete RockWheel tree from build directory..."
+                cp -a "$ROCKWHEEL_SRC/build_y1/.rockwheel"/* "$SD_STAGE/.rockwheel/" 2>/dev/null || true
+            elif [[ -d "$ROCKWHEEL_SRC/build_y1/.rockbox" ]]; then
+                echo "[*] Staging complete RockWheel tree from build directory..."
+                cp -a "$ROCKWHEEL_SRC/build_y1/.rockbox"/* "$SD_STAGE/.rockwheel/" 2>/dev/null || true
+            fi
+            cp "$rockwheel_bin" "$SD_STAGE/.rockwheel/rockwheel"
+            chmod +x "$SD_STAGE/.rockwheel/rockwheel"
+            for tdir in "$ROCKWHEEL_SRC"/themes/*/.rockbox; do
+                if [[ -d "$tdir" ]]; then
+                    cp -a "$tdir"/* "$SD_STAGE/.rockwheel/" 2>/dev/null || true
+                fi
+            done
+            find "$SD_STAGE/.rockwheel" -type f \( -name "*.cfg" -o -name "*.sbs" -o -name "*.wps" -o -name "*.fms" \) -exec sed -i 's|/\.rockbox/|/\.rockwheel/|g' {} + 2>/dev/null || true
+            if [[ -f "$SD_STAGE/.rockwheel/themes/iClassic-Square.cfg" && ! -f "$SD_STAGE/.rockwheel/config.cfg" ]]; then
+                cp "$SD_STAGE/.rockwheel/themes/iClassic-Square.cfg" "$SD_STAGE/.rockwheel/config.cfg"
+            fi
+            if [[ -d "$ROCKWHEEL_SRC/assets" ]]; then
+                cp -r "$ROCKWHEEL_SRC/assets" "$SD_STAGE/.rockwheel/" 2>/dev/null || true
             fi
         fi
     fi
@@ -743,24 +878,27 @@ if [[ "$PACKAGE_SDCARD" -eq 1 ]]; then
         cd "$SD_STAGE"
         zip -u -q "$SCRIPT_DIR/rockbox_sdcard.zip" .rockbox/rockbox
         zip -u -q -r "$SCRIPT_DIR/rockbox_sdcard.zip" .system Videos
-        if [[ -d .reborn ]]; then
-            zip -u -q -r "$SCRIPT_DIR/rockbox_sdcard.zip" .reborn
+        if [[ -d .rockwheel ]]; then
+            zip -q -r "$SCRIPT_DIR/rockwheel_sdcard.zip" .system Videos .rockwheel
         fi
         cd "$SCRIPT_DIR"
         echo "[+] Created SD card archive: $SCRIPT_DIR/rockbox_sdcard.zip"
+        if [[ -f "$SCRIPT_DIR/rockwheel_sdcard.zip" ]]; then
+            echo "[+] Created RockWheel SD card archive: $SCRIPT_DIR/rockwheel_sdcard.zip"
+        fi
     else
         rm -f "$SCRIPT_DIR/y1_sdcard.zip"
         cd "$SD_STAGE"
-        if [[ -d .reborn ]]; then
-            zip -q -r "$SCRIPT_DIR/y1_sdcard.zip" .system Videos .reborn
+        if [[ -d .rockwheel ]]; then
+            zip -q -r "$SCRIPT_DIR/y1_sdcard.zip" .system Videos .rockwheel
         else
             zip -q -r "$SCRIPT_DIR/y1_sdcard.zip" .system Videos
         fi
         cd "$SCRIPT_DIR"
-        cd "$SCRIPT_DIR"
         echo "[+] Created standalone SD card archive: $SCRIPT_DIR/y1_sdcard.zip"
     fi
 
+    chmod -R u+w "$SD_STAGE" 2>/dev/null || true
     rm -rf -- "$SD_STAGE"
     SD_STAGE=""
 else

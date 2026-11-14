@@ -280,6 +280,7 @@ bool y1_usb_attach_mass_storage(void);
 void y1_usb_detach_mass_storage(void);
 bool y1_usb_is_storage_attached(void);
 bool y1_usb_check_host_ejected(void);
+bool y1_usb_is_serial_active(void);
 
 #ifdef __cplusplus
 }

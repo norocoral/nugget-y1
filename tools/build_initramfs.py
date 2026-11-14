@@ -77,6 +77,14 @@ def build_cpio(root_dir: str) -> bytes:
                 target = os.readlink(full_path).encode('utf-8')
                 buf.extend(cpio_entry(rel_path, target, mode=0o120777))
             else:
+                # Deduplicate identical BusyBox copies if symlinks were dereferenced during Windows copy
+                if (rel_path.startswith("bin/") or rel_path.startswith("sbin/")) and f != "busybox" and f not in ["init_audio.sh", "unmute_eac"]:
+                    bb_p = os.path.join(root_dir, "bin", "busybox")
+                    if os.path.exists(bb_p) and os.path.getsize(full_path) == os.path.getsize(bb_p):
+                        target = b"busybox" if rel_path.startswith("bin/") else b"/bin/busybox"
+                        buf.extend(cpio_entry(rel_path, target, mode=0o120777))
+                        continue
+
                 is_exec = os.access(full_path, os.X_OK) or rel_path in ["init", "init_audio.sh"] or rel_path.startswith("bin/") or rel_path.startswith("sbin/")
                 mode = 0o100755 if is_exec else 0o100644
 

@@ -34,7 +34,19 @@
 #include <fcntl.h>
 #include <sys/stat.h>
 
+#if defined(__has_include) && __has_include("y1_video_lib.h")
+#include "y1_video_lib.h"
+#elif defined(__has_include) && __has_include("include/y1_video_lib.h")
+#include "include/y1_video_lib.h"
+#elif defined(__has_include) && __has_include("../../apps/plugins/y1_video_lib.h")
 #include "../../apps/plugins/y1_video_lib.h"
+#elif defined(__has_include) && __has_include("../../../!rockbox_fromsource/rockbox-master/rockbox-master/apps/plugins/y1_video_lib.h")
+#include "../../../!rockbox_fromsource/rockbox-master/rockbox-master/apps/plugins/y1_video_lib.h"
+#elif defined(__has_include) && __has_include("../../../!rockwheel/RockWheel/apps/plugins/y1_video_lib.h")
+#include "../../../!rockwheel/RockWheel/apps/plugins/y1_video_lib.h"
+#else
+#include "y1_video_lib.h"
+#endif
 
 /* =========================================================================
  * Built-in FFmpeg H.264 Decoder & FAAD2 AAC Decoder Declarations

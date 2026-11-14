@@ -4,7 +4,7 @@
 
 `liby1`은 **Innioasis Y1** 디지털 오디오 플레이어의 하드웨어 드라이버, MediaTek MT6572 / MT6323 PMIC 동작 및 커널 인터페이스를 감싸는 외부 종속성 제로의 가벼운 C 라이브러리입니다.
 
-C/C++ 개발자는 복잡한 커널 ioctl, PMIC 레지스터, sysfs 경로를 분석할 필요 없이 Y1을 위한 독립형 소프트웨어, 게임, 에뮬레이터, 커스텀 미디어 플레이어(MeUI, Reborn 등)를 자유롭게 개발할 수 있습니다. Rockbox 역시 내부적으로 `liby1`을 기반으로 구동됩니다.
+C/C++ 개발자는 복잡한 커널 ioctl, PMIC 레지스터, sysfs 경로를 분석할 필요 없이 Y1을 위한 독립형 소프트웨어, 게임, 에뮬레이터, 커스텀 미디어 플레이어(MeUI, RockWheel 등)를 자유롭게 개발할 수 있습니다. Rockbox 역시 내부적으로 `liby1`을 기반으로 구동됩니다.
 
 > [!TIP]
 > 전체 API 레퍼런스, 게임 루프 튜토리얼, 아키텍처 및 포팅 가이드는 **[`liby1` 개발자 매뉴얼 및 포팅 가이드](../docs/kr/LIBY1_GUIDE.md)** ([English](../docs/LIBY1_GUIDE.md))에서 확인하실 수 있습니다.
@@ -19,7 +19,7 @@ Y1 부트로더는 외장 MicroSD 카드에 저장된 소프트웨어를 동적�
 | :--- | :--- |
 | `/mnt/sdcard/.custom/launch` | **부트로더 캐러셀 선택지 4:** 사용자 정의 소프트웨어 (자동 감지) |
 | `/mnt/sdcard/.meui/meui` | **부트로더 캐러셀 선택지 2:** MeUI 프런트엔드 (자동 감지) |
-| `/mnt/sdcard/.reborn/reborn` | **부트로더 캐러셀 선택지 3:** Reborn 음악 플레이어 (자동 감지) |
+| `/mnt/sdcard/.rockwheel/rockwheel` | **부트로더 캐러셀 선택지 3:** RockWheel 음악 플레이어 (자동 감지) |
 | `/mnt/sdcard/.system/app` | 단일 독립형 자동 실행 프로그램 (메뉴 없이 부팅 시 바로 실행) |
 | `/mnt/sdcard/.system/lib/liby1.a` | 오프라인 정적 링크용 하드웨어 라이브러리 |
 | `/mnt/sdcard/.system/lib/liby1.so` | 공유 동적 라이브러리 |

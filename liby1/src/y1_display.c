@@ -566,6 +566,12 @@ int y1_backlight_get_raw(void)
 
 void y1_display_enter_early_suspend(void)
 {
+    /* Do not enter early_suspend or gate INFRA clocks if USB storage is attached */
+    if (y1_usb_is_storage_attached()) {
+        y1_log("[liby1-bl] early_suspend skipped: USB mass storage is active\n");
+        return;
+    }
+
     /* Hold userspace wakelock so kernel autosleep does not freeze userspace
      * threads while writing 'mem' to /sys/power/state to run early_suspend:
      * - mtkfb_early_suspend: powers off LCD panel, display engine, 60Hz VSync,

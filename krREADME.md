@@ -1,37 +1,60 @@
+<img width="1440" height="1080" alt="herokr" src="https://github.com/user-attachments/assets/e2ccc92e-e80b-4137-9537-2affff1bcf59" />
+
 🌐 **한국어** | [English](README.md)
 
-# 미니멀 리눅스 기반 호스티드 Rockbox (Innioasis Y1)
+# Nugget for Innioasis Y1
 
-이 디렉터리는 Innioasis Y1을 위한 모듈식 분리형 빌드 시스템, 최소 구성 리눅스 initramfs, 독립형 하드웨어 추상화 계층(`liby1`) 및 패키징 도구를 포함하고 있습니다. 플래시용 부트 이미지에는 리눅스 커널과 초기 기동 로직이 담겨 있으며, Rockbox 실행 파일, 하드웨어 라이브러리 및 시스템 자산은 외장 MicroSD 카드에 저장됩니다.
+[![Platform](https://img.shields.io/badge/Platform-MediaTek%20MT6572-orange.svg)](#하드웨어-사양)
 
----
-
-## 기술 문서 및 가이드 목록
-
-상세 서브시스템 사양, 개발자 매뉴얼 및 리버스 엔지니어링 기록:
-- **[모듈식 빌드 시스템 가이드](docs/kr/BUILD_GUIDE.md)** ([English](docs/BUILD_GUIDE.md)): 분리형 아키텍처, 터미널 그래픽 메뉴(`--gui`), `build.conf` 설정 레퍼런스, 명령행 플래그, 독립형 SDK 빌드 및 플래시 절차.
-- **[`liby1` 개발자 매뉴얼 및 API 가이드](docs/kr/LIBY1_GUIDE.md)** ([English](docs/LIBY1_GUIDE.md)): 디스플레이, 오디오, 입력, 전원, CPU, FM 라디오, USB 가젯을 제어하는 전체 C API 레퍼런스.
-- **[시스템 아키텍처](docs/kr/ARCHITECTURE.md)** ([English](docs/ARCHITECTURE.md)): 구성 요소 다이어그램, 부팅 시퀀스 흐름, 스토리지 계층 구조(`.system` vs `.rockbox`) 및 HAL 매핑.
-- **[기술 분석 결과](docs/kr/TECHNICAL_FINDINGS.md)** ([English](docs/TECHNICAL_FINDINGS.md)): 리버스 엔지니어링된 하드웨어 인터페이스, EAC 오디오 드라이버, PMIC 레지스터, 전력 튜닝, 입력 특이사항 및 부팅 지연 시간 분석.
-- **[오디오 서브시스템](docs/kr/AUDIO_SUBSYSTEM.md)** ([English](docs/AUDIO_SUBSYSTEM.md)): `/dev/eac` 인터페이스, 비트 퍼펙트 44.1/48kHz 재생, 팝 노이즈 제거 및 게인 스테이징.
-- **[전원 관리](docs/kr/POWER_MANAGEMENT.md)** ([English](docs/POWER_MANAGEMENT.md)): 유휴 상태 배터리 소모 해결, CPU 주파수 거버너, 코어 오프라인 및 Always-On Display.
+Nugget for Y1은 Innioasis Y1 디지털 오디오 플레이어를 위한 오픈 소스 커스텀 펌웨어입니다. 안드로이드를 완전히 걷어내고, 네이티브 호스티드 록박스(Hosted Rockbox)로 직접 부팅되는 미니멀 다운스트림 리눅스 커널(3.4.67)로 대체합니다.
 
 ---
 
-## 디렉터리 구조
+## 기술 사양 비교
 
-- `docs/`: 기술 사양서, 아키텍처 설계 문서, 빌드 가이드 및 하드웨어 분석 기록.
-- `liby1/`: 독립형 C 하드웨어 추상화 계층 (`liby1.a`, `liby1.so`, `include/liby1.h`, 예제 애플리케이션).
-- `initramfs/`: C 언어로 작성된 PID 1 `/init`. 부팅 CPU 부스트, 반응형 MicroSD 탐색, 프레임버퍼 상태 화면 표시, 부트로더 메뉴 및 Rockbox/커스텀 앱 실행을 담당.
-- `audio/`: 독립형 `unmute_eac.c` 테스트 유틸리티 및 `init_audio.sh` 설정 스크립트.
-- `splash/`: 소스 PNG 상태 화면 이미지 (`boot.png`, `connect.png`, `errconnect.png`, `error.png`, `sdcard.png`).
-- `bootl_image_assets/`: 부트로더 메뉴 PNG 아이콘 (Nugget, Android, Shut Down, USB).
-- `Themify2/`: SD 카드 배포용 번들 커스텀 Rockbox 테마, 글꼴, 아이콘 및 코덱.
-- `tools/`: 모듈식 빌드 도구, 터미널 GUI 설정기(`build_tui.py`), 스플래시 이미지 변환기(`convert_splash.py`), MTK 부트 이미지 패커(`mkbootimg_mtk.py`), CPIO 램디스크 생성기(`build_initramfs.py`).
-- `build.conf`: 중앙 빌드 구성 파일.
-- `rootfs/`: (빌드 시 생성) 최소 initramfs 램디스크의 기본 골격.
-- `stock_unpacked/`: (빌드 시 생성) 추출된 벤더 커널(`kernel_mtk.bin`), Git 추적 제외.
-- `bt_blobs/`: MediaTek 블루투스 커널 모듈 및 펌웨어 패치, Git 추적 제외.
+| 기능 | 순정 안드로이드 | 안드로이드 위 Rockbox | Nugget for Y1 (호스티드 리눅스) |
+| :--- | :--- | :--- | :--- |
+| 오디오 재생 배터리 지속 시간 | ~30시간 | ~20시간 | **~50시간** |
+| 대기 전류 | 높음 (~120-140 mA) | 높음 (~140-180 mA) | **< 5 mA (200시간 이상)** |
+| 콜드 부팅 시간 | ~40초 | ~45초 | **< 6초** |
+| 샘플 레이트 지원 | AudioFlinger를 통한 리샘플링 | 리샘플링 | **네이티브 비트 퍼펙트 44.1 및 48 kHz** |
+| 오디오 출력 경로 | 표준 안드로이드 HAL | 표준 안드로이드 HAL | **직접 MT6572 /dev/eac 제어** |
+| 헤드폰 앰프 게인 | 전체 | 전체 | **전체 (+12dB 아날로그 헤드룸)** |
+| 볼륨 스케일 | OS 마스터 볼륨 | 다중 출력 환경에서 불안정 | **Rockbox 로그 스케일 (-74 dB ~ +6 dB)** |
+| 디스플레이 모드 | 480x360 전용 | 480x360 전용 | **480x360 네이티브 + 320x240 클래식 모드** |
+| iPod 테마 호환성 | 미지원 | 480x360 리소스 필요 | **iPod Classic 테마 네이티브 지원** |
+| 키 잠금 모드 | 없음 | 없음 | **홀드 라이트 및 고급 키 잠금 지원 iPod Classic HOLD** |
+| USB 연결 | 안드로이드 MTP / 대용량 저장소 | 안드로이드 대용량 저장소 | **대용량 저장소(Mass Storage)** |
+
+---
+
+## 기술 문서
+
+상세 서브시스템 사양, 아키텍처 다이어그램 및 리버스 엔지니어링 결과는 [`hosted_linux_port/docs/`](hosted_linux_port/docs/)에서 확인하실 수 있습니다:
+- [기술 분석 결과](hosted_linux_port/docs/TECHNICAL_FINDINGS.md): 하드웨어 인터페이스, `/dev/eac` 오디오 드라이버, PMIC 레지스터, 전력 튜닝, 부팅 최적화 및 입력 이벤트 세부 특성.
+- [시스템 아키텍처](hosted_linux_port/docs/ARCHITECTURE.md): 아키텍처 블록 다이어그램, 부팅 시퀀스 흐름, 스토리지 레이아웃 및 HAL 매핑.
+- [오디오 서브시스템](hosted_linux_port/docs/AUDIO_SUBSYSTEM.md): MediaTek EAC 드라이버, 팝 노이즈 제거 메커니즘, 비트 퍼펙트 클록 전환 및 게인 스테이징.
+- [전원 관리](hosted_linux_port/docs/POWER_MANAGEMENT.md): 대기 중 배터리 소모 해결(< 5mA 대기), CPU 주파수 거버너, 코어 핫플러그 오프라인 및 Always-On Display (AOD).
+
+---
+
+## 설치 방법
+
+### 권장: Nugget Y1 Tool
+자동화 설치 도구:
+https://github.com/norocoral/nugget-y1-tool
+
+### 수동 설치 방법
+1. `boot_rockbox.img` 및 `rockbox_sdcard.zip`을 준비합니다.
+2. 다음 도구를 사용하여 `boot_rockbox.img`를 `boot` 파티션에 플래시합니다:
+   - SP Flash Tool: MT6572 산란 텍스트(scatter) 로드, `BOOTIMG` 체크, `boot_rockbox.img` 선택 후 Download 클릭, 그리고 볼륨 다운 버튼을 누른 채로 Y1을 연결합니다.
+   - Fastboot / python-mtk:
+     ```bash
+     python mtk.py w boot boot_rockbox.img
+     ```
+3. MicroSD 카드를 FAT32 또는 exFAT 형식으로 포맷합니다.
+4. `.rockbox` 디렉터리가 최상위 루트에 위치하도록 `rockbox_sdcard.zip` 압축을 카드 루트에 직접 풉니다.
+5. MicroSD 카드를 Y1에 삽입하고 전원을 켭니다.
 
 ---
 
@@ -40,65 +63,30 @@
 ### 사전 필수 패키지 (Ubuntu / Debian / WSL)
 ```bash
 sudo apt update
-sudo apt install -y build-essential gcc-arm-linux-gnueabihf g++-arm-linux-gnueabihf python3 python3-pip zip curl ccache
+sudo apt install -y build-essential gcc-arm-linux-gnueabihf python3 python3-pip zip curl
 ```
 
-### 대화형 터미널 그래픽 메뉴 (TUI)
-내장된 터미널 메뉴를 통해 빌드 구성 요소를 시각적으로 손쉽게 설정할 수 있습니다:
+### 빌드 명령
 ```bash
 cd hosted_linux_port
-./build.sh --gui
-```
-메뉴에서 방향키와 스페이스바로 빌드 컴포넌트(`liby1`, rootfs, 부트 이미지, Rockbox, SD 패키징, 커스텀 앱)를 켜거나 끄고, `B`를 눌러 저장과 동시에 빌드를 시작할 수 있습니다.
-
-### 명령행 빌드
-```bash
-# 전체 표준 빌드 (Rockbox + 부트 이미지 + SD 카드 패키지)
 ./build.sh
-
-# 독립형 리눅스 SDK 빌드 (Rockbox 제외)
-./build.sh --no-rockbox
-
-# liby1만 빌드 (liby1.a, liby1.so, hello_y1 예제)
-./build.sh --only-liby1
-
-# rootfs 및 boot_nugget.img만 빌드
-./build.sh --only-bootimg
-
-# 개발한 커스텀 C 바이너리를 /.system/app 에 패키징
-./build.sh --no-rockbox --custom-app /path/to/my_arm_app
 ```
 
----
+빌드 스크립트 실행 동작:
+1. `!stock_rom/boot.img`에서 순정 커널을 추출합니다(없는 경우).
+2. ARM 하드 플로트 GCC를 사용하여 C 언어로 작성된 커스텀 PID 1 `/init` 및 `unmute_eac` 유틸리티를 컴파일합니다.
+3. 스플래시 화면 PNG 이미지를 32비트 원시 프레임버퍼 파일로 변환합니다.
+4. Innioasis Y1용 호스티드 록박스를 컴파일합니다(`build_y1/`).
+5. `.rockbox` SD 카드 리소스를 `rockbox_sdcard.zip`으로 패키징합니다.
+6. 최소 구성의 initramfs 램디스크를 빌드하고 MediaTek 헤더가 포함된 플래시용 `boot_rockbox.img`를 생성합니다.
 
-## SD 카드 디렉터리 레이아웃
-
-모든 시스템, 하드웨어 및 개발자 파일은 `/mnt/sdcard/.system/`(`/.system`에 심볼릭 링크 연결)에 저장되어 Rockbox 디렉터리를 깨끗하게 유지합니다:
-
-```text
-/mnt/sdcard/
-|-- .system/                      # 시스템 및 하드웨어 SDK 파일
-|   |-- lib/                      # liby1.so, liby1video.so
-|   |-- include/                  # liby1.h
-|   |-- bin/                      # ffmpeg
-|   |-- bt/                       # 블루투스 커널 모듈 및 펌웨어
-|   |-- bt_paired.dat             # 페어링 기기 데이터베이스
-|   |-- ramdisk_android.cpio.gz   # 듀얼 부팅용 안드로이드 램디스크
-|   |-- y1_debug.txt              # 하드웨어 진단 로그
-|   `-- app                       # 부팅 시 실행 가능한 독립형 애플리케이션
-|-- .rockbox/                     # Rockbox 바이너리, 코덱, 테마, 글꼴
-`-- Videos/
-```
+*참고: 오픈 소스 라이선스 규정을 준수하기 위해 MediaTek 독점 바이너리(`bt_blobs/`, `stock_unpacked/`, `logo.bin`)는 Git 추적에서 제외되어 있습니다.*
 
 ---
 
-## 진단 로깅
+## 버튼 조작 가이드
 
-Y1의 진단 로깅 기능은 기본적으로 비활성화되어 있습니다. **설정 -> Nugget -> 디바이스 -> 진단 로깅**을 켜면 초기화, 디스플레이, 오디오, 블루투스, 버튼 및 절전 진단 정보가 `/mnt/sdcard/.system/y1_debug.txt`에 기록됩니다. 이 설정은 `.system/system.cfg`(또는 `.rockbox/config.cfg`)에 저장되며, 부팅 시 `/init`이 이를 읽어 시작 로그 출력 여부를 결정합니다.
-
----
-
-## 하드웨어 컨트롤 가이드
+iPod Classic과 동일한 내비게이션 체계에 전용 하드웨어 기능이 추가되었습니다:
 
 | 조작부 | 입력 방식 | 기능 설명 |
 | :--- | :--- | :--- |
@@ -109,33 +97,72 @@ Y1의 진단 로깅 기능은 기본적으로 비활성화되어 있습니다. *
 | 메뉴 버튼 | 짧게 누름 | 상위 메뉴로 이동 / 뒤로 가기 (120ms 즉각 반응) |
 | 메뉴 버튼 | 더블 클릭 | 키 잠금(HOLD 모드) 활성화 / 해제 토글 |
 | 메뉴 버튼 | 길게 누름 (280ms) | Rockbox 퀵 스크린 설정 열기 |
-| 메뉴 버튼 | 부팅 중 누르고 있기 | **부트로더 메뉴 강제 열기** (타임아웃 무시) |
 | 재생 버튼 | 짧게 누름 | 재생 / 일시정지 전환 |
 | 재생 버튼 | 길게 누름 | 재생 정지 |
 | 좌측 버튼 | 짧게 누름 | 재생 시간 $\ge 3$초 시 곡 처음으로 되감기, $< 3$초 시 이전 트랙으로 이동 |
-| 좌측 버튼 | 길게 누름 | 뒤로 탐색 |
+| 좌측 버튼 | 길게 누름 | 뒤로 탐색(리드 스캔) |
 | 우측 버튼 | 짧게 누름 | 다음 트랙으로 이동 |
-| 우측 버튼 | 길게 누름 | 앞으로 탐색 |
-| 헤드폰 리모컨 (MFB) | 인라인 클릭 | 단일/더블/트리플 클릭 및 길게 누르기 동작 (설정에서 구성 가능) |
+| 우측 버튼 | 길게 누름 | 앞으로 탐색(고속 탐색) |
+| 헤드폰 리모컨 (MFB) | 인라인 클릭 | 단일/더블/트리플 클릭 및 길게 누르기 동작 (설정에서 변경 가능) |
 
 ---
 
-## iPod Classic HOLD 및 백라이트 제어 서브시스템
+### iPod Classic HOLD 및 백라이트 제어 서브시스템
 
-Nugget for Y1은 하드웨어 홀드 스위치가 없는 Y1 환경에서 iPod Classic의 직관적인 잠금 및 백라이트 경험을 구현합니다:
+Nugget for Y1은 Y1의 하드웨어 특성에 맞춰 정밀하게 구현된 iPod Classic 스타일의 HOLD 및 백라이트 시스템을 제공합니다:
 
 - **HOLD 토글 (잠금 / 잠금 해제):**
-  - 언제든지 **MENU** 버튼을 빠르게 두 번 누르면(더블 클릭) HOLD 모드가 전환됩니다.
-  - 잠금 상태에서는 350ms의 넉넉한 더블 클릭 판정 창을 두어 오작동 없이 편리하게 잠금을 해제할 수 있으며, 잠금 해제 상태에서는 단일 클릭이 120ms만에 즉각 실행되어 쾌적한 메뉴 탐색을 제공합니다.
+  - 언제든지 **MENU** 버튼을 빠르게 두 번 누르면(더블 클릭) HOLD 모드가 켜지거나 꺼집니다.
+  - 잠금 상태에서는 350ms의 넉넉한 더블 클릭 판정 창을 두어 주머니 속 해제가 직관적이며, 잠금 해제 상태에서는 단일 클릭이 120ms만에 즉각 실행되어 메뉴 뒤로 가기 조작 시 답답함이나 딜레이가 없습니다.
 - **잠금 상태 (HOLD 활성화):**
-  - **입력 보호:** 주머니 속 오작동을 차단하기 위해 모든 휠 스크롤과 버튼 입력이 잠깁니다 (*고급 키 잠금*을 통해 볼륨 조절, 재생/일시정지, 곡 넘김을 선택적으로 허용 가능).
+  - **오작동 방지:** 주머니 속 오작동을 방지하기 위해 모든 버튼과 휠 조작이 잠깁니다 (*고급 키 잠금(Advanced Key Lock)* 설정을 통해 볼륨 조절이나 재생/일시정지, 곡 넘김을 예외적으로 허용할 수 있습니다).
   - **홀드 라이트 (Hold Light) 설정:**
-    - `꺼짐 (Off)` *(기본값)*: 완전한 주머니 절전 모드로 버튼을 눌러도 화면이 켜지지 않습니다.
-    - `켜짐 (On 또는 지정 밝기)`: 버튼 입력 시 명령은 실행되지 않으며 백라이트만 켜져 재생 상태 및 시각을 확인할 수 있습니다.
-  - **잠금 모드 백라이트 꺼짐 시간 (Backlight on Lock Timeout):** 꺼짐부터 최대 **5시간**까지 세밀하게 설정할 수 있으며, 잠금 진입 즉시 잠금 타임아웃과 밝기가 동적으로 적용됩니다.
+    - `꺼짐 (Off)` *(기본값)*: 완전한 주머니 절전 모드입니다. 버튼이나 휠을 조작해도 화면이 켜지지 않고 꺼진 상태를 유지합니다.
+    - `켜짐 (On 또는 지정 밝기)`: 조작 시 명령은 실행되지 않으며, 현재 시각이나 재생 중인 곡 정보를 확인할 수 있도록 백라이트만 켜집니다.
+  - **잠금 모드 백라이트 꺼짐 시간 (Backlight on Lock Timeout):** 최대 **5시간**까지 세부 설정이 가능합니다(꺼짐, 항상 켬, 1초~45초, 1분~45분, 1시간~5시간). 잠금 모드로 전환되는 즉시 설정된 잠금 타임아웃과 밝기가 동적으로 적용됩니다.
   - **잠금 모드 백라이트 규칙 (Backlight on Lock Rules):** 잠금 상태에서 화면을 유지할 조건을 지정합니다 (`Always`, `재생 중에만`, `WPS 화면에서만`).
 - **잠금 해제 상태 (일반 동작):**
   - **첫 번째 키 입력 시 백라이트만 켜기 (First Keypress Enables Backlight Only):**
     - `아니오 (No)` *(기본값)*: 화면이 꺼져 있을 때 버튼(예: 다음 곡, 재생/일시정지)을 누르면 즉시 명령을 수행하면서 동시에 디스플레이 백라이트를 켭니다.
     - `예 (Yes)`: 화면이 꺼져 있을 때 첫 번째 버튼 입력은 오직 화면 백라이트만 켜고 명령을 차단합니다. 이후 화면이 켜진 상태에서 버튼을 눌러야 명령이 실행됩니다.
-  - **일반 백라이트 꺼짐 타이머:** 일반 조작 중에는 표준 백라이트 꺼짐 시간 설정에 따라 유휴 시 디스플레이가 절전됩니다.
+  - **일반 백라이트 꺼짐 타이머:** 일반 조작 중에는 설정된 표준 백라이트 꺼짐 시간(Backlight Timeout)에 따라 유휴 시 디스플레이가 절전됩니다.
+
+---
+
+### 듀얼 부팅 서브시스템 및 부트로더 메뉴 (Dual-Boot & Bootloader Menu)
+
+Nugget은 내부 eMMC의 안드로이드 파티션(`SYSTEM`, `DATA`, `CACHE`)을 손상시키지 않고 보존하므로, 안드로이드와 Nugget 간의 완벽한 듀얼 부팅을 지원합니다:
+
+- **부트로더 메뉴 (Bootloader Menu):**
+  - 기기 전원을 켤 때 그 어떤 프로세스보다 먼저 로드되는 그래픽 부트로더 메뉴입니다.
+  - 투명 알파 채널이 적용된 전용 고해상도 그래픽 스프라이트와 슬라이딩 캐러셀 뷰가 적용되어 있습니다:
+    - **Pick 1: Rockbox** — 외장 MicroSD 카드의 Rockbox 환경으로 즉시 부팅합니다.
+    - **Pick 2: MeUI** — MeUI 프런트엔드를 실행합니다 (`.meui/meui` 존재 시).
+    - **Pick 3: User Software** — 사용자 정의 소프트웨어를 실행합니다 (`.custom/launch` 존재 시).
+    - **Pick 4: Android** — 다이렉트 유저스페이스 핸드오버 방식으로 안드로이드를 직접 실행합니다 (BCB 복구 플래그를 초기화하여 먹통 리커버리 진입을 방지하고, 순정 램디스크를 마운트하여 `SYSTEM`/`DATA`/`CACHE` 파티션과 함께 안드로이드 `init`을 PID 1로 직접 시작합니다).
+    - **Pick 5: Shut down** — 시스템을 안전하게 종료(전원 끄기)합니다.
+    - **Pick 6: USB Mass Storage** — 부트로더 메뉴에서 바로 USB 대용량 저장소(Mass Storage) 모드를 활성화합니다 (`usb.png` 화면 표시). PC와 연결하여 파일 전송이 가능하며, 아무 버튼이나 누르면 USB 모드를 종료하고 부트로더 메뉴로 안전하게 복귀합니다.
+    - **Pick 7: Linux terminal (USB)** — `/dev/ttyGS0` 및 `/dev/ttyGS1`을 통해 다중 탭 대화형 USB 시리얼 루트 셸을 실행합니다.
+  - **조작법:** 클릭 휠을 돌리거나 **좌/우 버튼**을 눌러 옵션을 탐색하고, **센터 버튼** 또는 **재생 버튼**을 눌러 선택을 확정합니다.
+  - **하드웨어 강제 진입:** **부팅 중 MENU 버튼을 길게 누르고 있으면 설정 활성화 여부와 관계없이 항상 부트로더 메뉴가 표시**됩니다.
+  - **설정 옵션:** `설정 -> Nugget -> 부트로더 메뉴` (`예` / `아니오`)에서 켜거나 끌 수 있습니다. 비활성화 시 MENU 버튼을 누르고 있지 않으면 바로 Nugget으로 고속 부팅합니다.
+- **Rockbox 내 안드로이드 실행 (Reboot to Android):**
+  - Rockbox 사용 중 언제든지 `설정 -> Nugget -> 안드로이드로 재부팅`을 선택하면 캐시를 안전하게 저장하고 즉시 안드로이드로 전환합니다.
+
+---
+
+## 크레딧
+https://github.com/nuxcodes/rockpod
+
+---
+
+## 라이선스
+
+GNU 일반 공중 사용 허가서 v2(GPL-2.0)에 따라 오픈 소스 [Rockbox](https://www.rockbox.org) 프로젝트를 기반으로 제작되었습니다.
+Innioasis 사와는 제휴 관계가 아닙니다.
+
+## 투명성 안내
+코드 개발 과정은 투명하게 공개되어야 한다고 믿습니다.
+본 프로젝트의 리버스 엔지니어링, 드라이버 및 부팅 코드는 AI(Google Antigravity)를 통해 생성되었습니다.
+
+본 프로젝트의 리버스 엔지니어링, 드라이버 및 부팅 코드는 AI(Google Antigravity)를 통해 생성되었습니다.

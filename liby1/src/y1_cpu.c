@@ -136,6 +136,10 @@ int y1_cpu_get_freq_mhz(void)
 void y1_cpu_set_screen_off_clamp(bool screen_off)
 {
     if (screen_off) {
+        if (y1_usb_is_storage_attached()) {
+            y1_log("[liby1-cpu] screen-off clamp skipped: USB mass storage is active\n");
+            return;
+        }
         if (saved_cpu_mode == -1) {
             saved_cpu_mode = current_cpu_mode >= 0 ? current_cpu_mode : Y1_CPU_MODE_DYNAMIC;
         }

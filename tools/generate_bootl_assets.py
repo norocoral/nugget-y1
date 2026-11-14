@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
 """
 generate_bootl_assets.py - Generate pre-composited bootloader menu raw screens
-Composites bg.png, pick1.png, pick2.png, pick3.png, pick4.png, and arrow.png into:
-  - bootl_pick1.raw (Nugget selected)
-  - bootl_pick2.raw (Android selected)
-  - bootl_pick3.raw (Shut down selected)
-  - bootl_pick4.raw (USB selected)
-Also converts usb.png to:
+Composites bg.png, pick1.png..pick7.png, and arrow.png into:
+  - bootl_pick1.raw (Rockbox selected)
+  - bootl_pick2.raw (MeUI selected)
+  - bootl_pick3.raw (User software selected)
+  - bootl_pick4.raw (Android selected)
+  - bootl_pick5.raw (Shut down selected)
+  - bootl_pick6.raw (USB selected)
+  - bootl_pick7.raw (Linux terminal selected)
+Also converts usb.png and terminal.png to:
   - bootl_usb.raw
+  - bootl_terminal.raw
 Supports transparent PNGs with alpha channel blending.
 Pure Python implementation using standard library zlib & struct (no PIL dependency).
 Output matches 480x360 ARGB8888 (little-endian BGRA) for MT6572 /dev/graphics/fb0.
@@ -187,13 +191,12 @@ def main():
     p5_path = os.path.join(assets_dir, 'pick5.png')
     p6_path = os.path.join(assets_dir, 'pick6.png')
     p7_path = os.path.join(assets_dir, 'pick7.png')
-    p8_path = os.path.join(assets_dir, 'pick8.png')
     arr_path = os.path.join(assets_dir, 'arrow.png')
     usb_path = os.path.join(assets_dir, 'usb.png')
     term_path = os.path.join(assets_dir, 'terminal.png')
 
     required_assets = [bg_path, p1_path, p2_path, p3_path, p4_path,
-                       p5_path, p6_path, p7_path, p8_path,
+                       p5_path, p6_path, p7_path,
                        arr_path, usb_path]
     if os.path.exists(term_path):
         required_assets.append(term_path)
@@ -211,7 +214,6 @@ def main():
     p5_w, p5_h, p5_px = decode_png(p5_path)
     p6_w, p6_h, p6_px = decode_png(p6_path)
     p7_w, p7_h, p7_px = decode_png(p7_path)
-    p8_w, p8_h, p8_px = decode_png(p8_path)
     arr_w, arr_h, arr_px = decode_png(arr_path)
     usb_w, usb_h, usb_px = decode_png(usb_path)
 
@@ -231,8 +233,7 @@ def main():
         ("bootl_pick4.raw", [(p3_px, p3_w, p3_h), (p4_px, p4_w, p4_h), (p5_px, p5_w, p5_h)], 208, 229),
         ("bootl_pick5.raw", [(p4_px, p4_w, p4_h), (p5_px, p5_w, p5_h), (p6_px, p6_w, p6_h)], 208, 229),
         ("bootl_pick6.raw", [(p5_px, p5_w, p5_h), (p6_px, p6_w, p6_h), (p7_px, p7_w, p7_h)], 208, 229),
-        ("bootl_pick7.raw", [(p6_px, p6_w, p6_h), (p7_px, p7_w, p7_h), (p8_px, p8_w, p8_h)], 208, 229),
-        ("bootl_pick8.raw", [(p6_px, p6_w, p6_h), (p7_px, p7_w, p7_h), (p8_px, p8_w, p8_h)], 366, 229),
+        ("bootl_pick7.raw", [(p5_px, p5_w, p5_h), (p6_px, p6_w, p6_h), (p7_px, p7_w, p7_h)], 366, 229),
     ]
 
     slot_x = [6, 164, 322]

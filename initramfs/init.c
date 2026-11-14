@@ -610,8 +610,35 @@ static const char *get_sdcard_app_binary(void)
 
     if (access("/mnt/sdcard/.system/app", X_OK) == 0)
         return "/mnt/sdcard/.system/app";
-    if (access("/mnt/sdcard/.rockbox/rockbox", X_OK) == 0)
+
+    /* Check configured default player if present */
+    FILE *dp_fp = fopen("/mnt/sdcard/.system/default_player", "r");
+    if (dp_fp) {
+        char player[64] = {0};
+        if (fgets(player, sizeof(player), dp_fp)) {
+            char *p = player;
+            while (*p && (*p == ' ' || *p == '\t')) p++;
+            char *e = p + strlen(p) - 1;
+            while (e >= p && (*e == '\r' || *e == '\n' || *e == ' ' || *e == '\t')) {
+                *e = '\0';
+                e--;
+            }
+            if (strcmp(p, "rockbox") == 0) {
+                if (access("/mnt/sdcard/.rockbox/rockbox", F_OK) == 0) {
+                    chmod("/mnt/sdcard/.rockbox/rockbox", 0755);
+                    fclose(dp_fp);
+                    return "/mnt/sdcard/.rockbox/rockbox";
+                }
+            }
+        }
+        fclose(dp_fp);
+    }
+
+    if (access("/mnt/sdcard/.rockbox/rockbox", X_OK) == 0 ||
+        access("/mnt/sdcard/.rockbox/rockbox", F_OK) == 0) {
+        chmod("/mnt/sdcard/.rockbox/rockbox", 0755);
         return "/mnt/sdcard/.rockbox/rockbox";
+    }
     return NULL;
 }
 
@@ -1301,99 +1328,130 @@ static int bootloader_menu_enabled_from_config(void)
     return 0;
 }
 
-static void run_usb_serial_shell(void)
+static void run_usb_serial_shell(const char *tty_name, int tab_num)
 {
-    /* Wait up to 5s for kernel /sys/class/tty/ttyGS0/dev to appear and create /dev/ttyGS0 node */
+    char sys_path[64];
+    snprintf(sys_path, sizeof(sys_path), "/sys/class/tty/%s/dev", tty_name);
+
     char dev_str[32] = {0};
     for (int r = 0; r < 50; r++) {
-        if (read_text_file("/sys/class/tty/ttyGS0/dev", dev_str, sizeof(dev_str)) && dev_str[0])
+        if (read_text_file(sys_path, dev_str, sizeof(dev_str)) && dev_str[0])
             break;
         usleep(100000);
     }
 
+    char dev_path[64];
+    snprintf(dev_path, sizeof(dev_path), "/dev/%s", tty_name);
+
     int maj = 0, min = 0;
     if (sscanf(dev_str, "%d:%d", &maj, &min) == 2) {
-        unlink("/dev/ttyGS0");
-        mknod("/dev/ttyGS0", S_IFCHR | 0666, makedev(maj, min));
+        unlink(dev_path);
+        mknod(dev_path, S_IFCHR | 0666, makedev(maj, min));
     } else {
         (void)!system("/bin/busybox mdev -s");
     }
 
-    int fd = open("/dev/ttyGS0", O_RDWR);
-    if (fd < 0) {
-        return;
-    }
+    while (access("/tmp/exit_terminal", F_OK) != 0) {
+        int fd = open(dev_path, O_RDWR);
+        if (fd < 0) {
+            usleep(250000);
+            continue;
+        }
 
-    /* Configure line discipline for serial console terminal */
-    struct termios tio;
-    if (tcgetattr(fd, &tio) == 0) {
-        tio.c_iflag |= (ICRNL | IXON);
-        tio.c_oflag |= (OPOST | ONLCR);
-        tio.c_lflag |= (ISIG | ICANON | ECHO | ECHOE | ECHOK);
-        tcsetattr(fd, TCSANOW, &tio);
-    }
+        /* Configure line discipline for serial console terminal */
+        struct termios tio;
+        if (tcgetattr(fd, &tio) == 0) {
+            tio.c_iflag |= (ICRNL | IXON);
+            tio.c_oflag |= (OPOST | ONLCR);
+            tio.c_lflag |= (ISIG | ICANON | ECHO | ECHOE | ECHOK);
+            tcsetattr(fd, TCSANOW, &tio);
+        }
 
-    /* Immediate greeting banner upon COM port open */
-    const char *banner =
-        "Nugget for Y1 terminal\r\n"
-        "\r\n"
-        "            ################################\r\n"
-        "           ## ######################### ## ##\r\n"
-        "           ## #                       # ## ##\r\n"
-        "           ## #                       # ## ##\r\n"
-        "           ## #      ##       ##      # ## ##\r\n"
-        "           ## #                       # ## ##\r\n"
-        "           ## #      ##       ##      # ## ##\r\n"
-        "           ## #       #########       # ## ##\r\n"
-        "           ## #                       # ## ##\r\n"
-        "           ## ######################### ## ##\r\n"
-        "           ##                           ## ##\r\n"
-        "           ##         #########         ## ##\r\n"
-        "           ##       ##         ##       ## ##\r\n"
-        "           ##      ##   #####   ##      ## ##\r\n"
-        "           ##     ##   #     #   ##     ## ##\r\n"
-        "           ##     ##   #     #   ##     ## ##\r\n"
-        "           ##      ##   #####   ##      ## ##\r\n"
-        "           ##       ##         ##       ## ##\r\n"
-        "           ##         #########         ## ##\r\n"
-        "           ##                           ## ##\r\n"
-        "            ################################\r\n"
-        "                    #           #\r\n"
-        "                    #           #\r\n"
-        "                #####       #####\r\n"
-        "\r\n"
-        "         https://github.com/norocoral/nugget-y1\r\n"
-        "       Welcome! Root shell active on /dev/ttyGS0.\r\n\r\n";
+        /* Immediate greeting banner upon COM port open */
+        char banner[1024];
+        snprintf(banner, sizeof(banner),
+            "Nugget for Y1 terminal [Tab %d: /dev/%s]\r\n"
+            "\r\n"
+            "            ################################\r\n"
+            "           ## ######################### ## ##\r\n"
+            "           ## #                       # ## ##\r\n"
+            "           ## #                       # ## ##\r\n"
+            "           ## #      ##       ##      # ## ##\r\n"
+            "           ## #                       # ## ##\r\n"
+            "           ## #      ##       ##      # ## ##\r\n"
+            "           ## #       #########       # ## ##\r\n"
+            "           ## #                       # ## ##\r\n"
+            "           ## ######################### ## ##\r\n"
+            "           ##                           ## ##\r\n"
+            "           ##         #########         ## ##\r\n"
+            "           ##       ##         ##       ## ##\r\n"
+            "           ##      ##   #####   ##      ## ##\r\n"
+            "           ##     ##   #     #   ##     ## ##\r\n"
+            "           ##     ##   #     #   ##     ## ##\r\n"
+            "           ##      ##   #####   ##      ## ##\r\n"
+            "           ##       ##         ##       ## ##\r\n"
+            "           ##         #########         ## ##\r\n"
+            "           ##                           ## ##\r\n"
+            "            ################################\r\n"
+            "                    #           #\r\n"
+            "                    #           #\r\n"
+            "                #####       #####\r\n"
+            "\r\n"
+            "         https://github.com/norocoral/nugget-y1\r\n"
+            "       Welcome! Root shell active on /dev/%s [Tab %d].\r\n"
+            "       * Tip: Open Tab 1 (/dev/ttyGS0) & Tab 2 (/dev/ttyGS1) concurrently.\r\n"
+            "       * Type 'menu' to return to the Bootloader Menu.\r\n\r\n",
+            tab_num, tty_name, tty_name, tab_num);
 
-    (void)!write(fd, banner, strlen(banner));
-    
-    pid_t sh_pid = fork();
-    if (sh_pid == 0) {
-        dup2(fd, 0);
-        dup2(fd, 1);
-        dup2(fd, 2);
-        if (fd > 2) close(fd);
-        setsid();
-        ioctl(0, TIOCSCTTY, 1);
+        (void)!write(fd, banner, strlen(banner));
 
-        setenv("PATH", "/bin:/sbin:/usr/bin:/usr/sbin:/mnt/sdcard/.system/bin:/mnt/sdcard/.rockbox/bin:/mnt/sdcard/.meui/bin:/mnt/sdcard/.reborn/bin:/mnt/sdcard/.custom/bin", 1);
-        setenv("LD_LIBRARY_PATH", "/mnt/sdcard/.meui/lib:/mnt/sdcard/.reborn/lib:/mnt/sdcard/.custom/lib:/mnt/sdcard/.system/lib:/mnt/sdcard/.rockbox/lib:/lib:/usr/lib", 1);
-        setenv("HOME", "/mnt/sdcard", 1);
-        setenv("TERM", "vt100", 1);
-        setenv("USER", "root", 1);
-        setenv("PS1", "nugget-y1:# ", 1);
+        pid_t sh_pid = fork();
+        if (sh_pid == 0) {
+            dup2(fd, 0);
+            dup2(fd, 1);
+            dup2(fd, 2);
+            if (fd > 2) close(fd);
+            setsid();
+            ioctl(0, TIOCSCTTY, 1);
 
-        (void)!chdir("/mnt/sdcard");
+            setenv("PATH", "/bin:/sbin:/usr/bin:/usr/sbin:/mnt/sdcard/.system/bin:/mnt/sdcard/.rockbox/bin:/mnt/sdcard/.meui/bin:/mnt/sdcard/.rockwheel/bin:/mnt/sdcard/.custom/bin", 1);
+            setenv("LD_LIBRARY_PATH", "/mnt/sdcard/.meui/lib:/mnt/sdcard/.rockwheel/lib:/mnt/sdcard/.custom/lib:/mnt/sdcard/.system/lib:/mnt/sdcard/.rockbox/lib:/lib:/usr/lib", 1);
+            setenv("HOME", "/mnt/sdcard", 1);
+            setenv("TERM", "vt100", 1);
+            setenv("USER", "root", 1);
 
-        execl("/bin/sh", "sh", "-i", NULL);
-        execl("/bin/busybox", "busybox", "sh", "-i", NULL);
-        _exit(1);
-    }
+            char ps1[32];
+            if (tab_num > 1)
+                snprintf(ps1, sizeof(ps1), "nugget-y1[tab%d]:# ", tab_num);
+            else
+                snprintf(ps1, sizeof(ps1), "nugget-y1:# ");
+            setenv("PS1", ps1, 1);
 
-    close(fd);
-    if (sh_pid > 0) {
-        int status = 0;
-        waitpid(sh_pid, &status, 0);
+            (void)!chdir("/mnt/sdcard");
+
+            execl("/bin/sh", "sh", "-i", NULL);
+            execl("/bin/busybox", "busybox", "sh", "-i", NULL);
+            _exit(1);
+        }
+
+        close(fd);
+        if (sh_pid > 0) {
+            int status = 0;
+            waitpid(sh_pid, &status, 0);
+        }
+
+        if (access("/tmp/exit_terminal", F_OK) == 0)
+            break;
+
+        /* If tab 1 exited normally via 'exit', request return to bootloader */
+        if (tab_num == 1) {
+            int ef = open("/tmp/exit_terminal", O_WRONLY | O_CREAT | O_TRUNC, 0666);
+            if (ef >= 0) close(ef);
+            break;
+        }
+
+        /* For secondary tab, wait briefly before accepting next connection */
+        usleep(300000);
     }
 }
 
@@ -1409,9 +1467,9 @@ static void run_bootloader_menu(void)
     }
 
     struct bootl_entry {
-        int id; /* 0=Rockbox, 1=MeUI, 2=Reborn, 3=Custom, 4=Android, 5=Shutdown, 6=USB, 7=Terminal */
+        int id; /* 0=Rockbox, 1=MeUI, 2=Custom, 3=Android, 4=Shutdown, 5=USB, 6=Terminal */
         const char *screen;
-    } entries[8];
+    } entries[7];
     int num_entries = 0;
 
     /* Pick 1: Rockbox (always present) */
@@ -1426,38 +1484,31 @@ static void run_bootloader_menu(void)
         num_entries++;
     }
 
-    /* Pick 3: Reborn (only if /.reborn/reborn or /mnt/sdcard/.reborn/reborn exists) */
-    if (access("/mnt/sdcard/.reborn/reborn", F_OK) == 0 || access("/.reborn/reborn", F_OK) == 0) {
+    /* Pick 3: User defined software (only if /.custom/launch or /mnt/sdcard/.custom/launch exists) */
+    if (access("/mnt/sdcard/.custom/launch", F_OK) == 0 || access("/.custom/launch", F_OK) == 0) {
         entries[num_entries].id = 2;
         entries[num_entries].screen = "bootl_pick3";
         num_entries++;
     }
 
-    /* Pick 4: User defined software (only if /.custom/launch or /mnt/sdcard/.custom/launch exists) */
-    if (access("/mnt/sdcard/.custom/launch", F_OK) == 0 || access("/.custom/launch", F_OK) == 0) {
-        entries[num_entries].id = 3;
-        entries[num_entries].screen = "bootl_pick4";
-        num_entries++;
-    }
+    /* Pick 4: Android (always present) */
+    entries[num_entries].id = 3;
+    entries[num_entries].screen = "bootl_pick4";
+    num_entries++;
 
-    /* Pick 5: Android (always present) */
+    /* Pick 5: Shut down (always present) */
     entries[num_entries].id = 4;
     entries[num_entries].screen = "bootl_pick5";
     num_entries++;
 
-    /* Pick 6: Shut down (always present) */
+    /* Pick 6: USB Mass Storage (always present) */
     entries[num_entries].id = 5;
     entries[num_entries].screen = "bootl_pick6";
     num_entries++;
 
-    /* Pick 7: USB Mass Storage (always present) */
+    /* Pick 7: Linux terminal (USB) (always present) */
     entries[num_entries].id = 6;
     entries[num_entries].screen = "bootl_pick7";
-    num_entries++;
-
-    /* Pick 8: Linux terminal (USB) (always present) */
-    entries[num_entries].id = 7;
-    entries[num_entries].screen = "bootl_pick8";
     num_entries++;
 
     int selection = 0;
@@ -1517,10 +1568,15 @@ static void run_bootloader_menu(void)
                         if (action_id == 0) {
                             /* Pick 1: Rockbox */
                             log_line("Bootloader Menu: Rockbox selected.\n");
-                            custom_app_override[0] = '\0';
+                            if (access("/mnt/sdcard/.rockbox/rockbox", F_OK) == 0) {
+                                strncpy(custom_app_override, "/mnt/sdcard/.rockbox/rockbox", sizeof(custom_app_override) - 1);
+                            } else {
+                                strncpy(custom_app_override, "/.rockbox/rockbox", sizeof(custom_app_override) - 1);
+                            }
                             for (int k = 0; k < 16; k++) {
                                 if (event_fds[k] >= 0) close(event_fds[k]);
                             }
+                            display_screen("boot");
                             return;
                         } else if (action_id == 1) {
                             /* Pick 2: MeUI */
@@ -1536,20 +1592,7 @@ static void run_bootloader_menu(void)
                             display_screen("boot");
                             return;
                         } else if (action_id == 2) {
-                            /* Pick 3: Reborn */
-                            log_line("Bootloader Menu: Reborn selected.\n");
-                            if (access("/mnt/sdcard/.reborn/reborn", F_OK) == 0) {
-                                strncpy(custom_app_override, "/mnt/sdcard/.reborn/reborn", sizeof(custom_app_override) - 1);
-                            } else {
-                                strncpy(custom_app_override, "/.reborn/reborn", sizeof(custom_app_override) - 1);
-                            }
-                            for (int k = 0; k < 16; k++) {
-                                if (event_fds[k] >= 0) close(event_fds[k]);
-                            }
-                            display_screen("boot");
-                            return;
-                        } else if (action_id == 3) {
-                            /* Pick 4: User defined software */
+                            /* Pick 3: User defined software */
                             log_line("Bootloader Menu: User defined software selected.\n");
                             if (access("/mnt/sdcard/.custom/launch", F_OK) == 0) {
                                 strncpy(custom_app_override, "/mnt/sdcard/.custom/launch", sizeof(custom_app_override) - 1);
@@ -1561,15 +1604,15 @@ static void run_bootloader_menu(void)
                             }
                             display_screen("boot");
                             return;
-                        } else if (action_id == 4) {
-                            /* Pick 5: Android */
+                        } else if (action_id == 3) {
+                            /* Pick 4: Android */
                             log_line("Bootloader Menu: Android selected.\n");
                             for (int k = 0; k < 16; k++) {
                                 if (event_fds[k] >= 0) close(event_fds[k]);
                             }
                             boot_into_android();
-                        } else if (action_id == 5) {
-                            /* Pick 6: Shut down */
+                        } else if (action_id == 4) {
+                            /* Pick 5: Shut down */
                             log_line("Bootloader Menu: Shut down selected.\n");
                             for (int k = 0; k < 16; k++) {
                                 if (event_fds[k] >= 0) close(event_fds[k]);
@@ -1577,8 +1620,8 @@ static void run_bootloader_menu(void)
                             sync();
                             reboot(RB_POWER_OFF);
                             while (1) sleep(1);
-                        } else if (action_id == 6) {
-                            /* Pick 7: USB Mass Storage */
+                        } else if (action_id == 5) {
+                            /* Pick 6: USB Mass Storage */
                             log_line("Bootloader Menu: USB mode selected.\n");
                             setup_usb_gadget(active_sd_dev[0] ? active_sd_dev : NULL,
                                              active_ext_dev[0] ? active_ext_dev : NULL);
@@ -1642,32 +1685,56 @@ static void run_bootloader_menu(void)
                             }
 
                             display_screen(entries[selection].screen);
-                        } else if (action_id == 7) {
-                            /* Pick 8: Linux terminal (USB) -> Launch terminal shell on /dev/ttyGS0.
-                             * Disconnect ONLY when the user turns off the device or types 'exit'.
+                        } else if (action_id == 6) {
+                            /* Pick 7: Linux terminal (USB) -> Launch multi-tab terminal shells on /dev/ttyGS0 and /dev/ttyGS1.
+                             * Disconnect ONLY when the user turns off the device or types 'exit'/'menu'.
                              * Button presses on the device will NOT disconnect the terminal. */
-                            log_line("Bootloader Menu: Linux terminal (USB) mode selected.\n");
+                            log_line("Bootloader Menu: Linux terminal (USB) mode selected (Dual ACM tabs).\n");
+
+                            unlink("/tmp/exit_terminal");
 
                             write_sysfs("/sys/class/android_usb/android0/enable", "0\n");
                             write_sysfs("/sys/class/android_usb/android0/idVendor", "0e8d\n");
                             write_sysfs("/sys/class/android_usb/android0/idProduct", "2007\n");
-                            write_sysfs("/sys/class/android_usb/android0/f_acm/instances", "1\n");
+                            write_sysfs("/sys/class/android_usb/android0/f_acm/instances", "2\n");
                             write_sysfs("/sys/class/android_usb/android0/functions", "acm\n");
-                            write_sysfs("/sys/class/android_usb/android0/bDeviceClass", "02\n");
+                            /* Use bDeviceClass 0 (Interface-defined) so Windows Composite Device Enumerator
+                             * (usbccgp.sys) creates independent COM ports for each ACM interface (e.g. COM5 & COM6). */
+                            write_sysfs("/sys/class/android_usb/android0/bDeviceClass", "0\n");
+                            write_sysfs("/sys/class/android_usb/android0/bDeviceSubClass", "0\n");
+                            write_sysfs("/sys/class/android_usb/android0/bDeviceProtocol", "0\n");
                             write_sysfs("/sys/class/android_usb/android0/enable", "1\n");
 
-                            pid_t term_pid = fork();
-                            if (term_pid == 0) {
+                            /* Spawn Tab 2 worker in background (/dev/ttyGS1) */
+                            pid_t term_pid2 = fork();
+                            if (term_pid2 == 0) {
                                 setpgid(0, 0);
-                                run_usb_serial_shell();
+                                run_usb_serial_shell("ttyGS1", 2);
+                                _exit(0);
+                            }
+
+                            /* Spawn Tab 1 worker (/dev/ttyGS0) */
+                            pid_t term_pid1 = fork();
+                            if (term_pid1 == 0) {
+                                setpgid(0, 0);
+                                run_usb_serial_shell("ttyGS0", 1);
                                 _exit(0);
                             }
 
                             display_screen("bootl_terminal");
 
-                            /* Wait for user to exit via terminal shell ('exit' command) */
+                            /* Wait for user to exit via terminal shell ('exit' command on primary tab or 'menu') */
                             int status = 0;
-                            waitpid(term_pid, &status, 0);
+                            waitpid(term_pid1, &status, 0);
+
+                            int ef = open("/tmp/exit_terminal", O_WRONLY | O_CREAT | O_TRUNC, 0666);
+                            if (ef >= 0) close(ef);
+
+                            if (term_pid2 > 0) {
+                                kill(term_pid2, SIGTERM);
+                                waitpid(term_pid2, NULL, WNOHANG);
+                            }
+                            unlink("/tmp/exit_terminal");
 
                             /* Disable USB terminal */
                             log_line("Terminal shell exited. Disabling USB terminal and returning to Bootloader Menu...\n");
@@ -2181,8 +2248,8 @@ int main(int argc, char *argv[])
         link_sdcard_to_root();
 
         /* Launch target application from MicroSD card */
-        setenv("PATH", "/bin:/sbin:/usr/bin:/usr/sbin:/mnt/sdcard/.system/bin:/mnt/sdcard/.rockbox/bin:/mnt/sdcard/.meui/bin:/mnt/sdcard/.reborn/bin:/mnt/sdcard/.custom/bin", 1);
-        setenv("LD_LIBRARY_PATH", "/mnt/sdcard/.meui/lib:/mnt/sdcard/.reborn/lib:/mnt/sdcard/.custom/lib:/mnt/sdcard/.system/lib:/mnt/sdcard/.rockbox/lib:/lib:/usr/lib", 1);
+        setenv("PATH", "/bin:/sbin:/usr/bin:/usr/sbin:/mnt/sdcard/.system/bin:/mnt/sdcard/.rockbox/bin:/mnt/sdcard/.meui/bin:/mnt/sdcard/.custom/bin", 1);
+        setenv("LD_LIBRARY_PATH", "/mnt/sdcard/.meui/lib:/mnt/sdcard/.custom/lib:/mnt/sdcard/.system/lib:/mnt/sdcard/.rockbox/lib:/lib:/usr/lib", 1);
         setenv("HOME", "/mnt/sdcard", 1);
         setenv("TERM", "linux", 1);
 

@@ -23,8 +23,8 @@ It provides C/C++ developers with an official, production-tested hardware abstra
 5. [Porting Guide: Bringing Your Own Experience to Y1](#5-porting-guide-bringing-your-own-experience-to-y1)
    - [5.1 The Standard Y1 Main Loop Architecture](#51-the-standard-y1-main-loop-architecture)
    - [5.2 Porting Framebuffer / SDL / Raylib / LVGL Applications](#52-porting-framebuffer--sdl--raylib--lvgl-applications)
-   - [5.3 Packaging for MeUI, Reborn, or Custom Software Picks](#53-packaging-for-meui-reborn-or-custom-software-picks)
-6. [Interactive USB Serial Debugging (Pick 8)](#6-interactive-usb-serial-debugging-pick-8)
+   - [5.3 Packaging for MeUI or Custom Software Picks](#53-packaging-for-meui-or-custom-software-picks)
+6. [Interactive USB Serial Debugging (Pick 7)](#6-interactive-usb-serial-debugging-pick-7)
 7. [Hardware Safety Watchdog (10-Second Force Shutdown)](#7-hardware-safety-watchdog-10-second-force-shutdown)
 8. [Complete Working Code Example: Interactive Game Demo](#8-complete-working-code-example-interactive-game-demo)
 9. [Build Environment & Makefile Template](#9-build-environment--makefile-template)
@@ -52,7 +52,6 @@ flowchart TD
     subgraph APPLICATIONS["User & System Applications"]
         RB["Rockbox Audio Player (/.rockbox/rockbox)"]
         MEUI["MeUI Frontend (/.meui/meui)"]
-        REBORN["Reborn Music Player (/.reborn/reborn)"]
         CUSTOM["Custom Software (/.custom/launch)"]
         DEMO["Standalone Utilities (/.system/app)"]
     end
@@ -90,19 +89,18 @@ Holding the **MENU** button at power-on brings up the visual carousel menu. The 
 
 1. **Pick 1: Rockbox** — Always present (`/.rockbox/rockbox` or `/mnt/sdcard/.rockbox/rockbox`).
 2. **Pick 2: MeUI** — Displayed only if `/mnt/sdcard/.meui/meui` or `/.meui/meui` exists.
-3. **Pick 3: Reborn** — Displayed only if `/mnt/sdcard/.reborn/reborn` or `/.reborn/reborn` exists.
-4. **Pick 4: Custom Software** — Displayed only if `/mnt/sdcard/.custom/launch` or `/.custom/launch` exists.
-5. **Pick 5: Android** — Reboots cleanly into the stock Android ROM partition.
-6. **Pick 6: Shut down** — Immediate clean hardware power off.
-7. **Pick 7: USB Mass Storage** — Mounts the MicroSD card to a connected PC for file transfers.
-8. **Pick 8: Linux terminal (USB)** — Spawns an interactive root rescue shell on `/dev/ttyGS0`.
+3. **Pick 3: User Defined Software** — Displayed only if `/mnt/sdcard/.custom/launch` or `/.custom/launch` exists.
+4. **Pick 4: Android** — Reboots cleanly into the stock Android ROM partition.
+5. **Pick 5: Shut down** — Immediate clean hardware power off.
+6. **Pick 6: USB Mass Storage** — Mounts the MicroSD card to a connected PC for file transfers.
+7. **Pick 7: Linux terminal (USB)** — Spawns multi-tab interactive root shells on `/dev/ttyGS0` and `/dev/ttyGS1`.
 
 ### Execution Environment
 When your application is launched from the bootloader or as `/.system/app`:
 - **Working Directory:** `/mnt/sdcard` (or application root)
 - **Environment Variables:**
-  - `PATH=/bin:/sbin:/usr/bin:/usr/sbin:/mnt/sdcard/.system/bin:/mnt/sdcard/.rockbox/bin:/mnt/sdcard/.meui/bin:/mnt/sdcard/.reborn/bin:/mnt/sdcard/.custom/bin`
-  - `LD_LIBRARY_PATH=/mnt/sdcard/.meui/lib:/mnt/sdcard/.reborn/lib:/mnt/sdcard/.custom/lib:/mnt/sdcard/.system/lib:/mnt/sdcard/.rockbox/lib:/lib:/usr/lib`
+  - `PATH=/bin:/sbin:/usr/bin:/usr/sbin:/mnt/sdcard/.system/bin:/mnt/sdcard/.rockbox/bin:/mnt/sdcard/.meui/bin:/mnt/sdcard/.custom/bin`
+  - `LD_LIBRARY_PATH=/mnt/sdcard/.meui/lib:/mnt/sdcard/.custom/lib:/mnt/sdcard/.system/lib:/mnt/sdcard/.rockbox/lib:/lib:/usr/lib`
   - `HOME=/mnt/sdcard`
   - `TERM=linux`
 
@@ -123,15 +121,12 @@ Deploying an application to the Y1 requires no flashing. Simply copy your binary
 |   |-- bt/                       # Bluetooth firmware & kernel modules (*.ko)
 |   |-- y1_debug.txt              # Live hardware diagnostic log
 |   `-- app                       # Optional default auto-boot application
-|-- .custom/                      # Pick 4: User defined software
+|-- .custom/                      # Pick 3: User defined software
 |   |-- launch                    # Main executable (ELF binary or shell script)
 |   |-- bin/                      # Custom binaries
 |   `-- lib/                      # Custom shared libraries (.so)
 |-- .meui/                        # Pick 2: MeUI frontend
 |   |-- meui                      # Executable
-|   `-- lib/                      # Shared libraries
-|-- .reborn/                      # Pick 3: Reborn music player
-|   |-- reborn                    # Executable
 |   `-- lib/                      # Shared libraries
 `-- .rockbox/                     # Pick 1: Rockbox player suite
     `-- rockbox                   # Rockbox executable
@@ -362,11 +357,11 @@ If porting an engine designed for 320x240:
   ```
   `liby1` will automatically upscale it to 480x360 with smooth hardware area-averaging.
 
-### 5.3 Packaging for MeUI, Reborn, or Custom Software Picks
+### 5.3 Packaging for MeUI or Custom Software Picks
 
 To have your application automatically appear in the bootloader carousel:
 
-1. **For Pick 4 (User Defined Software):**
+1. **For Pick 3 (User Defined Software):**
    - Place your executable at `/mnt/sdcard/.custom/launch`.
    - Place your shared libraries (`.so`) in `/mnt/sdcard/.custom/lib/`.
    - If using a shell script as the launcher:
@@ -377,18 +372,18 @@ To have your application automatically appear in the bootloader carousel:
      ```
    - Ensure the executable bit is set (`chmod +x /mnt/sdcard/.custom/launch`).
 
-2. **For Pick 2 (MeUI) or Pick 3 (Reborn):**
-   - Place binary at `/mnt/sdcard/.meui/meui` or `/mnt/sdcard/.reborn/reborn`.
-   - The bootloader automatically adds their respective `lib/` and `bin/` directories to the runtime path.
+2. **For Pick 2 (MeUI):**
+   - Place binary at `/mnt/sdcard/.meui/meui`.
+   - The bootloader automatically adds its respective `lib/` and `bin/` directories to the runtime path.
 
 ---
 
-## 6. Interactive USB Serial Debugging (Pick 8)
+## 6. Interactive USB Serial Debugging (Pick 7)
 
 The Innioasis Y1 includes an onboard USB Serial Terminal for live developer debugging.
 
 1. Turn on the device while holding **MENU** to enter the Bootloader Carousel.
-2. Select **Pick 8: Linux terminal (USB)**.
+2. Select **Pick 7: Linux terminal (USB)**.
 3. Connect the Y1 to your computer using a standard USB-C cable.
 4. On your PC, open a serial terminal (115200 baud, 8N1):
    - **Windows:**

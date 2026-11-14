@@ -32,6 +32,9 @@ cp "$SCRIPT_DIR/boot_nugget.img" "$DIST_DIR/"
 if [[ -f "$SCRIPT_DIR/rockbox_sdcard.zip" ]]; then
     cp "$SCRIPT_DIR/rockbox_sdcard.zip" "$DIST_DIR/"
 fi
+if [[ -f "$SCRIPT_DIR/rockwheel_sdcard.zip" ]]; then
+    cp "$SCRIPT_DIR/rockwheel_sdcard.zip" "$DIST_DIR/"
+fi
 if [[ -f "$SCRIPT_DIR/y1_sdcard.zip" ]]; then
     cp "$SCRIPT_DIR/y1_sdcard.zip" "$DIST_DIR/"
 fi
