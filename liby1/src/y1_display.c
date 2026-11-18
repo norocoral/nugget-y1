@@ -616,3 +616,17 @@ bool y1_display_is_early_suspended(void)
     return early_suspended;
 }
 
+void y1_power_set_idle_sleep(bool allow_suspend)
+{
+    if (allow_suspend) {
+        if (y1_usb_is_storage_attached())
+            return;
+        y1_sysfs_write("/sys/power/wake_unlock", "rockbox_active\n");
+        y1_sysfs_write("/sys/power/wake_unlock", "y1play\n");
+        y1_sysfs_write("/sys/power/state", "mem\n");
+        y1_log("[liby1-pwr] Released wakelocks for true mem suspend\n");
+    } else {
+        y1_sysfs_write("/sys/power/wake_lock", "rockbox_active\n");
+    }
+}
+

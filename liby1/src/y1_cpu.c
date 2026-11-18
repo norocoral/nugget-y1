@@ -40,14 +40,16 @@ void y1_cpu_set_mode(int mode)
     for (int cpu = 0; cpu < 2; cpu++) {
         switch (mode) {
         case Y1_CPU_MODE_POWERSAVE:
-            /* Fixed 598 MHz (Lowest VCORE 1.05V) */
+            /* Lowest available OPP (390 MHz if kernel OPP patched, else 598 MHz) */
             y1_sysfs_write("/proc/cpufreq/usb_raise_freq", "0\n");
             y1_sysfs_write("/proc/cpufreq/MTK_PPM_POLICY", "DISABLE\n");
             y1_sysfs_write("/proc/cpufreq/MTK_PPM_POLICY", "0\n");
-            write_cpu_freq_bounds(cpu, "598000\n", "598000\n");
+            write_cpu_freq_bounds(cpu, "390000\n", "598000\n");
             write_cpu_node(cpu, "scaling_governor", "userspace\n");
             write_cpu_node(cpu, "scaling_setspeed", "598000\n");
+            write_cpu_node(cpu, "scaling_setspeed", "390000\n");
             y1_sysfs_write("/proc/cpufreq/cpufreq_cur_freq", "598000\n");
+            y1_sysfs_write("/proc/cpufreq/cpufreq_cur_freq", "390000\n");
             break;
 
         case Y1_CPU_MODE_BALANCED:

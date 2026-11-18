@@ -153,6 +153,7 @@ int  y1_backlight_get_raw(void);
 void y1_display_enter_early_suspend(void);
 void y1_display_exit_early_suspend(void);
 bool y1_display_is_early_suspended(void);
+void y1_power_set_idle_sleep(bool allow_suspend);
 
 /* =========================================================================
  * 3. CPU Frequency & Core Hotplug Control

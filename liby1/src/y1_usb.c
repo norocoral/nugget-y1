@@ -229,8 +229,8 @@ bool y1_usb_get_ipod_mode(void)
         fclose(cfg);
     }
 
-    g_ipod_usb_mode = 1;
-    return true;
+    g_ipod_usb_mode = 0;
+    return false;
 }
 
 static void read_ipod_usb_serial(char *out, size_t out_sz)

@@ -239,6 +239,20 @@ def patch_kernel(in_path: str, out_path: str) -> None:
     wr32(ADDR_DT_SEND, arm_b(ADDR_DT_SEND, va_dt_send, link=False))
     image[cave_off : cave_off + len(cave_bytes)] = cave_bytes
 
+    # Lower lowest mt_cpufreq OPP [4] (598000 KHz @ 1150 mV -> 390000 KHz @ 1050 mV)
+    # for longer screen-off music playback battery life.
+    opp_old = struct.pack("<IIII", 806000, 1150, 598000, 1150)
+    opp_new = struct.pack("<IIII", 806000, 1150, 390000, 1050)
+    opp_hits = 0
+    search_pos = 0
+    while True:
+        idx = image.find(opp_old, search_pos)
+        if idx < 0:
+            break
+        image[idx : idx + len(opp_old)] = opp_new
+        opp_hits += 1
+        search_pos = idx + len(opp_old)
+
     # Recompress with gzip -9 and pad to exact original slot size
     gz_buf = io.BytesIO()
     with gzip.GzipFile(fileobj=gz_buf, mode="wb", compresslevel=9, mtime=0) as gz:

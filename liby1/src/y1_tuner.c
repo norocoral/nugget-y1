@@ -10,6 +10,7 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/ioctl.h>
+#include <errno.h>
 
 #include "liby1.h"
 
@@ -25,6 +26,7 @@
 #define FM_IOCTL_GETRSSI      _IOWR(FM_IOC_MAGIC, 0x07, int)
 #define FM_IOCTL_GETMONOSTERO _IOWR(FM_IOC_MAGIC, 0x0d, int)
 #define FM_IOCTL_SETMONOSTERO _IOWR(FM_IOC_MAGIC, 0x0e, int)
+#define FM_IOCTL_ANA_SWITCH   _IOWR(FM_IOC_MAGIC, 0x1e, int)
 #define FM_IOCTL_IS_PWRUP     _IOWR(FM_IOC_MAGIC, 0x20, int)
 #define FM_IOCTL_GET_I2S_INFO _IOWR(FM_IOC_MAGIC, 0x21, int)
 
@@ -57,34 +59,18 @@ static int  current_freq_hz = 87500000;
 static bool tuner_powered = false;
 static bool is_muted = false;
 
-static void ensure_fm_module_loaded(void)
-{
-    if (access("/sys/module/mtk_stp_wmt", F_OK) != 0 &&
-        access("/.system/bt/mtk_stp_wmt.ko", F_OK) == 0) {
-        (void)!system("insmod /.system/bt/mtk_stp_wmt.ko");
-    }
-    if (access("/sys/module/mtk_fm_drv", F_OK) != 0 &&
-        access("/.system/bt/mtk_fm_drv.ko", F_OK) == 0) {
-        (void)!system("insmod /.system/bt/mtk_fm_drv.ko");
-    }
-}
-
 static void fm_open_dev(void)
 {
     if (fm_fd >= 0)
         return;
 
     const char *devs[] = { "/dev/fm", "/dev/radio0", "/dev/stpfm", NULL };
-    for (int attempt = 0; attempt < 2 && fm_fd < 0; attempt++) {
-        for (int i = 0; devs[i]; i++) {
-            fm_fd = open(devs[i], O_RDWR | O_CLOEXEC);
-            if (fm_fd >= 0) {
-                y1_logf("[liby1-fm] Opened FM radio device: %s (fd=%d)\n", devs[i], fm_fd);
-                break;
-            }
+    for (int i = 0; devs[i]; i++) {
+        fm_fd = open(devs[i], O_RDWR | O_CLOEXEC);
+        if (fm_fd >= 0) {
+            y1_logf("[liby1-fm] Opened FM radio device: %s (fd=%d)\n", devs[i], fm_fd);
+            break;
         }
-        if (fm_fd < 0 && attempt == 0)
-            ensure_fm_module_loaded();
     }
 }
 
@@ -108,11 +94,30 @@ int y1_fm_power(bool on)
             parm.space = 1;
             parm.hilo  = 0;
             parm.freq  = (uint16_t)(current_freq_hz / 100000);
-            if (ioctl(fm_fd, FM_IOCTL_POWERUP, &parm) == 0) {
+            int pwrup_ret = ioctl(fm_fd, FM_IOCTL_POWERUP, &parm);
+            if (pwrup_ret < 0) {
+                y1_logf("[liby1-fm] FM_IOCTL_POWERUP failed (ret=%d, errno=%d: %s, err=%u), retrying...\n",
+                        pwrup_ret, errno, strerror(errno), (unsigned)parm.err);
+                usleep(150000);
+                memset(&parm, 0, sizeof(parm));
+                parm.band  = 1;
+                parm.space = 1;
+                parm.hilo  = 0;
+                parm.freq  = (uint16_t)(current_freq_hz / 100000);
+                pwrup_ret = ioctl(fm_fd, FM_IOCTL_POWERUP, &parm);
+            }
+            if (pwrup_ret == 0) {
+                int ana = 0; /* 0 = long/headphone antenna */
+                int ana_ret = ioctl(fm_fd, FM_IOCTL_ANA_SWITCH, &ana);
                 uint32_t vol = 15;
-                ioctl(fm_fd, FM_IOCTL_SETVOL, &vol);
+                int vol_ret = ioctl(fm_fd, FM_IOCTL_SETVOL, &vol);
                 struct y1_fm_i2s_info i2s = { 0, 1, 1 };
-                ioctl(fm_fd, FM_IOCTL_GET_I2S_INFO, &i2s);
+                int i2s_ret = ioctl(fm_fd, FM_IOCTL_GET_I2S_INFO, &i2s);
+                y1_logf("[liby1-fm] POWERUP OK (freq=%u, err=%u, ana=%d, vol=%d, i2s=%d)\n",
+                        (unsigned)parm.freq, (unsigned)parm.err, ana_ret, vol_ret, i2s_ret);
+            } else {
+                y1_logf("[liby1-fm] FM_IOCTL_POWERUP FAILED (ret=%d, errno=%d: %s, err=%u)\n",
+                        pwrup_ret, errno, strerror(errno), (unsigned)parm.err);
             }
         }
         y1_audio_set_fm_route(true);
@@ -141,8 +146,12 @@ int y1_fm_tune(int freq_hz)
         parm.space = 1;
         parm.hilo  = 0;
         parm.freq  = (uint16_t)(freq_hz / 100000);
-        if (ioctl(fm_fd, FM_IOCTL_TUNE, &parm) == 0 && parm.freq > 0)
+        int ret = ioctl(fm_fd, FM_IOCTL_TUNE, &parm);
+        if (ret == 0 && parm.freq > 0)
             current_freq_hz = (int)parm.freq * 100000;
+        else
+            y1_logf("[liby1-fm] TUNE(%d) failed (ret=%d, errno=%d: %s, err=%u)\n",
+                    freq_hz / 100000, ret, errno, strerror(errno), (unsigned)parm.err);
     }
     return 0;
 }
@@ -160,10 +169,15 @@ int y1_fm_seek(int freq_hz, bool up)
     parm.freq    = (uint16_t)(freq_hz / 100000);
     parm.seekdir = up ? 0 : 1;
     parm.seekth  = 0;
-    if (ioctl(fm_fd, FM_IOCTL_SEEK, &parm) == 0 && parm.freq > 0) {
+    int ret = ioctl(fm_fd, FM_IOCTL_SEEK, &parm);
+    if (ret == 0 && parm.freq > 0) {
         current_freq_hz = (int)parm.freq * 100000;
+        y1_logf("[liby1-fm] SEEK(%s from %d) -> %d\n", up ? "up" : "down", freq_hz / 100000, (int)parm.freq);
         return current_freq_hz;
     }
+    y1_logf("[liby1-fm] SEEK(%s from %d) failed (ret=%d, errno=%d: %s, err=%u, freq=%u)\n",
+            up ? "up" : "down", freq_hz / 100000, ret, errno, strerror(errno),
+            (unsigned)parm.err, (unsigned)parm.freq);
     return -1;
 }
 

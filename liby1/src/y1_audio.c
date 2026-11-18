@@ -14,6 +14,7 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/sysmacros.h>
+#include <poll.h>
 
 #ifndef makedev
 #define makedev(maj, min) (((maj) << 8) | (min))
@@ -234,8 +235,8 @@ int y1_audio_open(unsigned long sample_rate)
     ioctl(eac_fd, AUDDRV_FREE_DL1_BUF, 0);
     ioctl(eac_fd, FREE_MEMIF_BUF, 0);
 
-    int ret_alloc = ioctl(eac_fd, AUDDRV_ALLOCATE_DL1_BUF, 32768);
-    y1_logf("[liby1-audio] AUDDRV_ALLOCATE_DL1_BUF(32768) returned %d (errno=%d %s)\n",
+    int ret_alloc = ioctl(eac_fd, AUDDRV_ALLOCATE_DL1_BUF, 65536);
+    y1_logf("[liby1-audio] AUDDRV_ALLOCATE_DL1_BUF(65536) returned %d (errno=%d %s)\n",
             ret_alloc, errno, ret_alloc < 0 ? strerror(errno) : "OK");
 
     int ret_fp = ioctl(eac_fd, SET_MEMIF_FP, 0);
@@ -551,6 +552,7 @@ void y1_audio_set_recording_pga_db(int gain_db)
 
 static bool rec_active = false;
 static int  rec_mem_type = -1;
+static int  rec_fd = -1;
 
 static uint32_t calc_ul_rate_code(unsigned long sampr)
 {
@@ -563,6 +565,22 @@ static uint32_t calc_ul_rate_code(unsigned long sampr)
     }
 }
 
+static uint32_t calc_irq_rate_code(unsigned long sampr)
+{
+    switch (sampr) {
+        case 8000:  return 0;
+        case 11025: return 1;
+        case 12000: return 2;
+        case 16000: return 4;
+        case 22050: return 5;
+        case 24000: return 6;
+        case 32000: return 8;
+        case 44100: return 9;
+        case 48000: return 10;
+        default:    return 10; /* 48 kHz */
+    }
+}
+
 bool y1_audio_rec_start(enum y1_audio_rec_source source, unsigned long sample_rate)
 {
     if (eac_fd < 0 && y1_audio_open(sample_rate) < 0)
@@ -571,12 +589,19 @@ bool y1_audio_rec_start(enum y1_audio_rec_source source, unsigned long sample_ra
     if (rec_active)
         y1_audio_rec_stop();
 
+    ensure_eac_node();
+    rec_fd = open("/dev/eac", O_RDWR | O_NONBLOCK | O_CLOEXEC);
+    if (rec_fd < 0) {
+        y1_logf("[liby1-audio] rec open(/dev/eac) failed: %s\n", strerror(errno));
+        return false;
+    }
+
     audio_clocks(1);
     set_afereg(eac_fd, 0x10, 1, 1); /* AFE_ON */
 
     if (source == Y1_REC_SOURCE_LINE_FM) {
         rec_mem_type = MEM_TYPE_AWB;
-        ioctl(eac_fd, AUDDRV_ALLOCATE_AWB_BUF, 0x8000);
+        ioctl(rec_fd, AUDDRV_ALLOCATE_AWB_BUF, 0x8000);
         set_afereg(eac_fd, 0x38, 1 << 6, 1 << 6);   /* AFE_CONN5: I2S_IN_L -> AWB_L */
         set_afereg(eac_fd, 0x3c, 1 << 7, 1 << 7);   /* AFE_CONN6: I2S_IN_R -> AWB_R */
         set_afereg(eac_fd, 0x14, 1 << 6, 1 << 6);   /* AFE_DAC_CON0: AWB_ON */
@@ -584,46 +609,67 @@ bool y1_audio_rec_start(enum y1_audio_rec_source source, unsigned long sample_ra
     } else {
         uint32_t ul_code = calc_ul_rate_code(sample_rate);
         rec_mem_type = MEM_TYPE_VUL;
-        ioctl(eac_fd, AUDDRV_ALLOCATE_VUL_BUF, 0x8000);
+        ioctl(rec_fd, AUDDRV_ALLOCATE_VUL_BUF, 0x8000);
 
-        /* Enable AFE Uplink ADC & route ADDA UL L/R -> VUL */
-        set_afereg(eac_fd, 0x114, 1, 1);            /* AFE_ADDA_UL_SRC_CON0: UL_SRC_ON */
-        set_afereg(eac_fd, 0x128, 1, 1);            /* AFE_ADDA_UL_DL_CON0: ADDA_AFE_ON */
-        set_afereg(eac_fd, 0x74, 1 << 3, 1 << 3);   /* AFE_CONN21: ADDA_UL_L -> VUL_L */
-        set_afereg(eac_fd, 0x78, 1 << 4, 1 << 4);   /* AFE_CONN22: ADDA_UL_R -> VUL_R */
+        /* Enable AFE Uplink ADC & route ADDA UL L/R -> VUL (I03->O09, I04->O10 via 0x02c) */
+        set_afereg(eac_fd, 0x120, 0, 1);            /* AFE_ADDA_TOP_CON0: internal ADC */
+        set_afereg(eac_fd, 0x138, 0x03f87201U, ~0U);/* AFE_ADDA_NEWIF_CFG0 */
+        set_afereg(eac_fd, 0x13c, 0x400U, 0xc00U);  /* AFE_ADDA_NEWIF_CFG1 */
+        set_afereg(eac_fd, 0x114, (ul_code << 17) | 1U, 0x1e0001U); /* AFE_ADDA_UL_SRC_CON0: UL_SRC_ON */
+        set_afereg(eac_fd, 0x124, 1, 1);            /* AFE_ADDA_UL_DL_CON0: ADDA_AFE_ON */
+        set_afereg(eac_fd, 0x02c, (1U << 0) | (1U << 3), (1U << 0) | (1U << 3)); /* ADDA_UL L/R -> VUL L/R */
         set_afereg(eac_fd, 0x14, (ul_code << 16) | (1 << 3), (0x3 << 16) | (1 << 3)); /* VUL_MODE + VUL_ON */
         y1_audio_enable_recording_path(source);
     }
 
-    if (ioctl(eac_fd, SET_MEMIF_FP, rec_mem_type) < 0) {
-        y1_logf("[liby1-audio] SET_MEMIF_FP(%d) failed: %s\n", rec_mem_type, strerror(errno));
+    /* Configure IRQ2 (0x3b0 counter, 0x3a0 enable + rate) so AudDrv_read wakes cleanly */
+    uint32_t irq_rate = calc_irq_rate_code(sample_rate);
+    set_afereg(eac_fd, 0x3b0, 1024, 0xffff);
+    set_afereg(eac_fd, 0x3a0, (irq_rate << 8) | (1 << 1), (0xf << 8) | (1 << 1));
+
+    if (ioctl(rec_fd, SET_MEMIF_FP, rec_mem_type) < 0) {
+        y1_logf("[liby1-audio] rec SET_MEMIF_FP(%d) failed: %s\n", rec_mem_type, strerror(errno));
     }
     rec_active = true;
-    y1_logf("[liby1-audio] Recording started (src=%d, mem=%d, rate=%lu)\n",
-            (int)source, rec_mem_type, sample_rate);
+    y1_logf("[liby1-audio] Recording started (src=%d, mem=%d, rate=%lu, rec_fd=%d)\n",
+            (int)source, rec_mem_type, sample_rate, rec_fd);
     return true;
 }
 
 ssize_t y1_audio_rec_read(void *pcm_stereo_s16, size_t bytes)
 {
-    if (!rec_active || eac_fd < 0 || !pcm_stereo_s16 || bytes == 0)
+    if (!rec_active || rec_fd < 0 || !pcm_stereo_s16 || bytes == 0)
         return -1;
-    return read(eac_fd, pcm_stereo_s16, bytes);
+    struct pollfd pfd = { .fd = rec_fd, .events = POLLIN };
+    int pr = poll(&pfd, 1, 50);
+    if (pr <= 0)
+        return -1;
+    return read(rec_fd, pcm_stereo_s16, bytes);
 }
 
 void y1_audio_rec_stop(void)
 {
-    if (!rec_active || eac_fd < 0)
+    if (!rec_active)
         return;
 
-    ioctl(eac_fd, FREE_MEMIF_FP, rec_mem_type);
-    if (rec_mem_type == MEM_TYPE_AWB) {
-        set_afereg(eac_fd, 0x14, 0, 1 << 6);
-        ioctl(eac_fd, AUDDRV_FREE_AWB_BUF, 0);
-    } else if (rec_mem_type == MEM_TYPE_VUL) {
-        set_afereg(eac_fd, 0x14, 0, 1 << 3);
-        set_afereg(eac_fd, 0x114, 0, 1);
-        ioctl(eac_fd, AUDDRV_FREE_VUL_BUF, 0);
+    if (eac_fd >= 0) {
+        set_afereg(eac_fd, 0x3a0, 0, 1 << 1); /* Disable IRQ2 */
+        if (rec_mem_type == MEM_TYPE_AWB) {
+            set_afereg(eac_fd, 0x14, 0, 1 << 6);
+        } else if (rec_mem_type == MEM_TYPE_VUL) {
+            set_afereg(eac_fd, 0x14, 0, 1 << 3);
+            set_afereg(eac_fd, 0x02c, 0, (1U << 0) | (1U << 3));
+            set_afereg(eac_fd, 0x114, 0, 1);
+        }
+    }
+    if (rec_fd >= 0) {
+        ioctl(rec_fd, FREE_MEMIF_FP, rec_mem_type);
+        if (rec_mem_type == MEM_TYPE_AWB)
+            ioctl(rec_fd, AUDDRV_FREE_AWB_BUF, 0);
+        else if (rec_mem_type == MEM_TYPE_VUL)
+            ioctl(rec_fd, AUDDRV_FREE_VUL_BUF, 0);
+        close(rec_fd);
+        rec_fd = -1;
     }
     y1_audio_disable_recording_path();
     rec_active = false;
@@ -633,18 +679,37 @@ void y1_audio_rec_stop(void)
 
 void y1_audio_set_fm_route(bool enable)
 {
-    if (eac_fd < 0 && y1_audio_open(48000) < 0)
+    if (eac_fd < 0 && y1_audio_open(44100) < 0)
         return;
+
+    const uint32_t conn_mask = (1U << 16) | (1U << 8) | (1U << 23) | (1U << 10);
 
     if (enable) {
         ioctl(eac_fd, AUD_DRV_FM_I2S_ON, 0);
-        set_afereg(eac_fd, 0x24, 1 << 0, 1 << 0);  /* AFE_CONN1: I2S_IN_L -> I2S_OUT_L */
-        set_afereg(eac_fd, 0x28, 1 << 1, 1 << 1);  /* AFE_CONN2: I2S_IN_R -> I2S_OUT_R */
-        set_afereg(eac_fd, 0x10, 1, 1);            /* AFE_ON */
+
+        /* Configure 2nd I2S In (MT6627 FM slave, 32-bit I2S) */
+        set_afereg(eac_fd, 0x18, 0x8000000cU, ~1U);
+        set_afereg(eac_fd, 0x4c4, 0, 0x100U);
+
+        /* Route I00/I01 -> HW Digital Gain 2 (O15/O16) -> I2S Out (I12/I13 -> O03/O04) */
+        set_afereg(eac_fd, 0x438, conn_mask, conn_mask);
+        set_afereg(eac_fd, 0x428, (200U << 8) | (9U << 4), 0xfff0U);
+        set_afereg(eac_fd, 0x42c, 0x00080000U, ~0U); /* 0 dB FM digital gain */
+        set_afereg(eac_fd, 0x43c, 0, ~0U);
+        set_afereg(eac_fd, 0x428, 1, 1);             /* Enable HW Digital Gain 2 */
+
+        /* Enable I2S DAC out, 2nd I2S In, and AFE master switch */
+        set_afereg(eac_fd, 0x108, 1, 1);
+        set_afereg(eac_fd, 0x34, 1, 1);
+        set_afereg(eac_fd, 0x124, 1, 1);
+        set_afereg(eac_fd, 0x4c4, 0, 0x10U);
+        set_afereg(eac_fd, 0x18, 1, 1);
+        set_afereg(eac_fd, 0x10, 1, 1);
         y1_log("[liby1-audio] FM I2S audio route enabled\n");
     } else {
-        set_afereg(eac_fd, 0x24, 0, 1 << 0);
-        set_afereg(eac_fd, 0x28, 0, 1 << 1);
+        set_afereg(eac_fd, 0x438, 0, conn_mask);
+        set_afereg(eac_fd, 0x428, 0, 1);
+        set_afereg(eac_fd, 0x18, 0, 1);
         ioctl(eac_fd, AUD_DRV_FM_I2S_OFF, 0);
         y1_log("[liby1-audio] FM I2S audio route disabled\n");
     }
