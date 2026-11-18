@@ -14,7 +14,8 @@ SRCS      := src/y1_core.c \
              src/y1_input.c \
              src/y1_audio.c \
              src/y1_tuner.c \
-             src/y1_usb.c
+             src/y1_usb.c \
+             src/y1_ipod_sync.c
 
 OBJS      := $(patsubst src/%.c,$(BUILD_DIR)/%.o,$(SRCS))
 STATIC_LIB := $(BUILD_DIR)/liby1.a

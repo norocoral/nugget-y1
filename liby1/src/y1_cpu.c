@@ -12,6 +12,9 @@
 static int current_cpu_mode = -1;
 static int saved_cpu_mode = -1;
 static int saved_cpu1_online = -1;
+static int conv_saved_mode = -1;
+static int conv_saved_dual = -1;
+static int conv_boost_ref = 0;
 
 static void write_cpu_node(int cpu, const char *node, const char *val)
 {
@@ -165,6 +168,44 @@ void y1_cpu_set_screen_off_clamp(bool screen_off)
             current_cpu_mode = -1;
             y1_logf("[liby1-cpu] screen awake: restoring CPU mode %d\n", restore);
             y1_cpu_set_mode(restore);
+        }
+    }
+}
+
+void y1_cpu_boost_for_conversion(bool enable)
+{
+    if (enable) {
+        if (conv_boost_ref == 0) {
+            conv_saved_mode = (current_cpu_mode >= 0) ? current_cpu_mode : Y1_CPU_MODE_DYNAMIC;
+            conv_saved_dual = y1_cpu_is_dual_core() ? 1 : 0;
+            y1_logf("[liby1-cpu] conversion boost ON: max freq 1300MHz + 2 cores (saved mode=%d dual=%d)\n",
+                    conv_saved_mode, conv_saved_dual);
+        }
+        conv_boost_ref++;
+        y1_sysfs_write("/sys/devices/system/cpu/cpufreq/hotplug/is_cpu_hotplug_disable", "1");
+        y1_sysfs_write("/sys/devices/system/cpu/cpufreq/hotplug/cpu_num_base", "2");
+        y1_sysfs_write("/sys/devices/system/cpu/cpufreq/hotplug/cpu_num_limit", "2");
+        y1_cpu_set_dual_core(true);
+        y1_sysfs_write("/sys/devices/system/cpu/cpu1/online", "1");
+        y1_cpu_set_mode(Y1_CPU_MODE_TURBO);
+        y1_sysfs_write("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor", "performance");
+        y1_sysfs_write("/sys/devices/system/cpu/cpu0/cpufreq/scaling_min_freq", "1300000");
+        y1_sysfs_write("/sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq", "1300000");
+        y1_sysfs_write("/sys/devices/system/cpu/cpu0/cpufreq/scaling_setspeed", "1300000");
+    } else {
+        if (conv_boost_ref > 0)
+            conv_boost_ref--;
+        if (conv_boost_ref == 0) {
+            int restore_mode = (conv_saved_mode >= 0) ? conv_saved_mode : Y1_CPU_MODE_DYNAMIC;
+            int restore_dual = (conv_saved_dual >= 0) ? conv_saved_dual : 1;
+            conv_saved_mode = -1;
+            conv_saved_dual = -1;
+            current_cpu_mode = -1;
+            y1_logf("[liby1-cpu] conversion boost OFF: restoring mode=%d dual=%d\n",
+                    restore_mode, restore_dual);
+            y1_sysfs_write("/sys/devices/system/cpu/cpufreq/hotplug/is_cpu_hotplug_disable", "0");
+            y1_cpu_set_mode(restore_mode);
+            y1_cpu_set_dual_core(restore_dual != 0);
         }
     }
 }

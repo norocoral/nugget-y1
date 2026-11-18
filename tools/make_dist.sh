@@ -32,9 +32,6 @@ cp "$SCRIPT_DIR/boot_nugget.img" "$DIST_DIR/"
 if [[ -f "$SCRIPT_DIR/rockbox_sdcard.zip" ]]; then
     cp "$SCRIPT_DIR/rockbox_sdcard.zip" "$DIST_DIR/"
 fi
-if [[ -f "$SCRIPT_DIR/rockwheel_sdcard.zip" ]]; then
-    cp "$SCRIPT_DIR/rockwheel_sdcard.zip" "$DIST_DIR/"
-fi
 if [[ -f "$SCRIPT_DIR/y1_sdcard.zip" ]]; then
     cp "$SCRIPT_DIR/y1_sdcard.zip" "$DIST_DIR/"
 fi
@@ -72,7 +69,20 @@ echo "[*] Computing SHA-256 checksums..."
 
 # 6. Generate Release Notes template
 cat << 'EOF' > "$DIST_DIR/RELEASE_NOTES.md"
-# Innioasis Y1 Nugget OS & liby1 Release
+# Innioasis Y1 Nugget OS 2.0 & liby1 Release
+
+## ✨ What's New in 2.0
+* **Native iTunes Integration in Rockbox (Zero-Translation):**
+  * Loads `/iPod_Control/iTunes/iTunesDB` directly into Rockbox TagCache RAM (`tcramcache.hdr`) without writing `.tcd` files.
+  * Decodes `/iPod_Control/Artwork/ArtworkDB` & `F*.ithmb` RGB565 cover art on the fly.
+  * Browses and plays `iTunesDB` playlists and live-evaluated smart playlists (`SLst`) directly from memory.
+  * Writes `/iPod_Control/iTunes/Play Counts` (`mhdp`) and `OTGPlaylistInfo` (`mhpo`) live on track finish, rating change, and WPS **Toggle Favorite**.
+* **Authentic iPod 5.5G USB & Kernel EVPD Spoofing:**
+  * `patch_kernel_ipod.py` + `ipod_vpd.ko` provide Single-LUN (`MaxLUN=0`), Config 2 (`bNumConfigurations=2`), space-padded `"Apple   iPod            1.62"`, and SCSI EVPD `SysInfoExtended` XML for Windows iTunes and macOS Finder/Apple Music.
+* **High-Speed USB 2.0 Mass Storage (`y1_usb_tune_performance`):**
+  * Automatically tunes `mmcblk1` (`noop`/`deadline`, 2 MiB `read_ahead_kb`, `nr_requests=512`, `max_sectors_kb`) and locks dual-core 1.3 GHz performance while USB Mass Storage is attached.
+* **Faster WSL2 Build System (`build.sh`):**
+  * Native Linux ext4 `rsync` build cache (`~/.cache/y1_build/`), `--only-rockbox` flag, and incremental asset caching.
 
 ## 📦 Release Assets
 * **`boot_nugget.img`**: Flashable Linux boot image for the MT6572 `BOOTIMG` partition (contains kernel, display drivers, reactive MicroSD loader, and Bootloader Menu).

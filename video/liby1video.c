@@ -42,8 +42,6 @@
 #include "../../apps/plugins/y1_video_lib.h"
 #elif defined(__has_include) && __has_include("../../../!rockbox_fromsource/rockbox-master/rockbox-master/apps/plugins/y1_video_lib.h")
 #include "../../../!rockbox_fromsource/rockbox-master/rockbox-master/apps/plugins/y1_video_lib.h"
-#elif defined(__has_include) && __has_include("../../../!rockwheel/RockWheel/apps/plugins/y1_video_lib.h")
-#include "../../../!rockwheel/RockWheel/apps/plugins/y1_video_lib.h"
 #else
 #include "y1_video_lib.h"
 #endif

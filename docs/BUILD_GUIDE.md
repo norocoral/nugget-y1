@@ -99,7 +99,10 @@ Located at [`hosted_linux_port/build.conf`](../build.conf):
 | `CUSTOM_APP_BIN` | `""` | Optional path to an ARM executable to install at `/.system/app`. If present, `/init` launches this instead of Rockbox. |
 | `CROSS_COMPILE` | `"arm-linux-gnueabihf-"` | Prefix for the ARM cross-compiler toolchain. |
 | `USE_CCACHE` | `1` | Accelerates incremental rebuilds using `ccache` (if installed). |
-| `JOBS` | `0` | Parallel make jobs (`0` = auto-detect CPU cores via `nproc`). |
+| `JOBS` | `0` | Parallel make jobs (`0` = auto-detect `nproc * 2`). |
+
+> [!TIP]
+> **WSL2 Speed Optimization:** When running `./build.sh` from a Windows mount (`/mnt/c/...`), the script automatically syncs Rockbox sources via `rsync` into `$HOME/.cache/y1_build/` and stages SD archives in `/tmp/` on native Linux ext4 to avoid 9P/drvfs I/O bottlenecks. Set `FORCE_IN_PLACE_BUILD=1` to disable this behavior.
 
 ---
 
@@ -146,6 +149,9 @@ Builds `liby1`, the Linux rootfs, the boot image, and SD card `.system/` SDK pac
 
 # Build ONLY the video decoder library (liby1video.so)
 ./build.sh --only-video
+
+# Build ONLY Rockbox (rockbox + rockbox.zip)
+./build.sh --only-rockbox
 ```
 
 ### Deploying a Custom C Binary
@@ -222,10 +228,13 @@ fastboot reboot
 ## 7. Dual-Boot Configuration & Bootloader Menu
 
 The initramfs `/init` includes a multi-option graphical Bootloader Menu displayed before any application launches:
-* **Pick 1 (Nugget):** Boots Rockbox or custom app.
-* **Pick 2 (Android):** Replaces rootfs with stock Android ramdisk (`ramdisk_android.cpio.gz`) and launches Android OS.
-* **Pick 3 (Shut Down):** Safely powers down the device.
-* **Pick 4 (USB Mode):** Binds MicroSD to USB Mass Storage LUN0 for PC file transfer.
+* **Pick 1 (Rockbox):** Boots Rockbox on the MicroSD card.
+* **Pick 2 (MeUI):** Launches MeUI frontend (when `.meui/meui` exists).
+* **Pick 3 (User Software):** Launches custom user software (when `.custom/launch` exists).
+* **Pick 4 (Android):** Replaces rootfs with stock Android ramdisk (`ramdisk_android.cpio.gz`) and launches Android OS.
+* **Pick 5 (Shut down):** Safely powers down the device.
+* **Pick 6 (USB Mass Storage):** Binds MicroSD to USB Mass Storage LUN0 for PC file transfer.
+* **Pick 7 (Linux terminal (USB)):** Spawns interactive USB serial root shells on `/dev/ttyGS0` and `/dev/ttyGS1`.
 
 ### Always-On Menu Bypass
 Holding the **MENU** button while powering on the device will **always** force display of the Bootloader Menu, regardless of any automatic boot timeouts configured in `.system/system.cfg`.

@@ -24,14 +24,17 @@ Nugget for Y1 is an open-source custom firmware for the Innioasis Y1 digital aud
 | Display Modes | 480x360 only | 480x360 only | **480x360 Native + 320x240 Classic Mode** |
 | iPod Theme Compatibility | Incompatible | Requires 480x360 assets | **Native iPod Classic theme support** |
 | Key Lock Mode | None | None | **iPod Classic HOLD with Hold Light & Advanced Key Lock** |
-| USB Connection | Android MTP / Mass Storage | Android Mass Storage | **Mass Storage** |
+| USB Connection | Android MTP / Mass Storage | Android Mass Storage | **Apple iPod 5.5G Enhanced (`ipod_vpd.ko`, Single-LUN) & Tuned USB 2.0 Mass Storage** |
+| iTunes Synchronization | None | None | **Native Rockbox `iTunesDB` / `ArtworkDB` / `.ithmb` Support (Zero-Translation)** |
+| iTunes Playlists & Ratings | None | None | **In-Memory Playlists & Smart Playlists (`SLst`), Live `Play Counts`, Ratings & OTG Favorites** |
 
 ---
 
 ## Technical Documentation
 
-Detailed subsystem specifications, architecture diagrams, and reverse engineering findings are available in [`hosted_linux_port/docs/`](hosted_linux_port/docs/):
-- [Technical Findings](hosted_linux_port/docs/TECHNICAL_FINDINGS.md): Hardware interfaces, `/dev/eac` audio driver, PMIC registers, power tuning, boot optimizations, and input event nuances.
+Detailed subsystem specifications, architecture diagrams, and reverse engineering findings are available in [`docs/`](docs/):
+- [iPod 5.5G USB Mode & Native iTunes Integration](docs/IPOD_SYNC.md): Kernel `ipod_vpd.ko` EVPD spoofing, native `iTunesDB` TagCache RAM loading, on-the-fly `.ithmb` artwork decoding, live `Play Counts`/`OTGPlaylistInfo` writing, and USB 2.0 throughput tuning.
+- [Technical Findings](docs/TECHNICAL_FINDINGS.md): Hardware interfaces, `/dev/eac` audio driver, PMIC registers, power tuning, boot optimizations, and input event nuances.
 - [System Architecture](hosted_linux_port/docs/ARCHITECTURE.md): Architecture block diagrams, boot sequence flow, storage layout, and HAL implementation map.
 - [Audio Subsystem](hosted_linux_port/docs/AUDIO_SUBSYSTEM.md): MediaTek EAC driver, pop elimination mechanisms, bit-perfect clock switching, and gain staging.
 - [Power Management](hosted_linux_port/docs/POWER_MANAGEMENT.md): Idle battery drain fixes (< 5mA standby), CPU frequency governors, core offlining, and Always-On Display (AOD).

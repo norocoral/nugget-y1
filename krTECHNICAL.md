@@ -9,6 +9,7 @@
 ## 기술 문서 및 가이드 목록
 
 상세 서브시스템 사양, 개발자 매뉴얼 및 리버스 엔지니어링 기록:
+- **[iPod 5.5G USB 모드 및 동기화 엔진](docs/kr/IPOD_SYNC.md)** ([English](docs/IPOD_SYNC.md)): 기기 자체 온디바이스 양방향 iTunes ↔ Rockbox 동기화, Apple 5.5G 하드웨어 스푸핑, TagCache .tcd 생성, .ithmb 앨범아트 추출, 비디오 DB 및 듀얼코어 터보 잠금 안내.
 - **[모듈식 빌드 시스템 가이드](docs/kr/BUILD_GUIDE.md)** ([English](docs/BUILD_GUIDE.md)): 분리형 아키텍처, 터미널 그래픽 메뉴(`--gui`), `build.conf` 설정 레퍼런스, 명령행 플래그, 독립형 SDK 빌드 및 플래시 절차.
 - **[`liby1` 개발자 매뉴얼 및 API 가이드](docs/kr/LIBY1_GUIDE.md)** ([English](docs/LIBY1_GUIDE.md)): 디스플레이, 오디오, 입력, 전원, CPU, FM 라디오, USB 가젯을 제어하는 전체 C API 레퍼런스.
 - **[시스템 아키텍처](docs/kr/ARCHITECTURE.md)** ([English](docs/ARCHITECTURE.md)): 구성 요소 다이어그램, 부팅 시퀀스 흐름, 스토리지 계층 구조(`.system` vs `.rockbox`) 및 HAL 매핑.
@@ -25,7 +26,7 @@
 - `initramfs/`: C 언어로 작성된 PID 1 `/init`. 부팅 CPU 부스트, 반응형 MicroSD 탐색, 프레임버퍼 상태 화면 표시, 부트로더 메뉴 및 Rockbox/커스텀 앱 실행을 담당.
 - `audio/`: 독립형 `unmute_eac.c` 테스트 유틸리티 및 `init_audio.sh` 설정 스크립트.
 - `splash/`: 소스 PNG 상태 화면 이미지 (`boot.png`, `connect.png`, `errconnect.png`, `error.png`, `sdcard.png`).
-- `bootl_image_assets/`: 부트로더 메뉴 PNG 아이콘 (Nugget, Android, Shut Down, USB).
+- `bootl_image_assets/`: 부트로더 메뉴 PNG 아이콘 (Rockbox, MeUI, User Software, Android, Shut Down, USB Mass Storage, Linux Terminal).
 - `Themify2/`: SD 카드 배포용 번들 커스텀 Rockbox 테마, 글꼴, 아이콘 및 코덱.
 - `tools/`: 모듈식 빌드 도구, 터미널 GUI 설정기(`build_tui.py`), 스플래시 이미지 변환기(`convert_splash.py`), MTK 부트 이미지 패커(`mkbootimg_mtk.py`), CPIO 램디스크 생성기(`build_initramfs.py`).
 - `build.conf`: 중앙 빌드 구성 파일.

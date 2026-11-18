@@ -9,6 +9,7 @@ This directory contains the decoupled build system, minimal Linux initramfs, sta
 ## Technical Documentation & Guides
 
 Detailed subsystem specifications, developer manuals, and reverse engineering notes:
+- **[iPod 5.5G USB Mode & Sync Engine](docs/IPOD_SYNC.md)** ([한국어](docs/kr/IPOD_SYNC.md)): Complete guide to on-device bidirectional iTunes ↔ Rockbox sync, Apple 5.5G hardware spoofing, TagCache .tcd generation, .ithmb artwork extraction, video DB, and turbo lock.
 - **[Modular Build System Guide](docs/BUILD_GUIDE.md)** ([한국어](docs/kr/BUILD_GUIDE.md)): Decoupled architecture, Terminal GUI (`--gui`), `build.conf` reference, CLI flags, standalone SDK builds, and flashing instructions.
 - **[`liby1` Developer Manual & API Guide](docs/LIBY1_GUIDE.md)** ([한국어](docs/kr/LIBY1_GUIDE.md)): Complete C API documentation for display, audio, input, power, CPU, FM radio, and USB gadget.
 - **[System Architecture](docs/ARCHITECTURE.md)** ([한국어](docs/kr/ARCHITECTURE.md)): Component diagrams, boot sequence flow, storage hierarchy (`.system` vs `.rockbox`), and HAL mapping.
@@ -25,7 +26,7 @@ Detailed subsystem specifications, developer manuals, and reverse engineering no
 - `initramfs/`: PID 1 `/init` in C. Handles boot CPU boosting, reactive MicroSD discovery, framebuffer status screens, Bootloader Menu, and handoff to Rockbox or custom app.
 - `audio/`: Standalone `unmute_eac.c` test utility and `init_audio.sh` setup script.
 - `splash/`: Source PNG status screens (`boot.png`, `connect.png`, `errconnect.png`, `error.png`, `sdcard.png`).
-- `bootl_image_assets/`: Bootloader menu PNG icons (Nugget, Android, Shut Down, USB).
+- `bootl_image_assets/`: Bootloader menu PNG icons (Rockbox, MeUI, User Software, Android, Shut Down, USB Mass Storage, Linux Terminal).
 - `Themify2/`: Pre-bundled custom Rockbox theme, fonts, icons, and codecs for the SD card distribution.
 - `tools/`: Modular build tools, Terminal GUI configurator (`build_tui.py`), splash image converter (`convert_splash.py`), MTK boot image packer (`mkbootimg_mtk.py`), and CPIO ramdisk generator (`build_initramfs.py`).
 - `build.conf`: Central build configuration file.

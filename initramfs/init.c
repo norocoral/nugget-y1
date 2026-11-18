@@ -18,6 +18,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
@@ -94,6 +95,8 @@ static int read_text_file(const char *path, char *buffer, size_t size)
     buffer[strcspn(buffer, "\r\n")] = '\0';
     return 1;
 }
+
+static int is_ipod_usb_mode_enabled(void);
 
 struct process_cpu_sample {
     int pid;
@@ -399,6 +402,15 @@ static void write_sysfs(const char *path, const char *val)
     int fd = open(path, O_WRONLY | O_CLOEXEC);
     if (fd >= 0) {
         (void)!write(fd, val, strlen(val));
+        close(fd);
+    }
+}
+
+static void write_sysfs_exact(const char *path, const void *buf, size_t len)
+{
+    int fd = open(path, O_WRONLY | O_CLOEXEC);
+    if (fd >= 0) {
+        (void)!write(fd, buf, len);
         close(fd);
     }
 }
@@ -1368,7 +1380,7 @@ static void run_usb_serial_shell(const char *tty_name, int tab_num)
         }
 
         /* Immediate greeting banner upon COM port open */
-        char banner[1024];
+        char banner[2048];
         snprintf(banner, sizeof(banner),
             "Nugget for Y1 terminal [Tab %d: /dev/%s]\r\n"
             "\r\n"
@@ -1414,8 +1426,8 @@ static void run_usb_serial_shell(const char *tty_name, int tab_num)
             setsid();
             ioctl(0, TIOCSCTTY, 1);
 
-            setenv("PATH", "/bin:/sbin:/usr/bin:/usr/sbin:/mnt/sdcard/.system/bin:/mnt/sdcard/.rockbox/bin:/mnt/sdcard/.meui/bin:/mnt/sdcard/.rockwheel/bin:/mnt/sdcard/.custom/bin", 1);
-            setenv("LD_LIBRARY_PATH", "/mnt/sdcard/.meui/lib:/mnt/sdcard/.rockwheel/lib:/mnt/sdcard/.custom/lib:/mnt/sdcard/.system/lib:/mnt/sdcard/.rockbox/lib:/lib:/usr/lib", 1);
+            setenv("PATH", "/bin:/sbin:/usr/bin:/usr/sbin:/mnt/sdcard/.system/bin:/mnt/sdcard/.rockbox/bin:/mnt/sdcard/.meui/bin:/mnt/sdcard/.custom/bin", 1);
+            setenv("LD_LIBRARY_PATH", "/mnt/sdcard/.meui/lib:/mnt/sdcard/.custom/lib:/mnt/sdcard/.system/lib:/mnt/sdcard/.rockbox/lib:/lib:/usr/lib", 1);
             setenv("HOME", "/mnt/sdcard", 1);
             setenv("TERM", "vt100", 1);
             setenv("USER", "root", 1);
@@ -1623,6 +1635,10 @@ static void run_bootloader_menu(void)
                         } else if (action_id == 5) {
                             /* Pick 6: USB Mass Storage */
                             log_line("Bootloader Menu: USB mode selected.\n");
+                            if (is_ipod_usb_mode_enabled() && access("/bin/ipod_sync", X_OK) == 0) {
+                                log_line("Syncing Rockbox metadata to iTunes before USB attach...\n");
+                                (void)!system("/bin/ipod_sync pre");
+                            }
                             setup_usb_gadget(active_sd_dev[0] ? active_sd_dev : NULL,
                                              active_ext_dev[0] ? active_ext_dev : NULL);
                             display_screen("bootl_usb");
@@ -1672,8 +1688,15 @@ static void run_bootloader_menu(void)
                             write_sysfs("/sys/class/android_usb/android0/f_mass_storage/lun0/file", "\n");
                             write_sysfs("/sys/class/android_usb/android0/f_mass_storage/lun/file", "\n");
                             write_sysfs("/sys/class/android_usb/android0/f_mass_storage/lun1/file", "\n");
+                            write_sysfs("/sys/class/android_usb/android0/f_mass_storage/bicr", "0\n");
                             write_sysfs("/sys/class/android_usb/android0/enable", "0\n");
                             sync();
+                            write_sysfs("/proc/sys/vm/drop_caches", "3\n");
+
+                            if (is_ipod_usb_mode_enabled() && access("/bin/ipod_sync", X_OK) == 0) {
+                                log_line("Converting iPod/iTunes database to Rockbox after USB...\n");
+                                (void)!system("/bin/ipod_sync post");
+                            }
 
                             /* Debounce before returning to menu */
                             usleep(200000);
@@ -1826,17 +1849,23 @@ static void power_off_from_error_screen(void)
 
 static void init_bluetooth_subsystem(void)
 {
-    /* Ensure /system/etc/firmware symlink points to /etc/firmware for mtk_stp_wmt.ko.
-     * Kernel modules (mtk_stp_wmt.ko, mtk_stp_bt.ko) and the WMT patch daemon are
-     * lazy-loaded on demand by Rockbox (bt-y1.c) only when Bluetooth is enabled. */
+    /* Ensure /system/etc/firmware and /system/etc/fmr symlinks point to /.system/bt
+     * for mtk_stp_wmt.ko and mtk_fm_drv.ko. */
     mkdir("/system", 0755);
     mkdir("/system/etc", 0755);
     unlink("/system/etc/firmware");
     (void)!symlink("/etc/firmware", "/system/etc/firmware");
+    unlink("/etc/firmware/mt6627");
+    (void)!symlink("/.system/bt/mt6627", "/etc/firmware/mt6627");
+    unlink("/etc/fmr");
+    (void)!symlink("/.system/bt/fmr", "/etc/fmr");
+    unlink("/system/etc/fmr");
+    (void)!symlink("/.system/bt/fmr", "/system/etc/fmr");
     mkdir("/data", 0777);
 
     if (access("/dev/stpwmt", F_OK) != 0) mknod("/dev/stpwmt", S_IFCHR | 0666, makedev(190, 0));
     if (access("/dev/stpbt",  F_OK) != 0) mknod("/dev/stpbt",  S_IFCHR | 0666, makedev(192, 0));
+    if (access("/dev/fm",     F_OK) != 0) mknod("/dev/fm",     S_IFCHR | 0666, makedev(193, 0));
 }
 
 static void enable_touch_keys(void)
@@ -2008,28 +2037,297 @@ static int is_usb_power_online(void)
     return 0;
 }
 
+static int is_ipod_usb_mode_enabled(void)
+{
+    char buf[64];
+    if (read_text_file("/mnt/sdcard/.system/ipod_usb_mode", buf, sizeof(buf))) {
+        return atoi(buf) != 0 ? 1 : 0;
+    }
+
+    FILE *cfg = fopen("/mnt/sdcard/.rockbox/config.cfg", "r");
+    if (cfg) {
+        char line[256];
+        while (fgets(line, sizeof(line), cfg)) {
+            if (strncmp(line, "y1 ipod usb mode:", 17) == 0) {
+                const char *val = line + 17;
+                while (*val == ' ' || *val == '\t') val++;
+                fclose(cfg);
+                return (strncmp(val, "on", 2) == 0 || *val == '1') ? 1 : 0;
+            }
+        }
+        fclose(cfg);
+    }
+    return 1;
+}
+
+static void read_ipod_usb_serial(char *out, size_t out_sz)
+{
+    snprintf(out, out_sz, "000A270019B48C1F\n");
+    FILE *fp = fopen("/mnt/sdcard/iPod_Control/Device/SysInfo", "r");
+    if (!fp)
+        return;
+
+    char line[256];
+    while (fgets(line, sizeof(line), fp)) {
+        if (strncmp(line, "FirewireGuid:", 13) == 0) {
+            const char *p = line + 13;
+            while (*p == ' ' || *p == '\t') p++;
+            if (p[0] == '0' && (p[1] == 'x' || p[1] == 'X'))
+                p += 2;
+            char hex[32];
+            size_t n = 0;
+            while (n + 1 < sizeof(hex) &&
+                   ((p[n] >= '0' && p[n] <= '9') ||
+                    (p[n] >= 'a' && p[n] <= 'f') ||
+                    (p[n] >= 'A' && p[n] <= 'F'))) {
+                char c = p[n];
+                if (c >= 'a' && c <= 'f')
+                    c = (char)(c - 'a' + 'A');
+                hex[n++] = c;
+            }
+            hex[n] = '\0';
+            if (n >= 8)
+                snprintf(out, out_sz, "%s\n", hex);
+            break;
+        }
+    }
+    fclose(fp);
+}
+
+/* Linux f_mass_storage enforces: if (count > 28) return -EINVAL;
+ * Appending a newline causes 28-char inquiry strings to be 29 bytes and silently fail.
+ * Write exact raw bytes without newline across all possible lun inquiry sysfs nodes. */
+static void write_inquiry_string(const char *inq)
+{
+    static const char * const inq_paths[] = {
+        "/sys/class/android_usb/android0/f_mass_storage/lun0/inquiry_string",
+        "/sys/class/android_usb/android0/f_mass_storage/lun1/inquiry_string",
+        "/sys/class/android_usb/android0/f_mass_storage/lun/inquiry_string",
+        "/sys/class/android_usb/android0/f_mass_storage/inquiry_string",
+        "/sys/devices/virtual/android_usb/android0/f_mass_storage/lun0/inquiry_string",
+        "/sys/devices/virtual/android_usb/android0/f_mass_storage/lun1/inquiry_string",
+        "/sys/devices/virtual/android_usb/android0/f_mass_storage/lun/inquiry_string",
+        "/sys/devices/virtual/android_usb/android0/f_mass_storage/inquiry_string",
+        NULL
+    };
+    static const char * const cdrom_paths[] = {
+        "/sys/class/android_usb/android0/f_mass_storage/lun0/cdrom",
+        "/sys/class/android_usb/android0/f_mass_storage/lun1/cdrom",
+        "/sys/class/android_usb/android0/f_mass_storage/lun/cdrom",
+        "/sys/class/android_usb/android0/f_mass_storage/cdrom",
+        "/sys/devices/virtual/android_usb/android0/f_mass_storage/lun0/cdrom",
+        "/sys/devices/virtual/android_usb/android0/f_mass_storage/lun1/cdrom",
+        "/sys/devices/virtual/android_usb/android0/f_mass_storage/lun/cdrom",
+        "/sys/devices/virtual/android_usb/android0/f_mass_storage/cdrom",
+        NULL
+    };
+    for (int i = 0; cdrom_paths[i]; i++) {
+        write_sysfs(cdrom_paths[i], "0\n");
+    }
+    if (!inq)
+        return;
+    size_t len = strlen(inq);
+    if (len > 28)
+        len = 28;
+    for (int i = 0; inq_paths[i]; i++) {
+        write_sysfs_exact(inq_paths[i], inq, len);
+    }
+}
+
+static void ensure_ipod_device_files(void)
+{
+    mkdir("/mnt/sdcard/iPod_Control", 0777);
+    mkdir("/mnt/sdcard/iPod_Control/Device", 0777);
+    mkdir("/mnt/sdcard/iPod_Control/iTunes", 0777);
+    mkdir("/mnt/sdcard/iPod_Control/Music", 0777);
+    mkdir("/mnt/sdcard/iPod_Control/Artwork", 0777);
+    mkdir("/mnt/sdcard/Playlists", 0777);
+    mkdir("/mnt/sdcard/Videos", 0777);
+    mkdir("/mnt/sdcard/.system", 0777);
+    mkdir("/mnt/sdcard/.rockbox", 0777);
+    mkdir("/mnt/sdcard/.rockbox/albumart", 0777);
+    mkdir("/mnt/sdcard/.rockbox/video_thumbs", 0777);
+
+    for (int i = 0; i < 20; i++) {
+        char fdir[128];
+        snprintf(fdir, sizeof(fdir), "/mnt/sdcard/iPod_Control/Music/F%02d", i);
+        mkdir(fdir, 0777);
+    }
+
+    if (access("/mnt/sdcard/iPod_Control", F_OK) == 0 && access("/iPod_Control", F_OK) != 0)
+        (void)!symlink("/mnt/sdcard/iPod_Control", "/iPod_Control");
+    if (access("/mnt/sdcard/Playlists", F_OK) == 0 && access("/Playlists", F_OK) != 0)
+        (void)!symlink("/mnt/sdcard/Playlists", "/Playlists");
+    if (access("/mnt/sdcard/Videos", F_OK) == 0 && access("/Videos", F_OK) != 0)
+        (void)!symlink("/mnt/sdcard/Videos", "/Videos");
+
+    char serial[48] = {0};
+    char guid[32] = {0};
+    snprintf(serial, sizeof(serial), "8K7289LAV9K");
+    snprintf(guid, sizeof(guid), "000A270019B48C1F");
+
+    FILE *rfp = fopen("/mnt/sdcard/iPod_Control/Device/SysInfo", "r");
+    if (rfp) {
+        char line[256];
+        while (fgets(line, sizeof(line), rfp)) {
+            if (strncmp(line, "pszSerialNumber:", 16) == 0) {
+                const char *p = line + 16;
+                while (*p == ' ' || *p == '\t') p++;
+                size_t l = strlen(p);
+                while (l > 0 && (p[l-1] == '\r' || p[l-1] == '\n' || p[l-1] == ' ')) l--;
+                if (l > 0 && l < sizeof(serial)) {
+                    memcpy(serial, p, l);
+                    serial[l] = '\0';
+                }
+            } else if (strncmp(line, "FirewireGuid:", 13) == 0) {
+                const char *p = line + 13;
+                while (*p == ' ' || *p == '\t') p++;
+                if (p[0] == '0' && (p[1] == 'x' || p[1] == 'X')) p += 2;
+                char hex[32]; size_t n = 0;
+                while (n + 1 < sizeof(hex) && isxdigit((unsigned char)p[n])) {
+                    hex[n] = (char)toupper((unsigned char)p[n]);
+                    n++;
+                }
+                hex[n] = '\0';
+                if (n >= 8) snprintf(guid, sizeof(guid), "%s", hex);
+            }
+        }
+        fclose(rfp);
+    }
+
+    struct stat st;
+    if (stat("/mnt/sdcard/iPod_Control/Device/SysInfo", &st) != 0 || st.st_size < 100) {
+        FILE *wfp = fopen("/mnt/sdcard/iPod_Control/Device/SysInfo", "w");
+        if (wfp) {
+            fprintf(wfp,
+                "BoardHwName: iPod M25\r\n"
+                "pszSerialNumber: %s\r\n"
+                "ModelNumStr: MA450\r\n"
+                "FirewireGuid: 0x%s\r\n"
+                "HddFirmwareRev: BU011A\r\n"
+                "RegionCode: FB(0x001A)\r\n"
+                "PolicyFlags: 0x00000000\r\n"
+                "buildID: 0x06118000 (6.1.1)\r\n"
+                "visibleBuildID: 0x01128000 (1.2.1)\r\n"
+                "boardHwRev: 0x00000000 (0.0 0)\r\n"
+                "boardHwSwInterfaceRev: 0x000C0005 (0.0.12 5)\r\n"
+                "bootLoaderImageRev: 0x00000000 (0.0 0)\r\n"
+                "diskModeImageRev: 0x00000000 (0.0 0)\r\n"
+                "diagImageRev: 0x00000000 (0.0 0)\r\n"
+                "osImageRev: 0x00000000 (0.0 0)\r\n"
+                "iPodFamily: 0x00000006\r\n"
+                "updaterFamily: 0x00000006\r\n",
+                serial, guid);
+            fflush(wfp);
+            fclose(wfp);
+        }
+    }
+}
+
 static void setup_usb_gadget(const char *sd_dev, const char *ext_dev)
 {
     log_line("Configuring USB Mass Storage gadget for PC access...\n");
+
+    int ipod_mode = is_ipod_usb_mode_enabled();
+    if (ipod_mode) {
+        ensure_ipod_device_files();
+        if (access("/bin/ipod_sync", X_OK) == 0) {
+            (void)!system("/bin/ipod_sync init");
+        }
+    }
+    sync();
 
     /* 1. Disable gadget while reconfiguring */
     write_sysfs("/sys/class/android_usb/android0/enable", "0\n");
 
     /* 2. Configure USB descriptors */
-    write_sysfs("/sys/class/android_usb/android0/idVendor", "0e8d\n");
-    write_sysfs("/sys/class/android_usb/android0/idProduct", "0001\n");
-    write_sysfs("/sys/class/android_usb/android0/iManufacturer", "Innioasis\n");
-    write_sysfs("/sys/class/android_usb/android0/iProduct", "Y1 Rockbox Player\n");
     write_sysfs("/sys/class/android_usb/android0/functions", "mass_storage\n");
+    write_sysfs("/sys/class/android_usb/android0/bDeviceClass", "0\n");
+    write_sysfs("/sys/class/android_usb/android0/bDeviceSubClass", "0\n");
+    write_sysfs("/sys/class/android_usb/android0/bDeviceProtocol", "0\n");
 
-    /* 3. Determine primary backing device for LUN0 (Physical MicroSD) */
-    const char *target_lun0 = sd_dev;
-    if (!target_lun0 || access(target_lun0, F_OK) != 0) {
-        if (access("/dev/block/mmcblk1", F_OK) == 0) {
-            target_lun0 = "/dev/block/mmcblk1";
-        } else if (access("/dev/block/mmcblk1p1", F_OK) == 0) {
-            target_lun0 = "/dev/block/mmcblk1p1";
+    if (ipod_mode) {
+        char serial_buf[48];
+        read_ipod_usb_serial(serial_buf, sizeof(serial_buf));
+
+        if (access("/lib/modules/ipod_vpd.ko", F_OK) == 0 &&
+            access("/sys/module/ipod_vpd", F_OK) != 0) {
+            char dev_serial[32] = "8K7289LAV9K";
+            char dev_guid[48] = "000A270019B48C1F";
+            snprintf(dev_guid, sizeof(dev_guid), "%s", serial_buf);
+            size_t gl = strlen(dev_guid);
+            while (gl > 0 && (dev_guid[gl - 1] == '\n' || dev_guid[gl - 1] == '\r'))
+                dev_guid[--gl] = '\0';
+
+            FILE *sfp = fopen("/mnt/sdcard/iPod_Control/Device/SysInfo", "r");
+            if (sfp) {
+                char sline[256];
+                while (fgets(sline, sizeof(sline), sfp)) {
+                    if (strncmp(sline, "pszSerialNumber:", 16) == 0) {
+                        const char *p = sline + 16;
+                        while (*p == ' ' || *p == '\t') p++;
+                        size_t n = 0;
+                        while (n + 1 < sizeof(dev_serial) &&
+                               ((p[n] >= '0' && p[n] <= '9') ||
+                                (p[n] >= 'A' && p[n] <= 'Z') ||
+                                (p[n] >= 'a' && p[n] <= 'z'))) {
+                            dev_serial[n] = p[n];
+                            n++;
+                        }
+                        if (n > 0)
+                            dev_serial[n] = '\0';
+                        break;
+                    }
+                }
+                fclose(sfp);
+            }
+
+            char cmd[256];
+            snprintf(cmd, sizeof(cmd),
+                     "insmod /lib/modules/ipod_vpd.ko serial=%s guid=%s",
+                     dev_serial, dev_guid);
+            (void)!system(cmd);
         }
+
+        write_sysfs("/sys/class/android_usb/android0/idVendor", "05ac\n");
+        write_sysfs("/sys/class/android_usb/android0/idProduct", "1209\n");
+        write_sysfs("/sys/class/android_usb/android0/bcdDevice", "0002\n");
+        write_sysfs("/sys/class/android_usb/android0/iManufacturer", "Apple\n");
+        write_sysfs("/sys/class/android_usb/android0/iProduct", "iPod\n");
+        write_sysfs("/sys/class/android_usb/android0/iSerial", serial_buf);
+        write_inquiry_string("Apple___iPod____________1.62");
+        /* Disable MediaTek BICR (Built-in CD-ROM) so the device presents the
+         * physical MicroSD card directly as a Direct Access Disk (SCSI TYPE_DISK 0x00).
+         * Do NOT enable bicr (Built-In CD-ROM) as it overrides LUN0 with internal storage/ISO.
+         */
+        write_sysfs("/sys/class/android_usb/android0/f_mass_storage/bicr", "0\n");
+        write_sysfs("/sys/class/android_usb/android0/f_mass_storage/nluns", "1\n");
+        write_sysfs("/sys/class/android_usb/android0/f_mass_storage/luns", "1\n");
+    } else {
+        if (access("/sys/module/ipod_vpd", F_OK) == 0)
+            (void)!system("rmmod ipod_vpd");
+        write_sysfs("/sys/class/android_usb/android0/idVendor", "0e8d\n");
+        write_sysfs("/sys/class/android_usb/android0/idProduct", "0001\n");
+        write_sysfs("/sys/class/android_usb/android0/bcdDevice", "0100\n");
+        write_sysfs("/sys/class/android_usb/android0/iManufacturer", "Innioasis\n");
+        write_sysfs("/sys/class/android_usb/android0/iProduct", "Y1 Rockbox Player\n");
+        write_sysfs("/sys/class/android_usb/android0/iSerial", "0123456789ABCDEF\n");
+        write_inquiry_string("Innioasis_Y1_Player_____0100");
+        write_sysfs("/sys/class/android_usb/android0/f_mass_storage/bicr", "0\n");
+    }
+
+    /* 3. Determine primary backing device for LUN0 (prefer whole raw MicroSD disk) */
+    const char *target_lun0 = NULL;
+    if (access("/dev/block/mmcblk1", F_OK) == 0) {
+        target_lun0 = "/dev/block/mmcblk1";
+    } else if (access("/dev/mmcblk1", F_OK) == 0) {
+        target_lun0 = "/dev/mmcblk1";
+    } else if (sd_dev && access(sd_dev, F_OK) == 0) {
+        target_lun0 = sd_dev;
+    } else if (access("/dev/block/mmcblk1p1", F_OK) == 0) {
+        target_lun0 = "/dev/block/mmcblk1p1";
+    } else if (access("/dev/mmcblk1p1", F_OK) == 0) {
+        target_lun0 = "/dev/mmcblk1p1";
     }
 
     /* 4. Configure LUN0 backing file BEFORE enabling gadget */
@@ -2053,8 +2351,8 @@ static void setup_usb_gadget(const char *sd_dev, const char *ext_dev)
         log_line("Notice: Waiting for MicroSD insertion to bind USB LUN0.\n");
     }
 
-    /* 5. Configure LUN1 for secondary partition if present */
-    if (ext_dev && access(ext_dev, F_OK) == 0) {
+    /* 5. Configure LUN1 for secondary partition if present (strictly disabled in iPod mode) */
+    if (!ipod_mode && ext_dev && access(ext_dev, F_OK) == 0) {
         char buf[128];
         snprintf(buf, sizeof(buf), "%s\n", ext_dev);
 
@@ -2066,16 +2364,40 @@ static void setup_usb_gadget(const char *sd_dev, const char *ext_dev)
         snprintf(logmsg, sizeof(logmsg), "Attached %s to USB LUN1 (Secondary Partition).\n", ext_dev);
         log_line(logmsg);
     } else {
-        /* Clear LUN1 if no secondary storage */
+        /* Clear LUN1 if no secondary storage or in iPod mode */
         write_sysfs("/sys/class/android_usb/android0/f_mass_storage/lun1/file", "\n");
     }
 
-    /* 6. Enable gadget after LUNs are assigned */
+    /* 6. Tune MMC block queue for maximum USB 2.0 sequential throughput */
+    write_sysfs("/sys/block/mmcblk1/queue/scheduler", "deadline\n");
+    write_sysfs("/sys/block/mmcblk1/queue/scheduler", "noop\n");
+    write_sysfs("/sys/block/mmcblk1/queue/read_ahead_kb", "2048\n");
+    write_sysfs("/sys/block/mmcblk1/bdi/read_ahead_kb", "2048\n");
+    write_sysfs("/sys/block/mmcblk1/queue/nr_requests", "256\n");
+    write_sysfs("/sys/block/mmcblk1/queue/nr_requests", "512\n");
+    write_sysfs("/sys/block/mmcblk1/queue/iostats", "0\n");
+    write_sysfs("/sys/block/mmcblk1/queue/add_random", "0\n");
+    write_sysfs("/sys/block/mmcblk1/queue/nomerges", "0\n");
+    {
+        int hwfd = open("/sys/block/mmcblk1/queue/max_hw_sectors_kb", O_RDONLY);
+        if (hwfd >= 0) {
+            char hw_buf[32] = {0};
+            ssize_t r = read(hwfd, hw_buf, sizeof(hw_buf) - 1);
+            close(hwfd);
+            if (r > 0) {
+                int hw_max = atoi(hw_buf);
+                if (hw_max > 128) {
+                    char kb_str[16];
+                    snprintf(kb_str, sizeof(kb_str), "%d\n", hw_max > 512 ? 512 : hw_max);
+                    write_sysfs("/sys/block/mmcblk1/queue/max_sectors_kb", kb_str);
+                }
+            }
+        }
+    }
+
+    /* 7. Enable gadget after LUNs and queue tuning are assigned */
     write_sysfs("/sys/class/android_usb/android0/enable", "1\n");
-    /* Suppress MediaTek USB clock boost that locks CPU to 1.0GHz */
-    write_sysfs("/proc/cpufreq/usb_raise_freq", "0\n");
-    write_sysfs("/proc/cpufreq/MTK_PPM_POLICY", "DISABLE\n");
-    write_sysfs("/proc/cpufreq/MTK_PPM_POLICY", "0\n");
+    write_sysfs("/proc/cpufreq/usb_raise_freq", "1\n");
     log_line("USB Mass Storage activated (PC music transfer ready).\n");
 }
 
@@ -2089,6 +2411,7 @@ int main(int argc, char *argv[])
 
     mkdir("/sys", 0755);
     mount("sysfs", "/sys", "sysfs", 0, NULL);
+    write_sysfs("/sys/class/android_usb/android0/f_mass_storage/bicr", "0\n");
 
     /* Boost CPU to 1.2 GHz Dual-Core immediately for maximum boot performance */
     boost_cpu_for_boot();
@@ -2288,10 +2611,14 @@ int main(int argc, char *argv[])
         }
 
         /* Outside of Rockbox:
-         * Drop CPU to powersave while waiting in recovery, re-bind USB gadget */
+         * Drop CPU to powersave while idle in recovery, re-bind USB gadget */
         apply_powersave_cpu();
+        if (is_ipod_usb_mode_enabled() && access("/bin/ipod_sync", X_OK) == 0) {
+            (void)!system("/bin/ipod_sync init");
+        }
         setup_usb_gadget(active_sd_dev[0] ? active_sd_dev : NULL,
                          active_ext_dev[0] ? active_ext_dev : NULL);
+        int saw_usb_pc = 0;
 
         /* Recovery wait loop:
          * - If critical error & USB connected to PC: errconnect.png
@@ -2340,9 +2667,23 @@ int main(int argc, char *argv[])
                 }
             }
 
+            if (usb_to_pc && !saw_usb_pc) {
+                saw_usb_pc = 1;
+                boost_cpu_for_boot();
+            } else if (!usb_to_pc && saw_usb_pc) {
+                apply_powersave_cpu();
+            }
+
             /* If issues resolved and not currently connected to PC, continue operation! */
             if (rb_avail && !usb_to_pc) {
                 log_line("Issues resolved! Continuing operation...\n");
+                write_sysfs("/sys/class/android_usb/android0/enable", "0\n");
+                sync();
+                write_sysfs("/proc/sys/vm/drop_caches", "3\n");
+                if (saw_usb_pc && is_ipod_usb_mode_enabled() && access("/bin/ipod_sync", X_OK) == 0) {
+                    boost_cpu_for_boot();
+                    (void)!system("/bin/ipod_sync post");
+                }
                 boost_cpu_for_boot();
                 rockbox_found = 1;
                 crashed = 0;

@@ -4,7 +4,7 @@
 
 `liby1`은 **Innioasis Y1**(MediaTek MT6572 SoC, MT6323 PMIC, MT6627 무선 칩셋)의 모든 하드웨어 드라이버, sysfs 제어 노드, 커널 ioctl 인터페이스를 감싸는 외부 종속성 제로의 독립형 C 라이브러리입니다.
 
-개발자는 커널 레지스터 맵이나 저수준 ioctl을 역공학할 필요 없이, 검증된 공식 하드웨어 추상화 계층(HAL)을 활용하여 독립형 게임, 에뮬레이터, 커스텀 미디어 플레이어(MeUI, RockWheel 등), GUI 프런트엔드 및 유틸리티를 손쉽게 개발하고 포팅할 수 있습니다.
+개발자는 커널 레지스터 맵이나 저수준 ioctl을 역공학할 필요 없이, 검증된 공식 하드웨어 추상화 계층(HAL)을 활용하여 독립형 게임, 에뮬레이터, 커스텀 미디어 플레이어(MeUI 등), GUI 프런트엔드 및 유틸리티를 손쉽게 개발하고 포팅할 수 있습니다.
 
 ---
 
@@ -20,6 +20,7 @@
    - [4.5 오디오: EAC DMA 및 MT6323 DAC/앰프 (`y1_audio`)](#45-오디오-eac-dma-및-mt6323-dac앰프-y1_audio)
    - [4.6 FM 라디오 튜너 (`y1_tuner`)](#46-fm-라디오-튜너-y1_tuner)
    - [4.7 USB 대용량 저장소 가젯 (`y1_usb`)](#47-usb-대용량-저장소-가젯-y1_usb)
+   - [4.8 iPod 5.5G USB 모드 및 양방향 동기화 엔진 (`y1_ipod_sync`)](#48-ipod-55g-usb-모드-및-양방향-동기화-엔진-y1_ipod_sync)
 5. [포팅 가이드: Y1에서 나만의 경험 제작하기](#5-포팅-가이드-y1에서-나만의-경험-제작하기)
    - [5.1 표준 Y1 메인 루프 아키텍처](#51-표준-y1-메인-루프-아키텍처)
    - [5.2 프레임버퍼 / SDL / Raylib / LVGL 애플리케이션 포팅](#52-프레임버퍼--sdl--raylib--lvgl-애플리케이션-포팅)
@@ -192,6 +193,54 @@ if (y1_audio_open(44100) == 0) {
     y1_audio_close();
 }
 ```
+
+### 4.6 FM 라디오 튜너 (`y1_tuner`)
+```c
+y1_fm_power(true);
+y1_fm_tune(98500000); // 98.5 MHz
+int rssi = y1_fm_get_rssi();
+bool locked = y1_fm_is_tuned();
+y1_fm_set_mute(false);
+```
+
+### 4.7 USB 대용량 저장소 가젯 (`y1_usb`)
+```c
+// iPod 5.5세대 스푸핑 모드 토글 (기본 활성화)
+y1_usb_set_ipod_mode(true);
+bool is_ipod = y1_usb_get_ipod_mode();
+
+// PC와 파일 동기화를 위한 USB 연결 활성화
+y1_usb_attach_mass_storage();
+
+// 호스트 컴퓨터에서 드라이브를 언마운트/꺼내기 했는지 확인
+if (y1_usb_check_host_ejected()) {
+    y1_usb_detach_mass_storage();
+}
+```
+
+### 4.8 iPod 5.5G USB 모드 및 양방향 동기화 엔진 (`y1_ipod_sync`)
+`liby1`은 Apple iTunes/iPod 파일 포맷과 Rockbox 데이터베이스/에셋 간의 완전 자동화된 온디바이스 변환 엔진을 내장하고 있습니다:
+
+```c
+// 데이터베이스 및 앨범아트 변환을 위한 1.30 GHz 듀얼코어 터보 고정
+y1_cpu_boost_for_conversion(true);
+
+// /iPod_Control/Device/SysInfo 및 SysInfoExtended XML 생성 확인
+y1_ipod_ensure_device_files();
+
+// 연결 전 동기화: Rockbox -> iTunes (재생 횟수, 별점, OTG 재생목록)
+y1_ipod_sync_pre_connect(NULL, NULL);
+
+// 연결 해제 후 변환: iTunes -> Rockbox (TagCache .tcd, 앨범아트, 비디오 DB, .m3u8)
+// iTunesDB 변경 여부를 감지하여 필요 시에만 고속 변환 수행
+y1_ipod_sync_post_disconnect_if_changed(progress_callback, NULL);
+
+// CPU 터보 잠금 해제
+y1_cpu_boost_for_conversion(false);
+```
+
+> [!TIP]
+> 세부 하드웨어 스푸핑 디스크립터 매핑, `.ithmb` 앨범아트 디코딩 및 스마트 재생목록 규칙에 관한 전체 문서는 **[iPod 5.5G USB 모드 및 동기화 가이드](IPOD_SYNC.md)** ([English](../IPOD_SYNC.md))를 참고하세요.
 
 ---
 

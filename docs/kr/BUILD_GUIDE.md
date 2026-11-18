@@ -222,10 +222,13 @@ fastboot reboot
 ## 7. 듀얼 부팅 및 부트로더 메뉴
 
 initramfs `/init`은 애플리케이션 시작 전에 그래픽 기반 부트로더 메뉴를 제공합니다:
-* **Pick 1 (Nugget):** Rockbox 또는 커스텀 앱으로 부팅합니다.
-* **Pick 2 (Android):** 루트 파일시스템을 순정 안드로이드 램디스크(`ramdisk_android.cpio.gz`)로 교체하고 안드로이드 OS로 부팅합니다.
-* **Pick 3 (Shut Down):** 기기 전원을 안전하게 끕니다.
-* **Pick 4 (USB Mode):** MicroSD를 USB 대용량 저장소(Mass Storage)로 호스트 PC에 연결하여 음악/파일 전송 모드로 전환합니다.
+* **Pick 1 (Rockbox):** MicroSD 카드의 Rockbox로 부팅합니다.
+* **Pick 2 (MeUI):** MeUI 프런트엔드를 실행합니다 (`.meui/meui` 존재 시).
+* **Pick 3 (User Software):** 사용자 정의 소프트웨어를 실행합니다 (`.custom/launch` 존재 시).
+* **Pick 4 (Android):** 루트 파일시스템을 순정 안드로이드 램디스크(`ramdisk_android.cpio.gz`)로 교체하고 안드로이드 OS로 부팅합니다.
+* **Pick 5 (Shut down):** 기기 전원을 안전하게 끕니다.
+* **Pick 6 (USB Mass Storage):** MicroSD를 USB 대용량 저장소(Mass Storage)로 호스트 PC에 연결하여 음악/파일 전송 모드로 전환합니다.
+* **Pick 7 (Linux terminal (USB)):** `/dev/ttyGS0` 및 `/dev/ttyGS1`을 통해 대화형 USB 시리얼 루트 셸을 실행합니다.
 
 ### 메뉴 강제 진입 (메뉴 버튼 바이패스)
 기기 전원을 켤 때 **MENU** 버튼을 누르고 있으면 설정 파일(`.system/system.cfg`)의 자동 부팅 설정과 상관없이 **항상** 부트로더 메뉴 화면에 즉시 진입합니다.

@@ -3,6 +3,7 @@
  ****************************************************************************/
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <stdint.h>
 #include <stdbool.h>
 #include <string.h>
@@ -12,26 +13,43 @@
 
 #include "liby1.h"
 
-#define FM_IOCTL_POWERUP   _IOWR('R', 0, int)
-#define FM_IOCTL_POWERDOWN _IOWR('R', 1, int)
-#define FM_IOCTL_TUNE      _IOWR('R', 2, struct y1_fm_tune_parm)
-#define FM_IOCTL_SEEK      _IOWR('R', 3, struct y1_fm_seek_parm)
-#define FM_IOCTL_SETVOL    _IOWR('R', 4, uint32_t)
-#define FM_IOCTL_GETVOL    _IOWR('R', 5, uint32_t *)
-#define FM_IOCTL_MUTE      _IOWR('R', 6, uint32_t)
-#define FM_IOCTL_GETRSSI   _IOWR('R', 7, int *)
+/* MediaTek MT6572/MT6627 FM ioctl codes verified from stock mtk_fm_drv.ko */
+#define FM_IOC_MAGIC          0xf5
+#define FM_IOCTL_POWERUP      _IOWR(FM_IOC_MAGIC, 0x00, int)
+#define FM_IOCTL_POWERDOWN    _IOWR(FM_IOC_MAGIC, 0x01, int)
+#define FM_IOCTL_TUNE         _IOWR(FM_IOC_MAGIC, 0x02, int)
+#define FM_IOCTL_SEEK         _IOWR(FM_IOC_MAGIC, 0x03, int)
+#define FM_IOCTL_SETVOL       _IOWR(FM_IOC_MAGIC, 0x04, int)
+#define FM_IOCTL_GETVOL       _IOWR(FM_IOC_MAGIC, 0x05, int)
+#define FM_IOCTL_MUTE         _IOWR(FM_IOC_MAGIC, 0x06, int)
+#define FM_IOCTL_GETRSSI      _IOWR(FM_IOC_MAGIC, 0x07, int)
+#define FM_IOCTL_GETMONOSTERO _IOWR(FM_IOC_MAGIC, 0x0d, int)
+#define FM_IOCTL_SETMONOSTERO _IOWR(FM_IOC_MAGIC, 0x0e, int)
+#define FM_IOCTL_IS_PWRUP     _IOWR(FM_IOC_MAGIC, 0x20, int)
+#define FM_IOCTL_GET_I2S_INFO _IOWR(FM_IOC_MAGIC, 0x21, int)
 
-struct y1_fm_tune_parm {
-    uint8_t  band;
-    uint16_t freq; /* Frequency in 100 kHz units: 875..1080 */
-    uint8_t  space;
+struct __attribute__((packed)) y1_fm_tune_parm {
+    uint8_t  err;
+    uint8_t  band;  /* 1 = 87.5 - 108.0 MHz */
+    uint8_t  space; /* 1 = 100 kHz */
+    uint8_t  hilo;  /* 0 = auto */
+    uint16_t freq;  /* Frequency in 100 kHz units: 875..1080 */
 };
 
-struct y1_fm_seek_parm {
+struct __attribute__((packed)) y1_fm_seek_parm {
+    uint8_t  err;
     uint8_t  band;
-    uint16_t freq;
-    uint8_t  seekdir;
     uint8_t  space;
+    uint8_t  hilo;
+    uint16_t freq;
+    uint8_t  seekdir; /* 0 = up, 1 = down */
+    uint8_t  seekth;
+};
+
+struct y1_fm_i2s_info {
+    int status;
+    int mode;
+    int rate;
 };
 
 static int  fm_fd = -1;
@@ -39,18 +57,34 @@ static int  current_freq_hz = 87500000;
 static bool tuner_powered = false;
 static bool is_muted = false;
 
+static void ensure_fm_module_loaded(void)
+{
+    if (access("/sys/module/mtk_stp_wmt", F_OK) != 0 &&
+        access("/.system/bt/mtk_stp_wmt.ko", F_OK) == 0) {
+        (void)!system("insmod /.system/bt/mtk_stp_wmt.ko");
+    }
+    if (access("/sys/module/mtk_fm_drv", F_OK) != 0 &&
+        access("/.system/bt/mtk_fm_drv.ko", F_OK) == 0) {
+        (void)!system("insmod /.system/bt/mtk_fm_drv.ko");
+    }
+}
+
 static void fm_open_dev(void)
 {
     if (fm_fd >= 0)
         return;
 
     const char *devs[] = { "/dev/fm", "/dev/radio0", "/dev/stpfm", NULL };
-    for (int i = 0; devs[i]; i++) {
-        fm_fd = open(devs[i], O_RDWR | O_CLOEXEC);
-        if (fm_fd >= 0) {
-            y1_logf("[liby1-fm] Opened FM radio device: %s (fd=%d)\n", devs[i], fm_fd);
-            break;
+    for (int attempt = 0; attempt < 2 && fm_fd < 0; attempt++) {
+        for (int i = 0; devs[i]; i++) {
+            fm_fd = open(devs[i], O_RDWR | O_CLOEXEC);
+            if (fm_fd >= 0) {
+                y1_logf("[liby1-fm] Opened FM radio device: %s (fd=%d)\n", devs[i], fm_fd);
+                break;
+            }
         }
+        if (fm_fd < 0 && attempt == 0)
+            ensure_fm_module_loaded();
     }
 }
 
@@ -65,16 +99,28 @@ static void fm_close_dev(void)
 int y1_fm_power(bool on)
 {
     if (on) {
-        tuner_powered = true;
         fm_open_dev();
+        tuner_powered = true;
         if (fm_fd >= 0) {
-            int pwr = 1;
-            ioctl(fm_fd, FM_IOCTL_POWERUP, &pwr);
+            struct y1_fm_tune_parm parm;
+            memset(&parm, 0, sizeof(parm));
+            parm.band  = 1;
+            parm.space = 1;
+            parm.hilo  = 0;
+            parm.freq  = (uint16_t)(current_freq_hz / 100000);
+            if (ioctl(fm_fd, FM_IOCTL_POWERUP, &parm) == 0) {
+                uint32_t vol = 15;
+                ioctl(fm_fd, FM_IOCTL_SETVOL, &vol);
+                struct y1_fm_i2s_info i2s = { 0, 1, 1 };
+                ioctl(fm_fd, FM_IOCTL_GET_I2S_INFO, &i2s);
+            }
         }
-        y1_fm_tune(current_freq_hz);
+        y1_audio_set_fm_route(true);
+        y1_fm_set_mute(is_muted);
         y1_log("[liby1-fm] FM Tuner powered ON\n");
     } else {
         tuner_powered = false;
+        y1_audio_set_fm_route(false);
         if (fm_fd >= 0) {
             int pwr = 0;
             ioctl(fm_fd, FM_IOCTL_POWERDOWN, &pwr);
@@ -91,12 +137,34 @@ int y1_fm_tune(int freq_hz)
     if (fm_fd >= 0 && tuner_powered) {
         struct y1_fm_tune_parm parm;
         memset(&parm, 0, sizeof(parm));
-        parm.band = 1; /* 87.5 - 108.0 MHz */
-        parm.freq = (uint16_t)(freq_hz / 100000);
-        parm.space = 1; /* 100 kHz */
-        ioctl(fm_fd, FM_IOCTL_TUNE, &parm);
+        parm.band  = 1;
+        parm.space = 1;
+        parm.hilo  = 0;
+        parm.freq  = (uint16_t)(freq_hz / 100000);
+        if (ioctl(fm_fd, FM_IOCTL_TUNE, &parm) == 0 && parm.freq > 0)
+            current_freq_hz = (int)parm.freq * 100000;
     }
     return 0;
+}
+
+int y1_fm_seek(int freq_hz, bool up)
+{
+    if (fm_fd < 0 || !tuner_powered)
+        return -1;
+
+    struct y1_fm_seek_parm parm;
+    memset(&parm, 0, sizeof(parm));
+    parm.band    = 1;
+    parm.space   = 1;
+    parm.hilo    = 0;
+    parm.freq    = (uint16_t)(freq_hz / 100000);
+    parm.seekdir = up ? 0 : 1;
+    parm.seekth  = 0;
+    if (ioctl(fm_fd, FM_IOCTL_SEEK, &parm) == 0 && parm.freq > 0) {
+        current_freq_hz = (int)parm.freq * 100000;
+        return current_freq_hz;
+    }
+    return -1;
 }
 
 int y1_fm_get_freq(void)
@@ -109,8 +177,10 @@ int y1_fm_set_mute(bool mute)
     is_muted = mute;
     if (fm_fd >= 0 && tuner_powered) {
         uint32_t m = is_muted ? 1 : 0;
-        ioctl(fm_fd, FM_IOCTL_MUTE, m);
+        ioctl(fm_fd, FM_IOCTL_MUTE, &m);
     }
+    if (tuner_powered)
+        y1_audio_set_fm_route(!is_muted);
     return 0;
 }
 
@@ -121,21 +191,38 @@ bool y1_fm_is_muted(void)
 
 int y1_fm_get_rssi(void)
 {
+    int rssi = 50;
     if (fm_fd >= 0 && tuner_powered) {
-        int rssi = 0;
-        if (ioctl(fm_fd, FM_IOCTL_GETRSSI, &rssi) == 0)
-            return rssi;
+        if (ioctl(fm_fd, FM_IOCTL_GETRSSI, &rssi) == 0) {
+            if (rssi < 0) rssi = 0;
+            if (rssi > 100) rssi = 100;
+        }
     }
-    return 75;
+    return rssi;
 }
 
 bool y1_fm_is_tuned(void)
 {
-    if (fm_fd >= 0 && tuner_powered) {
-        int rssi = 0;
-        if (ioctl(fm_fd, FM_IOCTL_GETRSSI, &rssi) == 0)
-            return rssi > 15;
-    }
-    return (current_freq_hz >= 87500000 && current_freq_hz <= 108000000);
+    if (!tuner_powered)
+        return false;
+    return y1_fm_get_rssi() >= 15;
 }
 
+int y1_fm_set_mono(bool mono)
+{
+    if (fm_fd >= 0 && tuner_powered) {
+        int val = mono ? 1 : 0;
+        ioctl(fm_fd, FM_IOCTL_SETMONOSTERO, &val);
+    }
+    return 0;
+}
+
+bool y1_fm_is_stereo(void)
+{
+    int val = 0;
+    if (fm_fd >= 0 && tuner_powered) {
+        if (ioctl(fm_fd, FM_IOCTL_GETMONOSTERO, &val) == 0)
+            return val == 0; /* 0 = stereo, 1 = mono in MTK fm_drv */
+    }
+    return false;
+}

@@ -4,7 +4,7 @@
 
 `liby1` is a tiny, zero-dependency C library that encapsulates all hardware drivers, low-level MediaTek MT6572 / MT6323 PMIC operations, and kernel interfaces for the **Innioasis Y1** digital audio player.
 
-It enables C/C++ developers to create standalone software, games, emulators, custom media players (like MeUI or RockWheel), and GUI experiences for the Y1 without reverse-engineering kernel ioctls, PMIC registers, or sysfs paths. Rockbox itself uses `liby1` under the hood.
+It enables C/C++ developers to create standalone software, games, emulators, custom media players (like MeUI), and GUI experiences for the Y1 without reverse-engineering kernel ioctls, PMIC registers, or sysfs paths. Rockbox itself uses `liby1` under the hood.
 
 > [!TIP]
 > For the complete API reference, architecture breakdown, game loop tutorials, and porting guides, read the **[`liby1` Developer Manual & Porting Guide](../docs/LIBY1_GUIDE.md)** ([한국어](../docs/kr/LIBY1_GUIDE.md)).
@@ -17,9 +17,8 @@ The Y1 bootloader features dynamic multi-experience auto-discovery directly from
 
 | Location | Purpose |
 | :--- | :--- |
-| `/mnt/sdcard/.custom/launch` | **Pick 4 in Bootloader Carousel:** User defined software (automatically discovered) |
 | `/mnt/sdcard/.meui/meui` | **Pick 2 in Bootloader Carousel:** MeUI frontend (automatically discovered) |
-| `/mnt/sdcard/.rockwheel/rockwheel` | **Pick 3 in Bootloader Carousel:** RockWheel music player (automatically discovered) |
+| `/mnt/sdcard/.custom/launch` | **Pick 3 in Bootloader Carousel:** User defined software (automatically discovered) |
 | `/mnt/sdcard/.system/app` | Standalone auto-boot application (runs at power-on without menu) |
 | `/mnt/sdcard/.system/lib/liby1.a` | Static `liby1` hardware abstraction archive for offline linking |
 | `/mnt/sdcard/.system/lib/liby1.so` | Shared dynamic hardware library |
@@ -57,6 +56,16 @@ The Y1 bootloader features dynamic multi-experience auto-discovery directly from
    - `y1_fm_power()`, `y1_fm_tune()`, `y1_fm_set_mute()`, `y1_fm_get_rssi()`, `y1_fm_is_tuned()`
 7. **USB Mass Storage Gadget (`y1_usb.c`)**
    - `y1_usb_attach_mass_storage()`, `y1_usb_detach_mass_storage()`, `y1_usb_check_host_ejected()`
+   - `y1_usb_tune_performance()` (tunes `mmcblk1` queue: `noop`/`deadline`, 2 MiB `read_ahead_kb`, `nr_requests=512`, `max_sectors_kb`, and locks dual-core 1.3 GHz while attached)
+   - `y1_usb_set_ipod_mode()`, `y1_usb_get_ipod_mode()` (Apple iPod 5.5G Enhanced VID/PID, `ipod_vpd.ko` EVPD XML, and single-LUN spoofing)
+8. **iPod 5.5G USB Mode & Native iTunes Engine (`y1_ipod_sync.c`)**
+   - `y1_cpu_boost_for_conversion()` (locks CPU to 1300 MHz and online dual cores during heavy operations)
+   - `y1_ipod_ensure_device_files()` (initializes `/iPod_Control/Device/SysInfo` and `SysInfoExtended` XML)
+   - `y1_ipod_native_is_active()`, `y1_ipod_native_invalidate()`, `y1_ipod_native_load_ramcache()`, `y1_ipod_native_free_ramcache()` (loads `iTunesDB` directly into Rockbox TagCache RAM without `.tcd` translation)
+   - `y1_ipod_native_has_albumart()`, `y1_ipod_native_load_albumart_rgb565()` (decodes `ArtworkDB` + `F*.ithmb` RGB565 on the fly)
+   - `y1_ipod_native_playlist_count()`, `y1_ipod_native_playlist_name()`, `y1_ipod_native_playlist_track_count()`, `y1_ipod_native_playlist_track_path()` (reads `iTunesDB` playlists & `SLst` smart playlists directly from memory)
+   - `y1_ipod_native_record_play()`, `y1_ipod_native_record_rating()`, `y1_ipod_native_record_favorite()` (writes live `/iPod_Control/iTunes/Play Counts` `mhdp` and `OTGPlaylistInfo` `mhpo`)
+   - Standalone CLI utility: `/bin/ipod_sync init`
 
 ---
 
@@ -72,8 +81,8 @@ arm-linux-gnueabihf-gcc -O2 -Ihosted_linux_port/liby1/include \
     my_app.c hosted_linux_port/liby1/build/liby1.a -o launch -lpthread -lm -lrt
 ```
 
-### 2. Live Interactive Debugging Over USB (Pick 8)
-Hold **MENU** at boot and select **Pick 8: Linux terminal (USB)**. Connect the Y1 to your PC via USB and connect with a serial terminal (`115200 8N1` on `/dev/ttyACM0` or `COMx`) for a full BusyBox root shell with live debugging utilities (`ps`, `top`, `dmesg`, `kill`).
+### 2. Live Interactive Debugging Over USB (Pick 7)
+Hold **MENU** at boot and select **Pick 7: Linux terminal (USB)**. Connect the Y1 to your PC via USB and connect with a serial terminal (`115200 8N1` on `/dev/ttyACM0` or `COMx`) for a full BusyBox root shell with live debugging utilities (`ps`, `top`, `dmesg`, `kill`).
 
 ### 3. Fail-Safe Watchdog
 If your software deadlocks during development, hold **Play/Pause for 10 seconds** to trigger a hardware shutdown at any time.
@@ -81,6 +90,8 @@ If your software deadlocks during development, hold **Play/Pause for 10 seconds*
 ---
 
 ## Related Documentation
+- [iPod 5.5G USB Mode & Sync Engine Guide (English)](../docs/IPOD_SYNC.md)
+- [iPod 5.5G USB 모드 및 동기화 엔진 가이드 (한국어)](../docs/kr/IPOD_SYNC.md)
 - [liby1 Complete Developer Manual & Porting Guide (English)](../docs/LIBY1_GUIDE.md)
 - [liby1 개발자 매뉴얼 및 포팅 가이드 (한국어)](../docs/kr/LIBY1_GUIDE.md)
 - [Modular Build System Guide (English)](../docs/BUILD_GUIDE.md)

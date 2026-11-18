@@ -24,14 +24,17 @@ Nugget for Y1은 Innioasis Y1 디지털 오디오 플레이어를 위한 오픈 
 | 디스플레이 모드 | 480x360 전용 | 480x360 전용 | **480x360 네이티브 + 320x240 클래식 모드** |
 | iPod 테마 호환성 | 미지원 | 480x360 리소스 필요 | **iPod Classic 테마 네이티브 지원** |
 | 키 잠금 모드 | 없음 | 없음 | **홀드 라이트 및 고급 키 잠금 지원 iPod Classic HOLD** |
-| USB 연결 | 안드로이드 MTP / 대용량 저장소 | 안드로이드 대용량 저장소 | **대용량 저장소(Mass Storage)** |
+| USB 연결 | 안드로이드 MTP / 대용량 저장소 | 안드로이드 대용량 저장소 | **Apple iPod 5.5세대 Enhanced (`ipod_vpd.ko`, 단일 LUN) 및 고속 튜닝 USB 2.0 대용량 저장소** |
+| iTunes 동기화 | 미지원 | 미지원 | **Rockbox 네이티브 `iTunesDB` / `ArtworkDB` / `.ithmb` 직접 지원 (파일 변환 없음)** |
+| iTunes 재생목록 및 별점 | 미지원 | 미지원 | **메모리 직접 재생목록/스마트 재생목록(`SLst`), 실시간 `Play Counts`·별점·OTG 즐겨찾기 기록** |
 
 ---
 
 ## 기술 문서
 
-상세 서브시스템 사양, 아키텍처 다이어그램 및 리버스 엔지니어링 결과는 [`hosted_linux_port/docs/`](hosted_linux_port/docs/)에서 확인하실 수 있습니다:
-- [기술 분석 결과](hosted_linux_port/docs/TECHNICAL_FINDINGS.md): 하드웨어 인터페이스, `/dev/eac` 오디오 드라이버, PMIC 레지스터, 전력 튜닝, 부팅 최적화 및 입력 이벤트 세부 특성.
+상세 서브시스템 사양, 아키텍처 다이어그램 및 리버스 엔지니어링 결과는 [`docs/`](docs/)에서 확인하실 수 있습니다:
+- [iPod 5.5G USB 모드 및 네이티브 iTunes 통합](docs/kr/IPOD_SYNC.md): `ipod_vpd.ko` EVPD 스푸핑, 네이티브 `iTunesDB` TagCache RAM 로드, 실시간 `.ithmb` 앨범아트 디코딩, `Play Counts`/`OTGPlaylistInfo` 기록 및 USB 2.0 속도 튜닝.
+- [기술 분석 결과](docs/kr/TECHNICAL_FINDINGS.md): 하드웨어 인터페이스, `/dev/eac` 오디오 드라이버, PMIC 레지스터, 전력 튜닝, 부팅 최적화 및 입력 이벤트 세부 특성.
 - [시스템 아키텍처](hosted_linux_port/docs/ARCHITECTURE.md): 아키텍처 블록 다이어그램, 부팅 시퀀스 흐름, 스토리지 레이아웃 및 HAL 매핑.
 - [오디오 서브시스템](hosted_linux_port/docs/AUDIO_SUBSYSTEM.md): MediaTek EAC 드라이버, 팝 노이즈 제거 메커니즘, 비트 퍼펙트 클록 전환 및 게인 스테이징.
 - [전원 관리](hosted_linux_port/docs/POWER_MANAGEMENT.md): 대기 중 배터리 소모 해결(< 5mA 대기), CPU 주파수 거버너, 코어 핫플러그 오프라인 및 Always-On Display (AOD).

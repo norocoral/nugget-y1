@@ -20,6 +20,7 @@ It provides C/C++ developers with an official, production-tested hardware abstra
    - [4.5 Audio: EAC DMA & MT6323 PMIC DAC/Amp (`y1_audio`)](#45-audio-eac-dma--mt6323-pmic-dacamp-y1_audio)
    - [4.6 FM Radio Tuner (`y1_tuner`)](#46-fm-radio-tuner-y1_tuner)
    - [4.7 USB Mass Storage Gadget (`y1_usb`)](#47-usb-mass-storage-gadget-y1_usb)
+   - [4.8 iPod 5.5G USB Mode & Bidirectional Sync Engine (`y1_ipod_sync`)](#48-ipod-55g-usb-mode--bidirectional-sync-engine-y1_ipod_sync)
 5. [Porting Guide: Bringing Your Own Experience to Y1](#5-porting-guide-bringing-your-own-experience-to-y1)
    - [5.1 The Standard Y1 Main Loop Architecture](#51-the-standard-y1-main-loop-architecture)
    - [5.2 Porting Framebuffer / SDL / Raylib / LVGL Applications](#52-porting-framebuffer--sdl--raylib--lvgl-applications)
@@ -274,7 +275,11 @@ y1_fm_set_mute(false);
 
 ### 4.7 USB Mass Storage Gadget (`y1_usb`)
 ```c
-// Enable PC file syncing mode over USB
+// Toggle iPod 5.5G hardware spoofing mode (defaults to enabled)
+y1_usb_set_ipod_mode(true);
+bool is_ipod = y1_usb_get_ipod_mode();
+
+// Enable PC file syncing mode over USB (applies Apple descriptors if iPod mode is set)
 y1_usb_attach_mass_storage();
 
 // Poll whether host computer has unmounted/ejected the drive
@@ -282,6 +287,30 @@ if (y1_usb_check_host_ejected()) {
     y1_usb_detach_mass_storage();
 }
 ```
+
+### 4.8 iPod 5.5G USB Mode & Bidirectional Sync Engine (`y1_ipod_sync`)
+`liby1` embeds an automated on-device translation engine between Apple iTunes/iPod formats and Rockbox databases/assets:
+
+```c
+// Lock CPU to maximum 1.30 GHz dual-core turbo for database/artwork operations
+y1_cpu_boost_for_conversion(true);
+
+// Ensure /iPod_Control/Device/SysInfo and SysInfoExtended XML exist
+y1_ipod_ensure_device_files();
+
+// Pre-connect synchronization: Rockbox -> iTunes (Play counts, ratings, OTG playlists)
+y1_ipod_sync_pre_connect(NULL, NULL);
+
+// Post-disconnect conversion: iTunes -> Rockbox (TagCache .tcd, Artwork, Video DB, .m3u8)
+// Checks if iTunesDB changed, converts only when necessary
+y1_ipod_sync_post_disconnect_if_changed(progress_callback, NULL);
+
+// Release CPU frequency lock
+y1_cpu_boost_for_conversion(false);
+```
+
+> [!TIP]
+> For complete technical details, descriptor maps, `.ithmb` extraction, and playlist rules, see the **[iPod 5.5G USB Mode & Sync Engine Guide](IPOD_SYNC.md)** ([한국어](kr/IPOD_SYNC.md)).
 
 ---
 

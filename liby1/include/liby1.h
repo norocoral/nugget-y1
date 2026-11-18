@@ -172,6 +172,7 @@ void y1_cpu_set_dual_core(bool dual_core);
 bool y1_cpu_is_dual_core(void);
 int  y1_cpu_get_freq_mhz(void);
 void y1_cpu_set_screen_off_clamp(bool screen_off);
+void y1_cpu_boost_for_conversion(bool enable);
 
 /* =========================================================================
  * 4. Input (Click-Wheel, Buttons, Touch Scan, Headphone Jack)
@@ -254,6 +255,14 @@ void y1_audio_enable_recording_path(enum y1_audio_rec_source source);
 void y1_audio_disable_recording_path(void);
 void y1_audio_set_recording_pga_db(int gain_db);
 
+/** Start/read/stop MT6572 AFE Uplink (VUL / AWB) PCM recording via /dev/eac. */
+bool y1_audio_rec_start(enum y1_audio_rec_source source, unsigned long sample_rate);
+ssize_t y1_audio_rec_read(void *pcm_stereo_s16, size_t bytes);
+void y1_audio_rec_stop(void);
+
+/** Route MT6627 FM I2S / MRG audio to MT6572 AFE Downlink (headphones). */
+void y1_audio_set_fm_route(bool enable);
+
 /** Direct MT6323 PMIC analog register & MT6572 AFE register access via /dev/eac. */
 int  y1_pmic_read_reg(uint32_t offset);
 int  y1_pmic_write_reg(uint32_t offset, uint32_t val, uint32_t mask);
@@ -266,11 +275,14 @@ void y1_pmic_tune_accdet_debounce(void);
 
 int  y1_fm_power(bool on);
 int  y1_fm_tune(int freq_hz); /* e.g. 87500000 to 108000000 */
+int  y1_fm_seek(int freq_hz, bool up);
 int  y1_fm_get_freq(void);
 int  y1_fm_set_mute(bool mute);
 bool y1_fm_is_muted(void);
 int  y1_fm_get_rssi(void);
 bool y1_fm_is_tuned(void);
+int  y1_fm_set_mono(bool mono);
+bool y1_fm_is_stereo(void);
 
 /* =========================================================================
  * 7. USB Mass Storage Gadget (/sys/class/android_usb/android0)
@@ -281,6 +293,53 @@ void y1_usb_detach_mass_storage(void);
 bool y1_usb_is_storage_attached(void);
 bool y1_usb_check_host_ejected(void);
 bool y1_usb_is_serial_active(void);
+void y1_usb_tune_performance(bool enable);
+
+/* =========================================================================
+ * 8. iPod USB Mode (iPod 5.5G Spoofing & Native iTunesDB Support)
+ * ========================================================================= */
+
+void y1_usb_set_ipod_mode(bool enabled);
+bool y1_usb_get_ipod_mode(void);
+
+bool y1_ipod_ensure_device_files(void);
+
+struct y1_ipod_ramcache_tag {
+    int      tag;
+    int32_t  entry_count;
+    uint8_t *data;
+    size_t   size;
+};
+
+struct y1_ipod_ramcache_data {
+    int32_t  entry_count;
+    void    *indices;
+    size_t   indices_size;
+    struct y1_ipod_ramcache_tag tags[24];
+    int      num_tags;
+    size_t   total_datasize;
+};
+
+bool y1_ipod_native_is_active(void);
+void y1_ipod_native_invalidate(void);
+
+bool y1_ipod_native_load_ramcache(struct y1_ipod_ramcache_data *out);
+void y1_ipod_native_free_ramcache(struct y1_ipod_ramcache_data *data);
+
+bool y1_ipod_native_record_play(const char *rb_path, uint32_t play_delta,
+                                uint32_t unix_time, uint32_t bookmark_ms);
+bool y1_ipod_native_record_rating(const char *rb_path, int rating_rb);
+bool y1_ipod_native_record_favorite(const char *rb_path, bool is_favorite);
+
+bool y1_ipod_native_has_albumart(const char *rb_path);
+bool y1_ipod_native_load_albumart_rgb565(const char *rb_path,
+                                          uint16_t **out_rgb565,
+                                          int *out_w, int *out_h);
+
+int y1_ipod_native_playlist_count(void);
+const char *y1_ipod_native_playlist_name(int pl_idx);
+int y1_ipod_native_playlist_track_count(int pl_idx);
+const char *y1_ipod_native_playlist_track_path(int pl_idx, int tr_idx);
 
 #ifdef __cplusplus
 }
