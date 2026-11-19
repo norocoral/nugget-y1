@@ -417,6 +417,7 @@ const char *y1_ipod_native_playlist_track_path(int pl_idx, int tr_idx);
 ### 4.1 Bootloader Picks
 - **Pick 2 (`/.meui/meui`):** Place the executable at `/mnt/sdcard/.meui/meui` and shared libraries in `/mnt/sdcard/.meui/lib/`.
 - **Pick 3 (`/.custom/launch`):** Place an ELF executable or `chmod +x` shell script at `/mnt/sdcard/.custom/launch` and shared libraries in `/mnt/sdcard/.custom/lib/`.
+- **Pick 8 (`debuginfo*.txt`):** Generates a compact system and diagnostic log (`/mnt/sdcard/debuginfoYYYYMMDD_HHMMSS.txt`) for GitHub issue reports.
 
 ### 4.2 USB Serial Shell (Pick 7)
 1. Hold **MENU** while powering on to open the bootloader menu and select **Pick 7: Linux terminal (USB)**.

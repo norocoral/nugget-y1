@@ -98,6 +98,7 @@ Android partitions on the internal eMMC (`SYSTEM`, `DATA`, `CACHE`) are left unm
     - **Pick 5: Shut down** — Powers off the device.
     - **Pick 6: USB Mass Storage** — Enables USB Mass Storage from the bootloader; pressing any button exits USB mode and returns to the menu.
     - **Pick 7: Linux terminal (USB)** — Starts USB serial root shells on `/dev/ttyGS0` and `/dev/ttyGS1`.
+    - **Pick 8: Debug Info** — Writes a compact diagnostic report (`debuginfoYYYYMMDD_HHMMSS.txt`) to the MicroSD card root.
   - **Navigation:** Click Wheel or **Left / Right** selects an entry; **Center** or **Play** confirms.
   - **Hardware Override:** Holding **MENU** during boot forces the Bootloader Menu to appear regardless of settings.
   - **Settings Toggle:** `Settings -> Nugget -> Bootloader Menu` (`Yes` / `No`).

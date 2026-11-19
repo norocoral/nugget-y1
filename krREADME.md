@@ -98,6 +98,7 @@ sudo apt install -y build-essential gcc-arm-linux-gnueabihf python3 python3-pip 
     - **Pick 5: Shut down** — 기기 전원을 끕니다.
     - **Pick 6: USB Mass Storage** — 부트로더에서 USB 대용량 저장소 모드를 활성화합니다. 아무 버튼이나 누르면 종료되고 메뉴로 복귀합니다.
     - **Pick 7: Linux terminal (USB)** — `/dev/ttyGS0` 및 `/dev/ttyGS1`에서 USB 시리얼 루트 셸을 시작합니다.
+    - **Pick 8: Debug Info** — MicroSD 카드 루트에 간략한 진단 로그(`debuginfoYYYYMMDD_HHMMSS.txt`)를 생성합니다.
   - **조작법:** 클릭 휠 또는 **좌/우 버튼**으로 항목을 선택하고 **센터 버튼** 또는 **재생 버튼**으로 확정합니다.
   - **하드웨어 강제 진입:** 부팅 중 **MENU** 버튼을 누르고 있으면 설정과 무관하게 부트로더 메뉴가 표시됩니다.
   - **설정 옵션:** `설정 -> Nugget -> 부트로더 메뉴` (`예` / `아니오`).

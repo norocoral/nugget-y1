@@ -375,7 +375,11 @@ if [[ "$BUILD_ROOTFS" -eq 1 ]]; then
 
     echo "[*] Compiling native utilities with parallel jobs..."
 
+    NUGGET_BUILD_DATE="$(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+    NUGGET_GIT_REV="$(git -C "$SCRIPT_DIR" rev-parse --short HEAD 2>/dev/null || echo unknown)"
     "${CC[@]}" -O2 -Wall \
+        -DNUGGET_BUILD_DATE="\"$NUGGET_BUILD_DATE\"" \
+        -DNUGGET_GIT_REV="\"$NUGGET_GIT_REV\"" \
         "$SCRIPT_DIR/initramfs/init.c" \
         -o "$ROOTFS_DIR/init" &
     INIT_PID=$!

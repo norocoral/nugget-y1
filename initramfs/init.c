@@ -36,9 +36,20 @@
 #include <termios.h>
 #include <poll.h>
 #include <time.h>
+#include <sys/utsname.h>
+#include <sys/statvfs.h>
+#include <sys/klog.h>
 
 #ifndef VESA_NO_BLANKING
 #define VESA_NO_BLANKING 0
+#endif
+
+#ifndef NUGGET_BUILD_DATE
+#define NUGGET_BUILD_DATE __DATE__ " " __TIME__
+#endif
+
+#ifndef NUGGET_GIT_REV
+#define NUGGET_GIT_REV "unknown"
 #endif
 
 static char active_sd_dev[64] = {0};
@@ -1467,6 +1478,375 @@ static void run_usb_serial_shell(const char *tty_name, int tab_num)
     }
 }
 
+static int read_trimmed_line(const char *path, char *out, size_t out_sz)
+{
+    if (!out || out_sz == 0)
+        return -1;
+    out[0] = '\0';
+    int fd = open(path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0)
+        return -1;
+    ssize_t n = read(fd, out, out_sz - 1);
+    close(fd);
+    if (n < 0)
+        return -1;
+    out[n] = '\0';
+    while (n > 0 && (out[n - 1] == '\n' || out[n - 1] == '\r' || out[n - 1] == ' '))
+        out[--n] = '\0';
+    return 0;
+}
+
+static void append_file_tail(FILE *out, const char *label, const char *path, size_t max_bytes)
+{
+    int fd = open(path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0)
+        return;
+    struct stat st;
+    if (fstat(fd, &st) == 0 && st.st_size > 0) {
+        off_t offset = 0;
+        size_t to_read = (size_t)st.st_size;
+        if (to_read > max_bytes) {
+            offset = st.st_size - (off_t)max_bytes;
+            to_read = max_bytes;
+        }
+        if (offset > 0)
+            lseek(fd, offset, SEEK_SET);
+        char *buf = malloc(to_read + 1);
+        if (buf) {
+            ssize_t r = read(fd, buf, to_read);
+            if (r > 0) {
+                buf[r] = '\0';
+                fprintf(out, "\n[%s (last %zd/%lld bytes)]\n%s%s",
+                        label, r, (long long)st.st_size, buf,
+                        (buf[r - 1] == '\n') ? "" : "\n");
+            }
+            free(buf);
+        }
+    }
+    close(fd);
+}
+
+static void dump_mmc_host_info(FILE *out, const char *host)
+{
+    char host_dir[128];
+    snprintf(host_dir, sizeof(host_dir), "/sys/class/mmc_host/%s", host);
+    DIR *d = opendir(host_dir);
+    if (!d)
+        return;
+    struct dirent *de;
+    while ((de = readdir(d)) != NULL) {
+        if (strncmp(de->d_name, host, strlen(host)) == 0 && strchr(de->d_name, ':')) {
+            char p[256];
+            char name[32] = "?", manf[16] = "?", oem[16] = "?", prv[16] = "?",
+                 hw[16] = "?", fw[16] = "?", type[16] = "?";
+            snprintf(p, sizeof(p), "%s/%s/name", host_dir, de->d_name);
+            read_trimmed_line(p, name, sizeof(name));
+            snprintf(p, sizeof(p), "%s/%s/manfid", host_dir, de->d_name);
+            read_trimmed_line(p, manf, sizeof(manf));
+            snprintf(p, sizeof(p), "%s/%s/oemid", host_dir, de->d_name);
+            read_trimmed_line(p, oem, sizeof(oem));
+            snprintf(p, sizeof(p), "%s/%s/prv", host_dir, de->d_name);
+            read_trimmed_line(p, prv, sizeof(prv));
+            snprintf(p, sizeof(p), "%s/%s/hwrev", host_dir, de->d_name);
+            read_trimmed_line(p, hw, sizeof(hw));
+            snprintf(p, sizeof(p), "%s/%s/fwrev", host_dir, de->d_name);
+            read_trimmed_line(p, fw, sizeof(fw));
+            snprintf(p, sizeof(p), "%s/%s/type", host_dir, de->d_name);
+            read_trimmed_line(p, type, sizeof(type));
+            fprintf(out, "%s(%s): type=%s name=%s manf=%s oem=%s prv=%s hw=%s fw=%s\n",
+                    host, de->d_name, type, name, manf, oem, prv, hw, fw);
+        }
+    }
+    closedir(d);
+}
+
+static void dump_dir_names(FILE *out, const char *label, const char *dir_path)
+{
+    DIR *d = opendir(dir_path);
+    if (!d)
+        return;
+    fprintf(out, "%s=", label);
+    struct dirent *de;
+    int first = 1;
+    while ((de = readdir(d)) != NULL) {
+        if (de->d_name[0] == '.')
+            continue;
+        fprintf(out, "%s%s", first ? "" : ",", de->d_name);
+        first = 0;
+    }
+    if (first)
+        fprintf(out, "(empty)");
+    fputc('\n', out);
+    closedir(d);
+}
+
+static long file_kb(const char *path)
+{
+    struct stat st;
+    if (stat(path, &st) != 0)
+        return -1;
+    return (long)((st.st_size + 1023) / 1024);
+}
+
+static void write_compact_debug_info(void)
+{
+    time_t now = time(NULL);
+    struct tm tm_now;
+    char date_tag[32] = "unknown";
+    char date_iso[32] = "unknown";
+    if (localtime_r(&now, &tm_now)) {
+        strftime(date_tag, sizeof(date_tag), "%Y%m%d_%H%M%S", &tm_now);
+        strftime(date_iso, sizeof(date_iso), "%Y-%m-%d %H:%M:%S", &tm_now);
+    }
+
+    char out_path[128];
+    snprintf(out_path, sizeof(out_path), "/mnt/sdcard/debuginfo%s.txt", date_tag);
+
+    FILE *out = fopen(out_path, "w");
+    if (!out) {
+        log_line("Bootloader Menu: Failed to create debuginfo file on /mnt/sdcard.\n");
+        return;
+    }
+
+    struct utsname uts;
+    memset(&uts, 0, sizeof(uts));
+    uname(&uts);
+
+    fprintf(out, "=== Nugget Y1 Debug Info ===\n");
+    fprintf(out, "[build]\n");
+    fprintf(out, "date=%s\n", date_iso);
+    fprintf(out, "build_date=%s\n", NUGGET_BUILD_DATE);
+    fprintf(out, "git_rev=%s\n", NUGGET_GIT_REV);
+    fprintf(out, "init_compiled=%s %s\n", __DATE__, __TIME__);
+    fprintf(out, "kernel=%s %s %s %s\n", uts.sysname, uts.release, uts.version, uts.machine);
+
+    char buf[512];
+    if (read_trimmed_line("/proc/cmdline", buf, sizeof(buf)) == 0)
+        fprintf(out, "cmdline=%s\n", buf);
+
+    /* Hardware variations (board/CPU/FB/MMC/input) */
+    fprintf(out, "\n[hardware]\n");
+    FILE *cpufp = fopen("/proc/cpuinfo", "r");
+    if (cpufp) {
+        char line[160];
+        while (fgets(line, sizeof(line), cpufp)) {
+            if (strncmp(line, "Processor", 9) == 0 ||
+                strncmp(line, "Hardware", 8) == 0 ||
+                strncmp(line, "Revision", 8) == 0 ||
+                strncmp(line, "Serial", 6) == 0 ||
+                strncmp(line, "BogoMIPS", 8) == 0) {
+                fputs(line, out);
+            }
+        }
+        fclose(cpufp);
+    }
+
+    int fbfd = open("/dev/graphics/fb0", O_RDONLY | O_CLOEXEC);
+    if (fbfd >= 0) {
+        struct fb_var_screeninfo vinfo;
+        struct fb_fix_screeninfo finfo;
+        if (ioctl(fbfd, FBIOGET_VSCREENINFO, &vinfo) == 0 &&
+            ioctl(fbfd, FBIOGET_FSCREENINFO, &finfo) == 0) {
+            fprintf(out, "fb0=%s %ux%u@%ubpp stride=%u smem=%u\n",
+                    finfo.id, vinfo.xres, vinfo.yres, vinfo.bits_per_pixel,
+                    finfo.line_length, finfo.smem_len);
+        }
+        close(fbfd);
+    }
+    if (read_trimmed_line("/proc/lcm", buf, sizeof(buf)) == 0)
+        fprintf(out, "lcm=%s\n", buf);
+
+    dump_mmc_host_info(out, "mmc0");
+    dump_mmc_host_info(out, "mmc1");
+
+    FILE *ifp = fopen("/proc/bus/input/devices", "r");
+    if (ifp) {
+        char line[256];
+        while (fgets(line, sizeof(line), ifp)) {
+            if (strncmp(line, "I: ", 3) == 0 ||
+                strncmp(line, "N: ", 3) == 0 ||
+                strncmp(line, "P: ", 3) == 0 ||
+                strncmp(line, "H: ", 3) == 0) {
+                fputs(line, out);
+            }
+        }
+        fclose(ifp);
+    }
+
+    /* System State */
+    fprintf(out, "\n[system_state]\n");
+    char uptime[64] = "?";
+    read_trimmed_line("/proc/uptime", uptime, sizeof(uptime));
+    char cpu0_freq[32] = "?", gov[32] = "?", cpu1_on[16] = "?";
+    read_trimmed_line("/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq", cpu0_freq, sizeof(cpu0_freq));
+    read_trimmed_line("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor", gov, sizeof(gov));
+    read_trimmed_line("/sys/devices/system/cpu/cpu1/online", cpu1_on, sizeof(cpu1_on));
+    fprintf(out, "uptime=%s cpu0_khz=%s gov=%s cpu1_online=%s\n", uptime, cpu0_freq, gov, cpu1_on);
+
+    FILE *mfp = fopen("/proc/meminfo", "r");
+    if (mfp) {
+        char line[128];
+        while (fgets(line, sizeof(line), mfp)) {
+            if (strncmp(line, "MemTotal:", 9) == 0 ||
+                strncmp(line, "MemFree:", 8) == 0 ||
+                strncmp(line, "MemAvailable:", 13) == 0) {
+                fputs(line, out);
+            }
+        }
+        fclose(mfp);
+    }
+
+    char cap[16] = "?", volt[32] = "?", curr[32] = "?", bstat[32] = "?", usb_on[16] = "?";
+    read_trimmed_line("/sys/class/power_supply/battery/capacity", cap, sizeof(cap));
+    read_trimmed_line("/sys/class/power_supply/battery/voltage_now", volt, sizeof(volt));
+    read_trimmed_line("/sys/class/power_supply/battery/current_now", curr, sizeof(curr));
+    read_trimmed_line("/sys/class/power_supply/battery/status", bstat, sizeof(bstat));
+    read_trimmed_line("/sys/class/power_supply/usb/online", usb_on, sizeof(usb_on));
+    fprintf(out, "battery=%s%% status=%s volt=%s curr=%s usb_online=%s\n",
+            cap, bstat, volt, curr, usb_on);
+
+    char wlock[128] = "?", h2w[16] = "?", tpd[16] = "?";
+    read_trimmed_line("/sys/power/wake_lock", wlock, sizeof(wlock));
+    read_trimmed_line("/sys/class/switch/h2w/state", h2w, sizeof(h2w));
+    read_trimmed_line("/proc/tpd_keys_enable", tpd, sizeof(tpd));
+    fprintf(out, "wake_lock=[%s] h2w=%s tpd_keys=%s\n", wlock, h2w, tpd);
+
+    char usb_en[16] = "?", usb_fn[64] = "?", usb_vid[16] = "?", usb_pid[16] = "?";
+    read_trimmed_line("/sys/class/android_usb/android0/enable", usb_en, sizeof(usb_en));
+    read_trimmed_line("/sys/class/android_usb/android0/functions", usb_fn, sizeof(usb_fn));
+    read_trimmed_line("/sys/class/android_usb/android0/idVendor", usb_vid, sizeof(usb_vid));
+    read_trimmed_line("/sys/class/android_usb/android0/idProduct", usb_pid, sizeof(usb_pid));
+    fprintf(out, "usb_en=%s usb_fn=%s vid=%s pid=%s ipod_cfg=%d dbg_cfg=%d\n",
+            usb_en, usb_fn, usb_vid, usb_pid,
+            is_ipod_usb_mode_enabled(), logging_enabled_from_config());
+
+    /* Available Components */
+    fprintf(out, "\n[available_components]\n");
+    fprintf(out, "dev: fb0=%d eac=%d fm=%d stpwmt=%d stpbt=%d ttyGS0=%d\n",
+            access("/dev/graphics/fb0", F_OK) == 0,
+            access("/dev/eac", F_OK) == 0,
+            access("/dev/fm", F_OK) == 0,
+            access("/dev/stpwmt", F_OK) == 0,
+            access("/dev/stpbt", F_OK) == 0,
+            access("/dev/ttyGS0", F_OK) == 0);
+    fprintf(out, "bin_kb: rockbox=%ld meui=%ld custom=%ld sys_app=%ld ipod_sync=%ld\n",
+            file_kb("/mnt/sdcard/.rockbox/rockbox"),
+            file_kb("/mnt/sdcard/.meui/meui"),
+            file_kb("/mnt/sdcard/.custom/launch"),
+            file_kb("/mnt/sdcard/.system/app"),
+            file_kb("/bin/ipod_sync"));
+    fprintf(out, "sys_kb: liby1=%ld liby1video=%ld android_ramdisk=%ld ipod_vpd_ko=%ld\n",
+            file_kb("/mnt/sdcard/.system/lib/liby1.so"),
+            file_kb("/mnt/sdcard/.system/lib/liby1video.so"),
+            file_kb("/mnt/sdcard/.system/ramdisk_android.cpio.gz"),
+            file_kb("/lib/modules/ipod_vpd.ko"));
+    fprintf(out, "itunes_kb: iTunesDB=%ld ArtworkDB=%ld PlayCounts=%ld\n",
+            file_kb("/mnt/sdcard/iPod_Control/iTunes/iTunesDB"),
+            file_kb("/mnt/sdcard/iPod_Control/Artwork/ArtworkDB"),
+            file_kb("/mnt/sdcard/iPod_Control/iTunes/Play Counts"));
+    dump_dir_names(out, "sys_bin", "/mnt/sdcard/.system/bin");
+    dump_dir_names(out, "bt_blobs", "/mnt/sdcard/.system/bt");
+
+    /* Storage & Partitions */
+    struct statvfs vfs;
+    unsigned long long total_mb = 0, free_mb = 0;
+    if (statvfs("/mnt/sdcard", &vfs) == 0) {
+        total_mb = ((unsigned long long)vfs.f_blocks * vfs.f_frsize) >> 20;
+        free_mb = ((unsigned long long)vfs.f_bavail * vfs.f_frsize) >> 20;
+    }
+    fprintf(out, "\n[storage]\n");
+    fprintf(out, "sd_dev=%s ext_dev=%s sd_total_mb=%llu sd_free_mb=%llu\n",
+            active_sd_dev[0] ? active_sd_dev : "none",
+            active_ext_dev[0] ? active_ext_dev : "none",
+            total_mb, free_mb);
+
+    FILE *pfp = fopen("/proc/partitions", "r");
+    if (pfp) {
+        char line[128];
+        while (fgets(line, sizeof(line), pfp))
+            fputs(line, out);
+        fclose(pfp);
+    }
+
+    FILE *mntfp = fopen("/proc/mounts", "r");
+    if (mntfp) {
+        char line[256];
+        fprintf(out, "\n[mounts]\n");
+        while (fgets(line, sizeof(line), mntfp)) {
+            if (strstr(line, "/mnt/sdcard") || strstr(line, "mmcblk"))
+                fputs(line, out);
+        }
+        fclose(mntfp);
+    }
+
+    FILE *modfp = fopen("/proc/modules", "r");
+    if (modfp) {
+        char line[256];
+        fprintf(out, "\n[modules]\n");
+        while (fgets(line, sizeof(line), modfp)) {
+            char name[64];
+            unsigned long sz = 0;
+            if (sscanf(line, "%63s %lu", name, &sz) == 2)
+                fprintf(out, "%s (%lu)\n", name, sz);
+        }
+        fclose(modfp);
+    }
+
+    /* Compact Logs */
+    if (early_log_len > 0) {
+        fprintf(out, "\n[init_log]\n");
+        fwrite(early_log_buf, 1, early_log_len, out);
+        if (early_log_buf[early_log_len - 1] != '\n')
+            fputc('\n', out);
+    }
+
+    char *kbuf = malloc(16384 + 1);
+    if (kbuf) {
+        int kn = klogctl(3, kbuf, 16384);
+        if (kn > 0) {
+            kbuf[kn] = '\0';
+
+            /* Compact hardware-probe lines from dmesg */
+            fprintf(out, "\n[hw_probe_dmesg]\n");
+            int probe_lines = 0;
+            char *p = kbuf;
+            while (p && *p && probe_lines < 25) {
+                char *nl = strchr(p, '\n');
+                if (nl) *nl = '\0';
+                if (strstr(p, "lcm") || strstr(p, "LCM") ||
+                    strstr(p, "tpd") || strstr(p, "accdet") ||
+                    strstr(p, "msdc") || strstr(p, "mt6323") ||
+                    strstr(p, "mt6627") || strstr(p, "eac")) {
+                    fprintf(out, "%s\n", p);
+                    probe_lines++;
+                }
+                if (nl) *nl = '\n';
+                p = nl ? (nl + 1) : NULL;
+            }
+
+            const char *tail = (kn > 3072) ? (kbuf + kn - 3072) : kbuf;
+            if (kn > 3072) {
+                const char *nl = strchr(tail, '\n');
+                if (nl) tail = nl + 1;
+            }
+            fprintf(out, "\n[dmesg_tail]\n%s%s", tail,
+                    (kbuf[kn - 1] == '\n') ? "" : "\n");
+        }
+        free(kbuf);
+    }
+
+    append_file_tail(out, "y1_debug.txt", "/mnt/sdcard/.system/y1_debug.txt", 2048);
+
+    fflush(out);
+    fsync(fileno(out));
+    fclose(out);
+    sync();
+
+    char msg[192];
+    snprintf(msg, sizeof(msg), "Bootloader Menu: Debug info saved to %s\n", out_path);
+    log_line(msg);
+}
+
 static void run_bootloader_menu(void)
 {
     log_line("Entering Bootloader Menu...\n");
@@ -1479,9 +1859,9 @@ static void run_bootloader_menu(void)
     }
 
     struct bootl_entry {
-        int id; /* 0=Rockbox, 1=MeUI, 2=Custom, 3=Android, 4=Shutdown, 5=USB, 6=Terminal */
+        int id; /* 0=Rockbox, 1=MeUI, 2=Custom, 3=Android, 4=Shutdown, 5=USB, 6=Terminal, 7=Debug */
         const char *screen;
-    } entries[7];
+    } entries[8];
     int num_entries = 0;
 
     /* Pick 1: Rockbox (always present) */
@@ -1521,6 +1901,11 @@ static void run_bootloader_menu(void)
     /* Pick 7: Linux terminal (USB) (always present) */
     entries[num_entries].id = 6;
     entries[num_entries].screen = "bootl_pick7";
+    num_entries++;
+
+    /* Pick 8: Debug info log (always present) */
+    entries[num_entries].id = 7;
+    entries[num_entries].screen = "bootl_pick8";
     num_entries++;
 
     int selection = 0;
@@ -1773,6 +2158,19 @@ static void run_bootloader_menu(void)
                                 }
                             }
 
+                            display_screen(entries[selection].screen);
+                        } else if (action_id == 7) {
+                            /* Pick 8: Write compact debug info log to /mnt/sdcard/debuginfo[date].txt */
+                            log_line("Bootloader Menu: Debug info selected.\n");
+                            write_compact_debug_info();
+
+                            usleep(300000);
+                            for (int k = 0; k < 16; k++) {
+                                if (event_fds[k] >= 0) {
+                                    struct input_event flush_ev;
+                                    while (read(event_fds[k], &flush_ev, sizeof(flush_ev)) == sizeof(flush_ev));
+                                }
+                            }
                             display_screen(entries[selection].screen);
                         }
                     }

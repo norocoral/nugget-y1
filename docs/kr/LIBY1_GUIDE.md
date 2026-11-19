@@ -417,6 +417,7 @@ const char *y1_ipod_native_playlist_track_path(int pl_idx, int tr_idx);
 ### 4.1 부트로더 항목
 - **Pick 2 (`/.meui/meui`):** 실행 파일을 `/mnt/sdcard/.meui/meui`에, 공유 라이브러리를 `/mnt/sdcard/.meui/lib/`에 배치합니다.
 - **Pick 3 (`/.custom/launch`):** ELF 실행 파일 또는 `chmod +x` 셸 스크립트를 `/mnt/sdcard/.custom/launch`에, 공유 라이브러리를 `/mnt/sdcard/.custom/lib/`에 배치합니다.
+- **Pick 8 (`debuginfo*.txt`):** GitHub 이슈 제보용으로 사용할 수 있는 간략한 시스템/진단 로그(`/mnt/sdcard/debuginfoYYYYMMDD_HHMMSS.txt`)를 생성합니다.
 
 ### 4.2 USB 시리얼 셸 (Pick 7)
 1. 전원 켤 때 **MENU** 버튼을 누르고 있어 부트로더 메뉴를 연 뒤 **Pick 7: Linux terminal (USB)**를 선택합니다.
