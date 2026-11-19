@@ -47,7 +47,6 @@ sudo apt install -y build-essential gcc-arm-linux-gnueabihf g++-arm-linux-gnueab
 ### Interactive Terminal GUI (TUI)
 You can configure build components visually using the built-in terminal menu:
 ```bash
-cd hosted_linux_port
 ./build.sh --gui
 ```
 From the menu, use arrow keys and Space to toggle components (`liby1`, rootfs, boot image, Rockbox, SD packaging, custom app), or press `B` to save and build immediately.

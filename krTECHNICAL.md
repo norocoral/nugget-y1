@@ -47,7 +47,6 @@ sudo apt install -y build-essential gcc-arm-linux-gnueabihf g++-arm-linux-gnueab
 ### 대화형 터미널 그래픽 메뉴 (TUI)
 내장된 터미널 메뉴를 통해 빌드 구성 요소를 시각적으로 손쉽게 설정할 수 있습니다:
 ```bash
-cd hosted_linux_port
 ./build.sh --gui
 ```
 메뉴에서 방향키와 스페이스바로 빌드 컴포넌트(`liby1`, rootfs, 부트 이미지, Rockbox, SD 패키징, 커스텀 앱)를 켜거나 끄고, `B`를 눌러 저장과 동시에 빌드를 시작할 수 있습니다.
