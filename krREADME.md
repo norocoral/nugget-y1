@@ -67,6 +67,12 @@ sudo apt update
 sudo apt install -y build-essential gcc-arm-linux-gnueabihf python3 python3-pip zip curl
 ```
 
+### 필수 외부 파일
+1. **순정 `boot.img` (커널 및 안드로이드 듀얼 부팅 램디스크 추출용):**
+   Y1 Type A 순정 ROM([rom.zip](https://github.com/y1-community/y1-ata-rom/releases/download/0.1/rom.zip))을 다운로드하여 `boot.img`를 추출한 뒤 `stock_rom/boot.img` 경로에 배치합니다(또는 `STOCK_BOOT=/path/to/boot.img` 지정).
+2. **Rockbox 소스 (Rockbox 포함 빌드 시):**
+   이 저장소와 나란히 `https://github.com/norocoral/rockbox`를 클론(`../rockbox`)하거나 `ROCKBOX_SRC=/path/to/rockbox`를 지정합니다. Rockbox 없이 ROM/SDK만 빌드하려면 `./build.sh --no-rockbox`를 실행합니다.
+
 ### 빌드 명령
 ```bash
 ./build.sh

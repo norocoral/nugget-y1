@@ -67,6 +67,12 @@ sudo apt update
 sudo apt install -y build-essential gcc-arm-linux-gnueabihf python3 python3-pip zip curl
 ```
 
+### Required External Assets
+1. **Stock `boot.img` (for kernel & Android dual-boot ramdisk):**
+   Download the Y1 Type A stock ROM ([rom.zip](https://github.com/y1-community/y1-ata-rom/releases/download/0.1/rom.zip)), extract `boot.img`, and place it at `stock_rom/boot.img` (or set `STOCK_BOOT=/path/to/boot.img`).
+2. **Rockbox Source (if building with Rockbox):**
+   Clone `https://github.com/norocoral/rockbox` next to this repository (`../rockbox`) or set `ROCKBOX_SRC=/path/to/rockbox`. To build only the ROM/SDK without Rockbox, run `./build.sh --no-rockbox`.
+
 ### Build Command
 ```bash
 ./build.sh

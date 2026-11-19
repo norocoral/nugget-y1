@@ -59,14 +59,22 @@ sudo apt install -y \
     ccache
 ```
 
+### Required External Assets
+1. **Stock `boot.img` (Kernel & Android Dual-Boot Ramdisk):**
+   Download the Y1 Type A stock ROM ([rom.zip](https://github.com/y1-community/y1-ata-rom/releases/download/0.1/rom.zip)), extract `boot.img`, and save it as `stock_rom/boot.img` (or set `STOCK_BOOT=/path/to/boot.img`).
+2. **Rockbox Source (`BUILD_ROCKBOX=1`):**
+   Clone `https://github.com/norocoral/rockbox` alongside this repository (`../rockbox`) or set `ROCKBOX_SRC=/path/to/rockbox`. Pass `--no-rockbox` to build only the ROM/SDK.
+3. **MediaTek Bluetooth Blobs (`bt_blobs/`, optional):**
+   Proprietary MediaTek Bluetooth binaries are excluded from Git. If `bt_blobs/` is absent, the ROM still builds and boots, but Bluetooth A2DP will not be bundled unless you supply the blobs from a stock `/system` dump.
+
 ---
 
 ## 3. Configuration & Interactive Terminal GUI (TUI)
 
-The build system can be configured either by launching the interactive Terminal GUI or by editing `hosted_linux_port/build.conf`.
+The build system can be configured either by launching the interactive Terminal GUI or by editing `build.conf`.
 
 ### 3.1 Launching the Terminal GUI
-Run any of the following commands from `hosted_linux_port/`:
+Run any of the following commands from the repository root:
 ```bash
 ./build.sh --gui
 # Or:

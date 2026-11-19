@@ -179,16 +179,22 @@ if [[ -z "$WORKSPACE_ROOT" ]]; then
     fi
 fi
 
-if [[ -n "$WORKSPACE_ROOT" && -d "$WORKSPACE_ROOT/!rockbox_fromsource/rockbox-master/rockbox-master" ]]; then
-    ROCKBOX_SRC="$WORKSPACE_ROOT/!rockbox_fromsource/rockbox-master/rockbox-master"
-elif [[ -f "$SCRIPT_DIR/../tools/configure" ]]; then
-    ROCKBOX_SRC="$(cd "$SCRIPT_DIR/.." && pwd)"
-elif [[ -f "$SCRIPT_DIR/tools/configure" ]]; then
-    ROCKBOX_SRC="$SCRIPT_DIR"
-elif [[ -n "$WORKSPACE_ROOT" && -d "$WORKSPACE_ROOT/rockbox-master" ]]; then
-    ROCKBOX_SRC="$WORKSPACE_ROOT/rockbox-master"
-else
-    ROCKBOX_SRC="$(cd "$SCRIPT_DIR/.." && pwd)"
+if [[ -z "${ROCKBOX_SRC:-}" ]]; then
+    if [[ -n "$WORKSPACE_ROOT" && -d "$WORKSPACE_ROOT/!rockbox_fromsource/rockbox-master/rockbox-master" ]]; then
+        ROCKBOX_SRC="$WORKSPACE_ROOT/!rockbox_fromsource/rockbox-master/rockbox-master"
+    elif [[ -f "$SCRIPT_DIR/../rockbox/tools/configure" ]]; then
+        ROCKBOX_SRC="$(cd "$SCRIPT_DIR/../rockbox" && pwd)"
+    elif [[ -f "$SCRIPT_DIR/rockbox/tools/configure" ]]; then
+        ROCKBOX_SRC="$SCRIPT_DIR/rockbox"
+    elif [[ -f "$SCRIPT_DIR/../tools/configure" ]]; then
+        ROCKBOX_SRC="$(cd "$SCRIPT_DIR/.." && pwd)"
+    elif [[ -f "$SCRIPT_DIR/tools/configure" ]]; then
+        ROCKBOX_SRC="$SCRIPT_DIR"
+    elif [[ -n "$WORKSPACE_ROOT" && -d "$WORKSPACE_ROOT/rockbox-master" ]]; then
+        ROCKBOX_SRC="$WORKSPACE_ROOT/rockbox-master"
+    else
+        ROCKBOX_SRC="$(cd "$SCRIPT_DIR/.." && pwd)"
+    fi
 fi
 
 ROOTFS_DIR="$SCRIPT_DIR/rootfs"
@@ -868,8 +874,11 @@ if [[ "$BUILD_BOOTIMG" -eq 1 ]]; then
         -o "$SCRIPT_DIR/ramdisk_nugget.img"
 
     if [[ ! -s "$SCRIPT_DIR/stock_unpacked/kernel_mtk.bin" ]]; then
-        if [[ ! -s "$STOCK_BOOT" ]]; then
-            echo "[!] Stock boot image not found: $STOCK_BOOT"
+        if [[ -z "${STOCK_BOOT:-}" || ! -s "${STOCK_BOOT:-}" ]]; then
+            echo "[!] Stock boot.img not found."
+            echo "    Download Y1 Type A stock ROM (rom.zip) from:"
+            echo "    https://github.com/y1-community/y1-ata-rom/releases/download/0.1/rom.zip"
+            echo "    Extract boot.img to $SCRIPT_DIR/stock_rom/boot.img (or set STOCK_BOOT=/path/to/boot.img)."
             exit 1
         fi
 

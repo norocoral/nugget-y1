@@ -59,14 +59,22 @@ sudo apt install -y \
     ccache
 ```
 
+### 필수 외부 파일
+1. **순정 `boot.img` (커널 및 안드로이드 듀얼 부팅 램디스크):**
+   Y1 Type A 순정 ROM([rom.zip](https://github.com/y1-community/y1-ata-rom/releases/download/0.1/rom.zip))을 다운로드하여 `boot.img`를 추출한 뒤 `stock_rom/boot.img`에 저장합니다(또는 `STOCK_BOOT=/path/to/boot.img` 지정).
+2. **Rockbox 소스 (`BUILD_ROCKBOX=1` 사용 시):**
+   이 저장소와 나란히 `https://github.com/norocoral/rockbox`를 클론(`../rockbox`)하거나 `ROCKBOX_SRC=/path/to/rockbox`를 지정합니다. ROM/SDK만 빌드하려면 `--no-rockbox`를 전달합니다.
+3. **MediaTek 블루투스 바이너리 (`bt_blobs/`, 선택 사항):**
+   MediaTek 독점 블루투스 바이너리는 Git에서 제외되어 있습니다. `bt_blobs/`가 없어도 ROM 빌드 및 부팅은 가능하지만, 블루투스 A2DP를 포함하려면 순정 `/system` 덤프에서 해당 파일을 배치해야 합니다.
+
 ---
 
 ## 3. 빌드 설정 및 대화형 터미널 GUI (TUI)
 
-빌드 환경은 대화형 터미널 GUI를 실행하거나 `hosted_linux_port/build.conf` 파일을 직접 편집하여 구성할 수 있습니다.
+빌드 환경은 대화형 터미널 GUI를 실행하거나 `build.conf` 파일을 직접 편집하여 구성할 수 있습니다.
 
 ### 3.1 터미널 GUI 실행
-`hosted_linux_port/` 디렉터리에서 아래 명령 중 하나를 실행합니다:
+저장소 루트에서 아래 명령 중 하나를 실행합니다:
 ```bash
 ./build.sh --gui
 # 또는:
