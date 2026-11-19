@@ -6,7 +6,7 @@
 
 [![Platform](https://img.shields.io/badge/Platform-MediaTek%20MT6572-orange.svg)](#하드웨어-사양)
 
-Nugget for Y1은 Innioasis Y1 디지털 오디오 플레이어를 위한 오픈 소스 커스텀 펌웨어입니다. 안드로이드를 완전히 걷어내고, 네이티브 호스티드 록박스(Hosted Rockbox)로 직접 부팅되는 미니멀 다운스트림 리눅스 커널(3.4.67)로 대체합니다.
+Nugget for Y1은 Innioasis Y1 디지털 오디오 플레이어를 위한 오픈 소스 커스텀 펌웨어입니다. 안드로이드를 최소 구성 다운스트림 리눅스 커널(3.4.67)로 완전히 대체하며, 개발자가 네이티브 환경에서 직접 애플리케이션을 구현할 수 있도록 개발자 라이브러리를 제공합니다.
 
 ---
 
@@ -48,7 +48,7 @@ https://github.com/norocoral/nugget-y1-tool
 ### 수동 설치 방법
 1. `boot_rockbox.img` 및 `rockbox_sdcard.zip`을 준비합니다.
 2. 다음 도구를 사용하여 `boot_rockbox.img`를 `boot` 파티션에 플래시합니다:
-   - SP Flash Tool: MT6572 산란 텍스트(scatter) 로드, `BOOTIMG` 체크, `boot_rockbox.img` 선택 후 Download 클릭, 그리고 볼륨 다운 버튼을 누른 채로 Y1을 연결합니다.
+   - SP Flash Tool: MT6572 scatter 로드, `BOOTIMG` 체크, `boot_rockbox.img` 선택 후 Download 클릭, 볼륨 다운 버튼을 누른 채로 Y1 연결.
    - Fastboot / python-mtk:
      ```bash
      python mtk.py w boot boot_rockbox.img
@@ -74,56 +74,13 @@ sudo apt install -y build-essential gcc-arm-linux-gnueabihf python3 python3-pip 
 
 빌드 스크립트 실행 동작:
 1. `!stock_rom/boot.img`에서 순정 커널을 추출합니다(없는 경우).
-2. ARM 하드 플로트 GCC를 사용하여 C 언어로 작성된 커스텀 PID 1 `/init` 및 `unmute_eac` 유틸리티를 컴파일합니다.
+2. ARM 하드 플로트 GCC를 사용하여 커스텀 PID 1 C `/init` 및 `unmute_eac` 유틸리티를 컴파일합니다.
 3. 스플래시 화면 PNG 이미지를 32비트 원시 프레임버퍼 파일로 변환합니다.
 4. Innioasis Y1용 호스티드 록박스를 컴파일합니다(`build_y1/`).
 5. `.rockbox` SD 카드 리소스를 `rockbox_sdcard.zip`으로 패키징합니다.
 6. 최소 구성의 initramfs 램디스크를 빌드하고 MediaTek 헤더가 포함된 플래시용 `boot_rockbox.img`를 생성합니다.
 
 *참고: 오픈 소스 라이선스 규정을 준수하기 위해 MediaTek 독점 바이너리(`bt_blobs/`, `stock_unpacked/`, `logo.bin`)는 Git 추적에서 제외되어 있습니다.*
-
----
-
-## 버튼 조작 가이드
-
-iPod Classic과 동일한 내비게이션 체계에 전용 하드웨어 기능이 추가되었습니다:
-
-| 조작부 | 입력 방식 | 기능 설명 |
-| :--- | :--- | :--- |
-| 클릭 휠 | 회전 | 목록 스크롤 / 재생 화면(WPS)에서 볼륨 조절 |
-| 센터 버튼 | 짧게 누름 | 메뉴 항목 선택 / 활성화 |
-| 센터 버튼 | 길게 누름 (1초) | 현재 트랙/파일의 컨텍스트 메뉴 열기 |
-| 센터 버튼 | 길게 누름 (USB 화면에서 1초) | 대용량 저장소 마운트 해제 및 충전 전용 모드로 전환 |
-| 메뉴 버튼 | 짧게 누름 | 상위 메뉴로 이동 / 뒤로 가기 (120ms 릴리스 판정) |
-| 메뉴 버튼 | 더블 클릭 | 키 잠금(HOLD 모드) 활성화 / 해제 토글 |
-| 메뉴 버튼 | 길게 누름 (280ms) | Rockbox 퀵 스크린 설정 열기 |
-| 재생 버튼 | 짧게 누름 | 재생 / 일시정지 전환 |
-| 재생 버튼 | 길게 누름 | 재생 정지 |
-| 좌측 버튼 | 짧게 누름 | 재생 시간 $\ge 3$초 시 곡 처음으로 되감기, $< 3$초 시 이전 트랙으로 이동 |
-| 좌측 버튼 | 길게 누름 | 뒤로 탐색(리드 스캔) |
-| 우측 버튼 | 짧게 누름 | 다음 트랙으로 이동 |
-| 우측 버튼 | 길게 누름 | 앞으로 탐색(고속 탐색) |
-| 헤드폰 리모컨 (MFB) | 인라인 클릭 | 단일/더블/트리플 클릭 및 길게 누르기 동작 (설정에서 변경 가능) |
-
----
-
-### HOLD 및 백라이트 제어 서브시스템
-
-- **HOLD 토글 (잠금 / 잠금 해제):**
-  - **MENU** 버튼을 빠르게 두 번 누르면 HOLD 모드가 전환됩니다.
-  - 잠금 상태에서는 350ms 더블 클릭 판정 창을 사용하며, 잠금 해제 상태에서는 단일 클릭이 120ms 후 실행됩니다.
-- **잠금 상태 (HOLD 활성화):**
-  - **입력 차단:** *고급 키 잠금(Advanced Key Lock)*에서 볼륨, 재생/일시정지, 트랙 이동을 예외로 허용하지 않은 한 모든 휠 및 버튼 입력이 차단됩니다.
-  - **홀드 라이트 (Hold Light) 설정:**
-    - `꺼짐 (Off)` *(기본값)*: 버튼 및 휠 입력을 무시하며 화면이 켜지지 않습니다.
-    - `켜짐 (On 또는 밝기 %)`: 버튼 입력 시 재생 명령을 실행하지 않고 백라이트만 켭니다.
-  - **잠금 모드 백라이트 꺼짐 시간:** 최대 5시간까지 설정 가능 (`꺼짐`, `항상 켬`, `1초`–`45초`, `1분`–`45분`, `1시간`–`5시간`).
-  - **잠금 모드 백라이트 규칙:** `Always`, `재생 중에만`, `WPS 화면에서만`.
-- **잠금 해제 상태 (일반 동작):**
-  - **첫 번째 키 입력 시 백라이트만 켜기:**
-    - `아니오 (No)` *(기본값)*: 백라이트가 꺼진 상태에서 버튼을 누르면 명령을 실행하고 백라이트를 켭니다.
-    - `예 (Yes)`: 백라이트가 꺼진 상태에서의 첫 번째 버튼 입력은 백라이트만 켜고 이후 입력부터 명령을 실행합니다.
-  - **일반 백라이트 꺼짐 타이머:** 표준 Rockbox 백라이트 타임아웃 설정을 따릅니다.
 
 ---
 
@@ -149,14 +106,14 @@ iPod Classic과 동일한 내비게이션 체계에 전용 하드웨어 기능�
 
 ---
 
-## 크레딧
-https://github.com/nuxcodes/rockpod
+## 관련 저장소
+Rockbox: https://github.com/norocoral/rockbox
+Installer: https://github.com/norocoral/nugget-y1-tool
 
 ---
 
 ## 라이선스
 
-GNU 일반 공중 사용 허가서 v2(GPL-2.0)에 따라 오픈 소스 [Rockbox](https://www.rockbox.org) 프로젝트를 기반으로 제작되었습니다.
 Innioasis 사와는 제휴 관계가 아닙니다.
 
 ## 투명성 안내

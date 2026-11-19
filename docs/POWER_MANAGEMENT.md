@@ -2,93 +2,65 @@
 
 # Power Management: Innioasis Y1
 
-This document describes the power management architecture, CPU scaling, core hotplugging, idle battery mitigations, and display power-saving modes on the Innioasis Y1 hosted Rockbox port.
+This document describes the power management mechanisms implemented in the Nugget Linux environment and `liby1` on the MediaTek MT6572 / MT6323 hardware platform.
 
 ---
 
-## 1. Power Consumption Benchmarks
+## 1. Kernel Suspend & Wakelock Architecture
 
-| Metric | Stock Android | Rockbox on Android | Nugget for Y1 (Hosted Linux) |
-| :--- | :--- | :--- | :--- |
-| Audio Playback Duration | ~30 hours | ~20 hours | **~50 hours** |
-| Standby Time (Screen Off) | ~48 hours | ~36 hours | **~200+ hours** |
-| Standby Current | ~120-140 mA | ~140-180 mA | **< 5 mA** |
-| Active Audio Current | 140-180 mA | 180-220 mA | **45-65 mA** |
+Downstream MediaTek kernel 3.4.67 uses Android `earlysuspend` and `wakelock` sysfs interfaces (`/sys/power/state`, `/sys/power/wake_lock`, `/sys/power/wake_unlock`).
 
----
-
-## 2. Idle Battery Drain: Investigation & Fixes
-
-### 2.1 Problem Description
-Leaving the device idle for 9 hours with display off, audio stopped, and Bluetooth disabled resulted in 100% battery depletion.
-
-### 2.2 Root Causes
-1. **CPU Frequency Lock:** CPU 0 remained at 1196 MHz because default governors did not drop clock rates on screen timeout.
-2. **Secondary Core Leakage:** Cortex-A7 Core 1 remained powered in WFI rather than being shut down via hotplug.
-3. **SPM Deep Sleep Blocked:** Open drivers held wakelocks and clock gates, preventing the MediaTek System Power Manager (SPM) from entering deep sleep.
-4. **Quiescent Audio Current:** The MT6323 charge pump and headphone amplifier bias remained energized with no active stream.
-5. **Storage Flush Interval:** Linux VM 5-second dirty page writeback timers forced periodic MMC host wakeups.
-
-### 2.3 State Machine Implementation
+### 1.1 Display Early-Suspend vs. Full `mem` Suspend
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Awake: Backlight On
-    Awake --> Playing: Audio Started
-    Playing --> Awake: Audio Stopped
-
-    Awake --> ScreenOff: Backlight Timeout
-    Playing --> ScreenOffPlaying: Backlight Timeout
-
-    ScreenOff --> Awake: Center Key Click
-    ScreenOffPlaying --> Playing: Center Key Click
-
-    state ScreenOff {
-        [*] --> IdleThrottled
-        IdleThrottled: CPU 0 @ 598 MHz
-        IdleThrottled: CPU 1 Hotplugged (Offline)
-        IdleThrottled: SPM Regular Idle Active
-        IdleThrottled: MT6323 Amp Powered Down
-        IdleThrottled: Standby Current < 5 mA
-    }
-
-    state ScreenOffPlaying {
-        [*] --> PlayThrottled
-        PlayThrottled: CPU 0 @ 598 MHz
-        PlayThrottled: CPU 1 Hotplugged (Offline)
-        PlayThrottled: Display Bus 0 Hz
-        PlayThrottled: Active Current ~ 28-35 mA
-    }
+    [*] --> Active: rockbox_active locked, state="on"
+    Active --> EarlySuspend: y1_display_enter_early_suspend()
+    EarlySuspend --> MemSuspend: y1_power_set_idle_sleep(true)
+    MemSuspend --> Active: Wake IRQ + y1_power_set_idle_sleep(false) + y1_display_exit_early_suspend()
+    EarlySuspend --> Active: y1_display_exit_early_suspend()
 ```
 
----
+- **Early-Suspend (`y1_display_enter_early_suspend()`):**
+  - Acquires `"rockbox_active"` in `/sys/power/wake_lock` and writes `"mem\n"` to `/sys/power/state`.
+  - Because a userspace wakelock is held, kernel `earlysuspend` handlers power down the display controller, backlight, touch scan, and GPU without freezing userspace processes (used during screen-off audio playback).
+- **Full `mem` Suspend (`y1_power_set_idle_sleep(true)`):**
+  - Skipped if USB Mass Storage is attached (`y1_usb_is_storage_attached()`).
+  - Unlocks `"rockbox_active"` and `"y1play"` in `/sys/power/wake_unlock` and writes `"mem\n"` to `/sys/power/state`, allowing the kernel to enter `mem` suspend (RAM retention, userspace frozen) when audio DMA is idle.
+- **Resume (`y1_power_set_idle_sleep(false)` + `y1_display_exit_early_suspend()`):**
+  - Re-acquires `"rockbox_active"` in `/sys/power/wake_lock` and writes `"on\n"` to `/sys/power/state`.
 
-## 3. CPU Clock & Core Scaling
+### 1.2 Audio Playback Wakelock & SPM Deep-Idle
 
-### 3.1 Kernel Sysfs Control Nodes
-- Frequency Control:
-  `/sys/devices/system/cpu/cpu0/cpufreq/scaling_setspeed`
-  Supported frequencies: `598000`, `747500`, `1001000`, `1196000` (kHz).
-- Core 1 Hotplug:
-  `/sys/devices/system/cpu/cpu1/online`
-  Writing `0` powers down Core 1; writing `1` restores dual-core execution.
-
-### 3.2 Operating Profiles
-Profiles are configured under `Settings -> Nugget -> Device -> CPU Mode`:
-- **Normal:** CPU 0 scales between 598 MHz and 1001 MHz while awake. Clamped to 598 MHz single-core when screen is off.
-- **Battery Saver:** Locked at 598 MHz with Core 1 offline at all times.
-- **Performance:** Dual-core up to 1.2 GHz when awake for intensive database searches, cuesheet indexing, and heavy plugins.
+- `y1_audio_wake_lock(true)` / `y1_audio_wake_lock(false)` holds or releases `"y1play"` in `/sys/power/wake_lock` / `/sys/power/wake_unlock` so `mem` suspend is prevented while audio playback is active.
+- `y1_audio_set_deep_idle(false)` disables MT6572 SPM CPU powerdown while AFE DL1 DMA is running so DMA transfers are not interrupted; `y1_audio_set_deep_idle(true)` re-enables it when audio stops.
 
 ---
 
-## 4. Always-On Display (AOD)
+## 2. CPU Frequency & Core Hotplug Control
 
-When enabled (`Settings -> Nugget -> Device -> Always On Display`):
-1. **Backlight PWM:** Dimmed by 50% instead of fully powered off.
-2. **Button LEDs:** Click wheel and button backlights are powered off.
-3. **1 FPS Refresh Rate:** Display driver throttles refresh to 1 Hz, updating only track position and clock.
-4. **Bus Power Gating:** Display bus enters low-power state between frames, saving 97% of display bus power.
-5. **Conditional Policies:**
-   - `AOD: On WPS Only`: Display stays on only on the While Playing Screen. Menus turn off the display normally.
-   - `AOD: When Playing Only`: Display stays on only while music is actively playing.
+### 2.1 Kernel Sysfs Interfaces
+- Frequency governor/speed: `/sys/devices/system/cpu/cpu0/cpufreq/` (`scaling_governor`, `scaling_setspeed`)
+- Core 1 hotplug: `/sys/devices/system/cpu/cpu1/online` (`0` = offline, `1` = online)
 
+### 2.2 `liby1` CPU Modes (`enum y1_cpu_mode_id`)
+
+| Mode | Constant | Behavior |
+| :--- | :--- | :--- |
+| Dynamic | `Y1_CPU_MODE_DYNAMIC` (`0`) | `ondemand` governor (598 MHz – 1001 MHz) |
+| Powersave | `Y1_CPU_MODE_POWERSAVE` (`1`) | Fixed 598 MHz |
+| Balanced | `Y1_CPU_MODE_BALANCED` (`2`) | Fixed 1001 MHz |
+| Performance | `Y1_CPU_MODE_PERFORMANCE` (`3`) | Fixed 1196 MHz |
+| Turbo | `Y1_CPU_MODE_TURBO` (`4`) | Fixed 1300 MHz |
+
+- `y1_cpu_set_dual_core(bool dual_core)` enables or offlines CPU1 via `/sys/devices/system/cpu/cpu1/online`.
+- `y1_cpu_set_screen_off_clamp(bool screen_off)` clamps CPU frequency and offlines CPU1 when the display is off.
+- `y1_cpu_boost_for_conversion(bool enable)` temporarily raises CPU frequency/cores during bulk database or artwork processing and restores the prior mode when disabled.
+
+---
+
+## 3. Peripheral Power-Down When Idle
+
+- **Display Eco Mode:** `y1_fb_set_eco_mode(true)` writes `/proc/dispsys/eco_mode`.
+- **Touch Scanning:** `y1_input_set_touch_scanning(false)` disables touch-wheel scanning via `/proc/tpd_keys_enable`.
+- **Audio Analog Stage:** Closing `/dev/eac` (`y1_audio_close()`) powers down the MT6323 headphone amplifier and DAC bias after draining settling samples.

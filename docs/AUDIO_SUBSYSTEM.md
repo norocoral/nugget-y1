@@ -53,17 +53,20 @@ Downstream MediaTek kernel 3.4.67 routes digital PCM audio through the Enhanced 
 
 ## 4. Gain Staging & Volume Control
 
-Gain management combines digital attenuation with analog amplification:
-- **Digital Range (-74 dB to 0 dB):** Handled by Rockbox's software volume dither engine. Digital amplification never exceeds 0 dBFS to prevent clipping.
-- **Analog Headroom (0 dB to +12 dB):** Handled by the MT6323 integrated analog headphone amplifier stages, providing driving power for higher impedance headphones without digital distortion.
+Gain management combines digital attenuation with analog PGA control:
+- **Digital Gain:** Software PCM attenuation up to 0 dBFS (avoiding digital clipping).
+- **Analog Headphone PGA (`MT6323_AUDTOP_CON5`, `0x70a`):** `y1_audio_set_hp_analog_gain(idx_l, idx_r)` writes 3-bit gain indices (`0..7`, 2 dB/step) to bits `[14:12]` (L) and `[10:8]` (R) while preserving headphone mux/power bits `[4:0]` (`0x0014`).
 
 ---
 
-## 5. Headphone Detection & Disconnect
+## 5. Headphone Detection
 
-The 3.5mm jack uses an analog impedance sensing switch wired to the `accdet` driver.
-- Disconnect: Monitored via `/sys/class/switch/h2w/state`. When unplugged, Rockbox immediately invokes `pause_action()`.
-- Reconnect: Playback resumes automatically when enabled in `Settings -> Playback Settings -> Pause on Headphone Unplug`.
+The 3.5mm jack state is exposed by the `accdet` driver via `/sys/class/switch/h2w/state`:
+- `0`: No jack inserted
+- `1`: 4-pole TRRS headset (with microphone)
+- `2`: 3-pole TRS headphones
+
+`liby1` exposes `y1_jack_get_raw_state()`, `y1_jack_is_inserted()`, and `y1_jack_has_mic()`. Inline remote button events (MFB) are delivered via the `ACCDET` `/dev/input/event*` device, with debounce tuned by `y1_pmic_tune_accdet_debounce()`.
 
 ---
 
