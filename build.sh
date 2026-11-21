@@ -18,6 +18,8 @@ BUILD_VIDEO_LIB=1
 BUILD_ROCKBOX=1
 PACKAGE_SDCARD=1
 BUILD_DIST=0
+BUILD_DIST_IUCE=0
+DIST_VERSION="${DIST_VERSION:-}"
 BUNDLE_BT_BLOBS=1
 BUNDLE_ANDROID_RAMDISK=1
 CUSTOM_APP_BIN=""
@@ -39,6 +41,7 @@ Innioasis Y1 Modular Build System (liby1 Hardware Layer + Linux Boot + Rockbox)
 Options:
   --gui, --tui, --menu, menuconfig   Launch the interactive Terminal GUI configurator
   --dist                             Build & assemble complete GitHub release distribution into dist/
+  --dist-iuce                        Same as --dist, plus package dist/rom.zip for Innioasis Updater CE
   --only-liby1                       Build only liby1 (liby1.a, liby1.so, hello_y1)
   --only-rootfs                      Build only liby1 and initramfs rootfs utilities
   --only-bootimg                     Build only liby1, rootfs, and boot_nugget.img
@@ -63,6 +66,16 @@ while [[ $# -gt 0 ]]; do
             BUILD_DIST=1
             BUILD_ROCKBOX=1
             shift
+            ;;
+        --dist-iuce)
+            BUILD_DIST=1
+            BUILD_DIST_IUCE=1
+            BUILD_ROCKBOX=1
+            shift
+            ;;
+        --version)
+            DIST_VERSION="${2:-}"
+            shift 2
             ;;
         --only-liby1)
             BUILD_LIBY1=1
@@ -277,9 +290,23 @@ trap cleanup EXIT
 # Build information & prerequisite validation
 # ---------------------------------------------------------------------------
 
+if [[ "${BUILD_DIST:-0}" -eq 1 && -z "${DIST_VERSION:-}" ]]; then
+    if [[ -t 0 ]]; then
+        read -rp "Enter distribution version number: " DIST_VERSION
+    fi
+    if [[ -z "${DIST_VERSION:-}" ]]; then
+        echo "[!] Error: Version number is required when building for --dist (pass --version <num> or DIST_VERSION)."
+        exit 1
+    fi
+fi
+export DIST_VERSION BUILD_DIST_IUCE
+
 echo "=========================================================="
 echo " Innioasis Y1 Modular Build System"
 echo "=========================================================="
+if [[ -n "${DIST_VERSION:-}" ]]; then
+    echo "Dist Version:   $DIST_VERSION"
+fi
 echo "Toolchain:      ${CC[*]}"
 echo "Parallelism:    $JOBS jobs"
 echo "Components:     liby1=$BUILD_LIBY1 rootfs=$BUILD_ROOTFS bootimg=$BUILD_BOOTIMG video=$BUILD_VIDEO_LIB rockbox=$BUILD_ROCKBOX sdcard=$PACKAGE_SDCARD"
@@ -350,7 +377,14 @@ if [[ "$BUILD_ROOTFS" -eq 1 ]]; then
         fi
 
         if [[ -n "$SRC_IMG" ]]; then
-            if [[ ! -s "$ROOTFS_DIR/etc/$img.raw" || "$SRC_IMG" -nt "$ROOTFS_DIR/etc/$img.raw" ]]; then
+            if [[ "$img" == "boot" && -n "${DIST_VERSION:-}" ]]; then
+                MFG_DATE="$(date +%Y.%m.%d)"
+                echo "[*] Stamping boot.png with MFG $MFG_DATE / VER $DIST_VERSION..."
+                python3 "$SCRIPT_DIR/tools/convert_splash.py" \
+                    --overlay "MFG $MFG_DATE" \
+                    --overlay "VER $DIST_VERSION" \
+                    "$SRC_IMG" "$ROOTFS_DIR/etc/$img.raw"
+            elif [[ ! -s "$ROOTFS_DIR/etc/$img.raw" || "$SRC_IMG" -nt "$ROOTFS_DIR/etc/$img.raw" ]]; then
                 echo "[*] Converting $SRC_IMG..."
                 python3 "$SCRIPT_DIR/tools/convert_splash.py" \
                     "$SRC_IMG" "$ROOTFS_DIR/etc/$img.raw"
@@ -598,6 +632,16 @@ if [[ "$BUILD_ROCKBOX" -eq 1 ]]; then
         fi
     fi
 
+    if [[ -d "$SCRIPT_DIR/liby1/src" ]]; then
+        mkdir -p "$ROCKBOX_WORK_SRC/vendor/liby1/include" "$ROCKBOX_WORK_SRC/vendor/liby1/src"
+        cp -u "$SCRIPT_DIR/liby1/include/"* "$ROCKBOX_WORK_SRC/vendor/liby1/include/" 2>/dev/null || cp -f "$SCRIPT_DIR/liby1/include/"* "$ROCKBOX_WORK_SRC/vendor/liby1/include/"
+        cp -u "$SCRIPT_DIR/liby1/src/"* "$ROCKBOX_WORK_SRC/vendor/liby1/src/" 2>/dev/null || cp -f "$SCRIPT_DIR/liby1/src/"* "$ROCKBOX_WORK_SRC/vendor/liby1/src/"
+        if [[ "$ROCKBOX_WORK_SRC" != "$ROCKBOX_SRC" && -d "$ROCKBOX_SRC/vendor/liby1" ]]; then
+            cp -u "$SCRIPT_DIR/liby1/include/"* "$ROCKBOX_SRC/vendor/liby1/include/" 2>/dev/null || true
+            cp -u "$SCRIPT_DIR/liby1/src/"* "$ROCKBOX_SRC/vendor/liby1/src/" 2>/dev/null || true
+        fi
+    fi
+
     mkdir -p "$BUILD_DIR"
     cd "$BUILD_DIR"
 
@@ -637,10 +681,15 @@ if [[ "$BUILD_ROCKBOX" -eq 1 ]]; then
     fi
 
     echo "[*] Building Rockbox with $JOBS parallel jobs..."
-    make -j"$JOBS"
-
-    echo "[*] Creating Rockbox base archive..."
-    make -j"$JOBS" zip
+    if [[ -n "${DIST_VERSION:-}" ]]; then
+        make -j"$JOBS" SVNVERSION="$DIST_VERSION"
+        echo "[*] Creating Rockbox base archive (version $DIST_VERSION)..."
+        make -j"$JOBS" zip SVNVERSION="$DIST_VERSION"
+    else
+        make -j"$JOBS"
+        echo "[*] Creating Rockbox base archive..."
+        make -j"$JOBS" zip
+    fi
 
     if [[ ! -s "$BUILD_DIR/rockbox.zip" ]]; then
         echo "[!] Rockbox SD package was not generated."

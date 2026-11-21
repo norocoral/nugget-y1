@@ -10,6 +10,99 @@ import zlib
 import struct
 import os
 
+_FONT_5X7 = {
+    ' ': (0x00, 0x00, 0x00, 0x00, 0x00),
+    '.': (0x00, 0x60, 0x60, 0x00, 0x00),
+    '-': (0x08, 0x08, 0x08, 0x08, 0x08),
+    '_': (0x40, 0x40, 0x40, 0x40, 0x40),
+    '/': (0x20, 0x10, 0x08, 0x04, 0x02),
+    ':': (0x00, 0x36, 0x36, 0x00, 0x00),
+    '0': (0x3E, 0x51, 0x49, 0x45, 0x3E),
+    '1': (0x00, 0x42, 0x7F, 0x40, 0x00),
+    '2': (0x42, 0x61, 0x51, 0x49, 0x46),
+    '3': (0x21, 0x41, 0x45, 0x4B, 0x31),
+    '4': (0x18, 0x14, 0x12, 0x7F, 0x10),
+    '5': (0x27, 0x45, 0x45, 0x45, 0x39),
+    '6': (0x3C, 0x4A, 0x49, 0x49, 0x30),
+    '7': (0x01, 0x71, 0x09, 0x05, 0x03),
+    '8': (0x36, 0x49, 0x49, 0x49, 0x36),
+    '9': (0x06, 0x49, 0x49, 0x29, 0x1E),
+    'A': (0x7E, 0x11, 0x11, 0x11, 0x7E),
+    'B': (0x7F, 0x49, 0x49, 0x49, 0x36),
+    'C': (0x3E, 0x41, 0x41, 0x41, 0x22),
+    'D': (0x7F, 0x41, 0x41, 0x22, 0x1C),
+    'E': (0x7F, 0x49, 0x49, 0x49, 0x41),
+    'F': (0x7F, 0x09, 0x09, 0x09, 0x01),
+    'G': (0x3E, 0x41, 0x49, 0x49, 0x7A),
+    'H': (0x7F, 0x08, 0x08, 0x08, 0x7F),
+    'I': (0x00, 0x41, 0x7F, 0x41, 0x00),
+    'J': (0x20, 0x40, 0x41, 0x3F, 0x01),
+    'K': (0x7F, 0x08, 0x14, 0x22, 0x41),
+    'L': (0x7F, 0x40, 0x40, 0x40, 0x40),
+    'M': (0x7F, 0x02, 0x0C, 0x02, 0x7F),
+    'N': (0x7F, 0x04, 0x08, 0x10, 0x7F),
+    'O': (0x3E, 0x41, 0x41, 0x41, 0x3E),
+    'P': (0x7F, 0x09, 0x09, 0x09, 0x06),
+    'Q': (0x3E, 0x41, 0x51, 0x21, 0x5E),
+    'R': (0x7F, 0x09, 0x19, 0x29, 0x46),
+    'S': (0x46, 0x49, 0x49, 0x49, 0x31),
+    'T': (0x01, 0x01, 0x7F, 0x01, 0x01),
+    'U': (0x3F, 0x40, 0x40, 0x40, 0x3F),
+    'V': (0x1F, 0x20, 0x40, 0x20, 0x1F),
+    'W': (0x3F, 0x40, 0x38, 0x40, 0x3F),
+    'X': (0x63, 0x14, 0x08, 0x14, 0x63),
+    'Y': (0x07, 0x08, 0x70, 0x08, 0x07),
+    'Z': (0x61, 0x51, 0x49, 0x45, 0x43),
+}
+
+def _draw_text_xrgb(pixels: bytearray, w: int, h: int, lines: list[str], scale: int = 2) -> None:
+    line_h = 7 * scale
+    line_gap = 4
+    margin_x = 12
+    margin_y = 12
+    total_h = len(lines) * line_h + max(0, len(lines) - 1) * line_gap
+    y0 = h - margin_y - total_h
+
+    def set_px(px: int, py: int, r: int, g: int, b: int) -> None:
+        if 0 <= px < w and 0 <= py < h:
+            idx = (py * w + px) * 4
+            pixels[idx] = b
+            pixels[idx + 1] = g
+            pixels[idx + 2] = r
+            pixels[idx + 3] = 0xFF
+
+    for li, text in enumerate(lines):
+        y_base = y0 + li * (line_h + line_gap)
+        x_cur = margin_x
+        for ch in text.upper():
+            glyph = _FONT_5X7.get(ch, _FONT_5X7[' '])
+            for col_idx, col_bits in enumerate(glyph):
+                for row_idx in range(7):
+                    if col_bits & (1 << row_idx):
+                        for sy in range(scale):
+                            for sx in range(scale):
+                                set_px(x_cur + col_idx * scale + sx + 1, y_base + row_idx * scale + sy + 1, 0, 0, 0)
+                        for sy in range(scale):
+                            for sx in range(scale):
+                                set_px(x_cur + col_idx * scale + sx, y_base + row_idx * scale + sy, 235, 235, 235)
+            x_cur += 6 * scale
+
+def _png_chunk(tag: bytes, payload: bytes) -> bytes:
+    return struct.pack('>I', len(payload)) + tag + payload + struct.pack('>I', zlib.crc32(tag + payload) & 0xffffffff)
+
+def encode_xrgb8888_to_png(pixels: bytes, w: int, h: int, out_png: str) -> None:
+    raw = bytearray()
+    for y in range(h):
+        raw.append(0)
+        row_off = y * w * 4
+        for x in range(w):
+            i = row_off + x * 4
+            raw.extend((pixels[i + 2], pixels[i + 1], pixels[i], 0xFF))
+    ihdr = struct.pack('>IIBBBBB', w, h, 8, 6, 0, 0, 0)
+    png_bytes = b'\x89PNG\r\n\x1a\n' + _png_chunk(b'IHDR', ihdr) + _png_chunk(b'IDAT', zlib.compress(bytes(raw), 6)) + _png_chunk(b'IEND', b'')
+    with open(out_png, 'wb') as f:
+        f.write(png_bytes)
+
 def decode_png_to_xrgb8888(png_path: str, target_w: int = 480, target_h: int = 360) -> bytes:
     with open(png_path, 'rb') as f:
         data = f.read()
@@ -113,12 +206,28 @@ def decode_png_to_xrgb8888(png_path: str, target_w: int = 480, target_h: int = 3
 
 
 def main():
-    if len(sys.argv) < 3:
-        print(f"Usage: {sys.argv[0]} <input.png> <output.raw>")
+    args = sys.argv[1:]
+    overlays = []
+    out_png = None
+    positional = []
+    i = 0
+    while i < len(args):
+        if args[i] == '--overlay' and i + 1 < len(args):
+            overlays.append(args[i + 1])
+            i += 2
+        elif args[i] == '--out-png' and i + 1 < len(args):
+            out_png = args[i + 1]
+            i += 2
+        else:
+            positional.append(args[i])
+            i += 1
+
+    if len(positional) < 2:
+        print(f"Usage: {sys.argv[0]} [--overlay <text>]... [--out-png <path>] <input.png> <output.raw>")
         sys.exit(1)
 
-    input_png = sys.argv[1]
-    output_raw = sys.argv[2]
+    input_png = positional[0]
+    output_raw = positional[1]
 
     if not os.path.exists(input_png):
         print(f"Error: Input file '{input_png}' not found!")
@@ -127,7 +236,12 @@ def main():
     os.makedirs(os.path.dirname(os.path.abspath(output_raw)), exist_ok=True)
 
     print(f"[*] Converting '{input_png}' to raw framebuffer binary '{output_raw}'...")
-    raw_data = decode_png_to_xrgb8888(input_png, 480, 360)
+    raw_data = bytearray(decode_png_to_xrgb8888(input_png, 480, 360))
+    if overlays:
+        _draw_text_xrgb(raw_data, 480, 360, overlays, scale=2)
+    if out_png:
+        os.makedirs(os.path.dirname(os.path.abspath(out_png)), exist_ok=True)
+        encode_xrgb8888_to_png(bytes(raw_data), 480, 360, out_png)
 
     with open(output_raw, 'wb') as f:
         f.write(raw_data)

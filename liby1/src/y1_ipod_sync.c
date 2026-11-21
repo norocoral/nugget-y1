@@ -681,9 +681,39 @@ static void decode_mhod_string(const uint8_t *p, size_t avail, char *out, size_t
     if (is_utf16) {
         decode_utf16(str_data, slen, false, out, out_sz);
     } else {
-        size_t n = slen < out_sz - 1 ? slen : out_sz - 1;
-        memcpy(out, str_data, n);
-        out[n] = '\0';
+        /* Check whether str_data is valid UTF-8; if not, convert ISO-8859-1 -> UTF-8 */
+        bool valid_utf8 = true;
+        for (size_t i = 0; i < slen; ) {
+            uint8_t c = str_data[i];
+            if (c < 0x80) {
+                i++;
+            } else if ((c & 0xE0) == 0xC0 && i + 1 < slen &&
+                       (str_data[i + 1] & 0xC0) == 0x80) {
+                i += 2;
+            } else if ((c & 0xF0) == 0xE0 && i + 2 < slen &&
+                       (str_data[i + 1] & 0xC0) == 0x80 &&
+                       (str_data[i + 2] & 0xC0) == 0x80) {
+                i += 3;
+            } else if ((c & 0xF8) == 0xF0 && i + 3 < slen &&
+                       (str_data[i + 1] & 0xC0) == 0x80 &&
+                       (str_data[i + 2] & 0xC0) == 0x80 &&
+                       (str_data[i + 3] & 0xC0) == 0x80) {
+                i += 4;
+            } else {
+                valid_utf8 = false;
+                break;
+            }
+        }
+        if (valid_utf8) {
+            size_t n = slen < out_sz - 1 ? slen : out_sz - 1;
+            memcpy(out, str_data, n);
+            out[n] = '\0';
+        } else {
+            size_t pos = 0;
+            for (size_t i = 0; i < slen && pos + 1 < out_sz; i++)
+                pos = append_utf8(str_data[i], out, out_sz, pos);
+            out[pos] = '\0';
+        }
     }
 }
 
@@ -1172,6 +1202,7 @@ static struct art_slot *parse_artwork_db(int *out_count)
         struct art_slot best;
         memset(&best, 0, sizeof(best));
         uint32_t best_area = 0;
+        bool best_unpadded = false;
 
         size_t mpos = ihdr;
         for (uint32_t c = 0; c < children && mpos + 16 <= itotal; c++) {
@@ -1233,9 +1264,13 @@ static struct art_slot *parse_artwork_db(int *out_count)
                         while (*rel == ':' || *rel == '/')
                             rel++;
                         uint32_t area = (uint32_t)w * (uint32_t)h;
+                        bool unpadded = (hpad == 0 && vpad == 0);
+                        bool better = (unpadded && !best_unpadded) ||
+                                      (unpadded == best_unpadded && area > best_area);
                         if (w > 0 && h > 0 && isz >= (uint32_t)w * h * 2 &&
-                            area > best_area) {
+                            better) {
                             best_area = area;
+                            best_unpadded = unpadded;
                             best.art_id = art_id;
                             best.song_dbid = song_dbid;
                             best.ithmb_offset = off;
@@ -1271,9 +1306,17 @@ static struct art_slot *parse_artwork_db(int *out_count)
 static bool load_ithmb_pixels(const struct art_slot *slot, uint16_t **out_px)
 {
     *out_px = NULL;
-    size_t expected = (size_t)slot->width * (size_t)slot->height * 2U;
-    if (expected == 0 || expected > 4 * 1024 * 1024)
+    size_t tight_row = (size_t)slot->width * 2U;
+    size_t tight_sz = tight_row * (size_t)slot->height;
+    if (tight_sz == 0 || tight_sz > 8 * 1024 * 1024)
         return false;
+
+    size_t read_sz = (slot->image_size >= tight_sz && slot->image_size <= 8 * 1024 * 1024)
+        ? (size_t)slot->image_size
+        : tight_sz;
+    size_t row_bytes = (slot->height > 0) ? (read_sz / (size_t)slot->height) : tight_row;
+    if (row_bytes < tight_row)
+        row_bytes = tight_row;
 
     char ipath[512];
     snprintf(ipath, sizeof(ipath), "%s/%s", IPOD_ARTWORK_DIR, slot->ithmb_rel);
@@ -1281,22 +1324,20 @@ static bool load_ithmb_pixels(const struct art_slot *slot, uint16_t **out_px)
     if (fd < 0)
         return false;
 
-    uint16_t *buf = (uint16_t *)malloc(expected);
-    if (!buf) {
+    if (lseek(fd, (off_t)slot->ithmb_offset, SEEK_SET) != (off_t)slot->ithmb_offset) {
         close(fd);
         return false;
     }
 
-    if (lseek(fd, (off_t)slot->ithmb_offset, SEEK_SET) != (off_t)slot->ithmb_offset) {
-        free(buf);
+    uint8_t *raw = (uint8_t *)malloc(read_sz);
+    if (!raw) {
         close(fd);
         return false;
     }
 
     size_t got = 0;
-    uint8_t *raw = (uint8_t *)buf;
-    while (got < expected) {
-        ssize_t r = read(fd, raw + got, expected - got);
+    while (got < read_sz) {
+        ssize_t r = read(fd, raw + got, read_sz - got);
         if (r <= 0) {
             if (r < 0 && errno == EINTR)
                 continue;
@@ -1306,10 +1347,26 @@ static bool load_ithmb_pixels(const struct art_slot *slot, uint16_t **out_px)
     }
     close(fd);
 
-    if (got != expected) {
-        free(buf);
+    if (got < tight_sz || got < row_bytes * (size_t)slot->height) {
+        free(raw);
         return false;
     }
+
+    if (row_bytes == tight_row) {
+        *out_px = (uint16_t *)raw;
+        return true;
+    }
+
+    uint16_t *buf = (uint16_t *)malloc(tight_sz);
+    if (!buf) {
+        free(raw);
+        return false;
+    }
+    uint8_t *dst = (uint8_t *)buf;
+    for (uint16_t y = 0; y < slot->height; y++)
+        memcpy(dst + (size_t)y * tight_row, raw + (size_t)y * row_bytes, tight_row);
+    free(raw);
+
     *out_px = buf;
     return true;
 }
@@ -1723,15 +1780,20 @@ static bool utf8_strcasestr(const char *hay, const char *needle)
 }
 
 static bool eval_slst_rule(const struct itdb_track *tr, const uint8_t *rule, size_t rlen,
-                           uint32_t now_mac)
+                           uint32_t now_mac, bool *supported)
 {
-    if (rlen < 56)
+    if (supported) *supported = true;
+    if (rlen < 56) {
+        if (supported) *supported = false;
         return false;
+    }
     uint32_t field = rd32be(rule + 0);
     uint32_t action = rd32be(rule + 4);
     uint32_t vlen = rd32be(rule + 52);
-    if (56 + vlen > rlen)
+    if (56 + vlen > rlen) {
+        if (supported) *supported = false;
         return false;
+    }
 
     bool negate = (action & 0x02000000U) != 0;
     bool is_str = (action & 0x01000000U) != 0;
@@ -1750,7 +1812,7 @@ static bool eval_slst_rule(const struct itdb_track *tr, const uint8_t *rule, siz
         case 0x27: tval = tr->grouping; break;
         case 0x29: tval = tr->albumartist; break;
         case 0x3e: tval = tr->tv_show; break;
-        default:   return false;
+        default:   if (supported) *supported = false; return false;
         }
         char needle[512];
         decode_utf16(rule + 56, vlen, true, needle, sizeof(needle));
@@ -1783,7 +1845,7 @@ static bool eval_slst_rule(const struct itdb_track *tr, const uint8_t *rule, siz
         case 0x19: tv = tr->rating_ipod; break;
         case 0x20: tv = tr->added_mac; is_date = true; break;
         case 0x3c: tv = tr->media_type; break;
-        default:   return false;
+        default:   if (supported) *supported = false; return false;
         }
 
         if (op == 0x200U && is_date) {
@@ -1799,6 +1861,9 @@ static bool eval_slst_rule(const struct itdb_track *tr, const uint8_t *rule, siz
         } else if (op == 0x100U) {
             res = (tv >= fval && tv <= tval_hi);
         }
+    } else {
+        if (supported) *supported = false;
+        return false;
     }
 
     return negate ? !res : res;
@@ -1842,7 +1907,7 @@ static void collect_playlists_from_section_locked(int64_t list_off, bool is_podc
         if (ptotal == 0 || pos + ptotal > sz || phdr < 44)
             break;
 
-        bool is_folder = (phdr >= 68 && mhyp[64] != 0) || (phdr >= 42 && mhyp[41] != 0);
+        bool is_folder = (phdr >= 42 && mhyp[41] != 0);
 
         char pname[256];
         snprintf(pname, sizeof(pname), is_podcast_sec ? "Podcasts_%u" : "Playlist_%u", p);
@@ -1919,7 +1984,12 @@ static void collect_playlists_from_section_locked(int64_t list_off, bool is_podc
                                 rules_supported = false;
                                 break;
                             }
-                            bool rmatch = eval_slst_rule(tr, slst + roff, rtot, now_mac);
+                            bool rsup = true;
+                            bool rmatch = eval_slst_rule(tr, slst + roff, rtot, now_mac, &rsup);
+                            if (!rsup) {
+                                rules_supported = false;
+                                break;
+                            }
                             if (conj_or != 0)
                                 match = match || rmatch;
                             else
@@ -2293,8 +2363,10 @@ bool y1_ipod_native_load_albumart_rgb565(const char *rb_path,
     if (!load_ithmb_pixels(&slot_copy, &px))
         return false;
 
-    int x0 = slot_copy.hpad > 0 ? slot_copy.hpad : 0;
-    int y0 = slot_copy.vpad > 0 ? slot_copy.vpad : 0;
+    size_t tight_sz = (size_t)slot_copy.width * (size_t)slot_copy.height * 2U;
+    bool padded_external = (slot_copy.image_size > tight_sz);
+    int x0 = (!padded_external && slot_copy.hpad > 0) ? slot_copy.hpad : 0;
+    int y0 = (!padded_external && slot_copy.vpad > 0) ? slot_copy.vpad : 0;
     int cw = (int)slot_copy.width - 2 * x0;
     int ch = (int)slot_copy.height - 2 * y0;
     if (cw <= 0 || ch <= 0) {
