@@ -8,7 +8,9 @@
  * Copyright (C) 2026 Nugget Y1
  ****************************************************************************/
 
+#ifndef _GNU_SOURCE
 #define _GNU_SOURCE
+#endif
 #include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
@@ -879,7 +881,7 @@ static uint32_t count_podcast_shows(const uint8_t *buf, size_t sz, int64_t list_
         if (ptotal == 0 || pos + ptotal > sz || phlen < 44)
             break;
 
-        if (mhyp[42] | mhyp[43]) {
+        if ((mhyp[42] != 0) || (mhyp[43] & 0xFEU) != 0) {
             uint32_t mhods = rd32le(mhyp + 12);
             uint32_t items = rd32le(mhyp + 16);
             size_t child = pos + phlen;
@@ -1311,13 +1313,6 @@ static bool load_ithmb_pixels(const struct art_slot *slot, uint16_t **out_px)
     if (tight_sz == 0 || tight_sz > 8 * 1024 * 1024)
         return false;
 
-    size_t read_sz = (slot->image_size >= tight_sz && slot->image_size <= 8 * 1024 * 1024)
-        ? (size_t)slot->image_size
-        : tight_sz;
-    size_t row_bytes = (slot->height > 0) ? (read_sz / (size_t)slot->height) : tight_row;
-    if (row_bytes < tight_row)
-        row_bytes = tight_row;
-
     char ipath[512];
     snprintf(ipath, sizeof(ipath), "%s/%s", IPOD_ARTWORK_DIR, slot->ithmb_rel);
     int fd = open(ipath, O_RDONLY);
@@ -1329,15 +1324,15 @@ static bool load_ithmb_pixels(const struct art_slot *slot, uint16_t **out_px)
         return false;
     }
 
-    uint8_t *raw = (uint8_t *)malloc(read_sz);
+    uint8_t *raw = (uint8_t *)malloc(tight_sz);
     if (!raw) {
         close(fd);
         return false;
     }
 
     size_t got = 0;
-    while (got < read_sz) {
-        ssize_t r = read(fd, raw + got, read_sz - got);
+    while (got < tight_sz) {
+        ssize_t r = read(fd, raw + got, tight_sz - got);
         if (r <= 0) {
             if (r < 0 && errno == EINTR)
                 continue;
@@ -1347,27 +1342,12 @@ static bool load_ithmb_pixels(const struct art_slot *slot, uint16_t **out_px)
     }
     close(fd);
 
-    if (got < tight_sz || got < row_bytes * (size_t)slot->height) {
+    if (got < tight_sz) {
         free(raw);
         return false;
     }
 
-    if (row_bytes == tight_row) {
-        *out_px = (uint16_t *)raw;
-        return true;
-    }
-
-    uint16_t *buf = (uint16_t *)malloc(tight_sz);
-    if (!buf) {
-        free(raw);
-        return false;
-    }
-    uint8_t *dst = (uint8_t *)buf;
-    for (uint16_t y = 0; y < slot->height; y++)
-        memcpy(dst + (size_t)y * tight_row, raw + (size_t)y * row_bytes, tight_row);
-    free(raw);
-
-    *out_px = buf;
+    *out_px = (uint16_t *)raw;
     return true;
 }
 
@@ -1461,7 +1441,7 @@ static void free_native_state_locked(void)
 
 static void add_native_playlist_locked(const char *name, const int *indices, int count)
 {
-    if (!name || !name[0] || !indices || count <= 0)
+    if (!name || !name[0] || count < 0)
         return;
     if (g_playlist_count >= g_playlist_cap) {
         int new_cap = g_playlist_cap > 0 ? g_playlist_cap * 2 : 16;
@@ -1472,10 +1452,15 @@ static void add_native_playlist_locked(const char *name, const int *indices, int
         g_playlists = np;
         g_playlist_cap = new_cap;
     }
-    int *copy = (int *)malloc((size_t)count * sizeof(int));
-    if (!copy)
-        return;
-    memcpy(copy, indices, (size_t)count * sizeof(int));
+    int *copy = NULL;
+    if (count > 0 && indices) {
+        copy = (int *)malloc((size_t)count * sizeof(int));
+        if (!copy)
+            return;
+        memcpy(copy, indices, (size_t)count * sizeof(int));
+    } else {
+        count = 0;
+    }
     g_playlists[g_playlist_count].name = dup_or_empty(name);
     g_playlists[g_playlist_count].track_indices = copy;
     g_playlists[g_playlist_count].count = count;
@@ -1501,7 +1486,7 @@ static void overlay_playcounts_and_otg_locked(void)
                 uint32_t bm     = rd32le(pe + 8);
                 uint32_t stars  = rd32le(pe + 12);
                 g_itdb.tracks[i].playcount += pdelta;
-                if (lmac > MAC_EPOCH_OFFSET)
+                if (lmac > MAC_EPOCH_OFFSET && lmac != 0xFFFFFFFFU)
                     g_itdb.tracks[i].lastplayed_mac = lmac;
                 if (bm > 0)
                     g_itdb.tracks[i].bookmark_ms = bm;
@@ -1516,10 +1501,12 @@ static void overlay_playcounts_and_otg_locked(void)
     uint8_t *otg_buf = read_entire_file(IPOD_OTG_INFO_PATH, &otg_sz);
     if (otg_buf && otg_sz >= 20 && memcmp(otg_buf, "mhpo", 4) == 0) {
         uint32_t hdr_len = rd32le(otg_buf + 4);
-        uint32_t cnt     = rd32le(otg_buf + 8);
-        if (hdr_len >= 12 && (size_t)hdr_len + (size_t)cnt * 4 <= otg_sz) {
+        uint32_t ent_len = rd32le(otg_buf + 8);
+        uint32_t cnt     = rd32le(otg_buf + 12);
+        if (hdr_len >= 20 && ent_len >= 4 &&
+            (size_t)hdr_len + (size_t)cnt * ent_len <= otg_sz) {
             for (uint32_t i = 0; i < cnt; i++) {
-                uint32_t tidx = rd32le(otg_buf + hdr_len + (size_t)i * 4);
+                uint32_t tidx = rd32le(otg_buf + hdr_len + (size_t)i * ent_len);
                 if (tidx < (uint32_t)g_itdb.track_count)
                     g_itdb.tracks[tidx].is_favorite = true;
             }
@@ -1903,11 +1890,11 @@ static void collect_playlists_from_section_locked(int64_t list_off, bool is_podc
         uint32_t ptotal = rd32le(mhyp + 8);
         uint32_t mhods = rd32le(mhyp + 12);
         uint32_t items = rd32le(mhyp + 16);
-        uint32_t is_master = rd32le(mhyp + 20);
+        uint8_t is_master = mhyp[20];
         if (ptotal == 0 || pos + ptotal > sz || phdr < 44)
             break;
 
-        bool is_folder = (phdr >= 42 && mhyp[41] != 0);
+        bool is_folder = (phdr >= 44 && (mhyp[43] & 0x01) != 0);
 
         char pname[256];
         snprintf(pname, sizeof(pname), is_podcast_sec ? "Podcasts_%u" : "Playlist_%u", p);
@@ -2013,8 +2000,7 @@ static void collect_playlists_from_section_locked(int64_t list_off, bool is_podc
                 }
             }
 
-            if (item_count > 0)
-                add_native_playlist_locked(pname, idx_list, item_count);
+            add_native_playlist_locked(pname, idx_list, item_count);
         }
         pos += ptotal;
     }
@@ -2059,7 +2045,10 @@ static bool ensure_native_loaded_locked(void)
             qsort(g_by_path, (size_t)g_itdb.track_count, sizeof(struct path_map_entry), cmp_path_map);
     }
 
-    collect_playlists_from_section_locked(g_itdb.playlists_off, false);
+    if (g_itdb.playlists_off >= 0)
+        collect_playlists_from_section_locked(g_itdb.playlists_off, false);
+    else if (g_itdb.podcasts_off >= 0)
+        collect_playlists_from_section_locked(g_itdb.podcasts_off, false);
     g_itdb.raw = NULL;
     g_itdb.raw_size = 0;
     free(db_buf);
@@ -2069,18 +2058,26 @@ static bool ensure_native_loaded_locked(void)
     return true;
 }
 
-static uint8_t *load_or_init_playcounts_locked(size_t *out_sz)
+static uint8_t *load_or_init_playcounts_locked(size_t *out_sz,
+                                               uint32_t *out_hdr_len,
+                                               uint32_t *out_ent_len)
 {
     uint32_t total_slots = (uint32_t)g_itdb.track_count + g_itdb.shows_count;
     size_t min_sz = 0x60U + (size_t)total_slots * 0x1cU;
 
     size_t pc_sz = 0;
     uint8_t *pc_buf = read_entire_file(IPOD_PLAYCOUNTS_PATH, &pc_sz);
-    if (pc_buf && pc_sz >= min_sz && memcmp(pc_buf, "mhdp", 4) == 0 &&
-        rd32le(pc_buf + 4) == 0x60U && rd32le(pc_buf + 8) == 0x1cU &&
-        rd32le(pc_buf + 12) >= total_slots) {
-        *out_sz = pc_sz;
-        return pc_buf;
+    if (pc_buf && pc_sz >= 0x60U && memcmp(pc_buf, "mhdp", 4) == 0) {
+        uint32_t hdr_len = rd32le(pc_buf + 4);
+        uint32_t ent_len = rd32le(pc_buf + 8);
+        uint32_t ent_cnt = rd32le(pc_buf + 12);
+        if (hdr_len >= 0x60U && ent_len >= 0x14U && ent_cnt >= total_slots &&
+            (size_t)hdr_len + (size_t)ent_cnt * ent_len <= pc_sz) {
+            *out_sz = pc_sz;
+            *out_hdr_len = hdr_len;
+            *out_ent_len = ent_len;
+            return pc_buf;
+        }
     }
     free(pc_buf);
 
@@ -2093,13 +2090,17 @@ static uint8_t *load_or_init_playcounts_locked(size_t *out_sz)
     wr32le(pc_buf + 8, 0x1cU);
     wr32le(pc_buf + 12, total_slots);
 
-    /* Preserve each track's existing iTunesDB star rating so untouched tracks are never zeroed */
+    /* Preserve each track's existing iTunesDB play metadata so untouched tracks are never zeroed */
     for (int i = 0; i < g_itdb.track_count; i++) {
         uint8_t *pe = pc_buf + 0x60U + (size_t)i * 0x1cU;
+        wr32le(pe + 4, g_itdb.tracks[i].lastplayed_mac);
+        wr32le(pe + 8, g_itdb.tracks[i].bookmark_ms);
         wr32le(pe + 12, (uint32_t)g_itdb.tracks[i].rating_ipod);
     }
 
     *out_sz = min_sz;
+    *out_hdr_len = 0x60U;
+    *out_ent_len = 0x1cU;
     return pc_buf;
 }
 
@@ -2161,7 +2162,8 @@ bool y1_ipod_native_record_play(const char *rb_path, uint32_t play_delta,
     }
 
     size_t pc_sz = 0;
-    uint8_t *pc_buf = load_or_init_playcounts_locked(&pc_sz);
+    uint32_t hdr_len = 0, ent_len = 0;
+    uint8_t *pc_buf = load_or_init_playcounts_locked(&pc_sz, &hdr_len, &ent_len);
     if (!pc_buf) {
         pthread_mutex_unlock(&g_native_lock);
         return false;
@@ -2172,20 +2174,23 @@ bool y1_ipod_native_record_play(const char *rb_path, uint32_t play_delta,
                         : (g_itdb.db_mtime + MAC_EPOCH_OFFSET + 60U);
 
     g_itdb.tracks[tidx].playcount += play_delta;
-    if (play_delta > 0)
+    if (play_delta > 0) {
         g_itdb.tracks[tidx].lastplayed_mac = last_mac;
-    if (bookmark_ms > 0)
         g_itdb.tracks[tidx].bookmark_ms = bookmark_ms;
+    } else if (bookmark_ms > 0) {
+        g_itdb.tracks[tidx].bookmark_ms = bookmark_ms;
+    }
 
-    uint8_t *pe = pc_buf + 0x60U + (size_t)tidx * 0x1cU;
+    uint8_t *pe = pc_buf + hdr_len + (size_t)tidx * ent_len;
     uint32_t cur_delta = rd32le(pe + 0);
     wr32le(pe + 0, cur_delta + play_delta);
     if (play_delta > 0) {
         wr32le(pe + 4, last_mac);
-        pe[0x11] = 0x01; /* played_marker per iOpenPod sidecars/codec.py */
-    }
-    if (bookmark_ms > 0)
         wr32le(pe + 8, bookmark_ms);
+        pe[0x11] = 0x01; /* played_marker per iOpenPod sidecars/codec.py */
+    } else if (bookmark_ms > 0) {
+        wr32le(pe + 8, bookmark_ms);
+    }
 
     bool ok = write_file_atomic(IPOD_PLAYCOUNTS_PATH, pc_buf, pc_sz);
     free(pc_buf);
@@ -2215,14 +2220,15 @@ bool y1_ipod_native_record_rating(const char *rb_path, int rating_rb)
     }
 
     size_t pc_sz = 0;
-    uint8_t *pc_buf = load_or_init_playcounts_locked(&pc_sz);
+    uint32_t hdr_len = 0, ent_len = 0;
+    uint8_t *pc_buf = load_or_init_playcounts_locked(&pc_sz, &hdr_len, &ent_len);
     if (!pc_buf) {
         pthread_mutex_unlock(&g_native_lock);
         return false;
     }
 
     g_itdb.tracks[tidx].rating_ipod = rating_ipod;
-    uint8_t *pe = pc_buf + 0x60U + (size_t)tidx * 0x1cU;
+    uint8_t *pe = pc_buf + hdr_len + (size_t)tidx * ent_len;
     wr32le(pe + 12, (uint32_t)rating_ipod);
 
     bool ok = write_file_atomic(IPOD_PLAYCOUNTS_PATH, pc_buf, pc_sz);
@@ -2262,10 +2268,12 @@ bool y1_ipod_native_record_favorite(const char *rb_path, bool is_favorite)
     uint8_t *otg_buf = read_entire_file(IPOD_OTG_INFO_PATH, &otg_sz);
     if (otg_buf && otg_sz >= 20 && memcmp(otg_buf, "mhpo", 4) == 0) {
         uint32_t hdr_len = rd32le(otg_buf + 4);
-        uint32_t cnt = rd32le(otg_buf + 8);
-        if (hdr_len >= 12 && (size_t)hdr_len + (size_t)cnt * 4 <= otg_sz) {
+        uint32_t ent_len = rd32le(otg_buf + 8);
+        uint32_t cnt = rd32le(otg_buf + 12);
+        if (hdr_len >= 20 && ent_len >= 4 &&
+            (size_t)hdr_len + (size_t)cnt * ent_len <= otg_sz) {
             for (uint32_t i = 0; i < cnt && count < g_itdb.track_count; i++) {
-                uint32_t v = rd32le(otg_buf + hdr_len + (size_t)i * 4);
+                uint32_t v = rd32le(otg_buf + hdr_len + (size_t)i * ent_len);
                 if (v < (uint32_t)g_itdb.track_count && (int)v != tidx)
                     indices[count++] = v;
             }
@@ -2285,7 +2293,8 @@ bool y1_ipod_native_record_favorite(const char *rb_path, bool is_favorite)
         if (obuf) {
             memcpy(obuf, "mhpo", 4);
             wr32le(obuf + 4, 20);
-            wr32le(obuf + 8, (uint32_t)count);
+            wr32le(obuf + 8, 4); /* entry length */
+            wr32le(obuf + 12, (uint32_t)count);
             for (int i = 0; i < count; i++)
                 wr32le(obuf + 20 + (size_t)i * 4, indices[i]);
             ok = write_file_atomic(IPOD_OTG_INFO_PATH, obuf, osz);
@@ -2363,10 +2372,8 @@ bool y1_ipod_native_load_albumart_rgb565(const char *rb_path,
     if (!load_ithmb_pixels(&slot_copy, &px))
         return false;
 
-    size_t tight_sz = (size_t)slot_copy.width * (size_t)slot_copy.height * 2U;
-    bool padded_external = (slot_copy.image_size > tight_sz);
-    int x0 = (!padded_external && slot_copy.hpad > 0) ? slot_copy.hpad : 0;
-    int y0 = (!padded_external && slot_copy.vpad > 0) ? slot_copy.vpad : 0;
+    int x0 = (slot_copy.hpad > 0) ? slot_copy.hpad : 0;
+    int y0 = (slot_copy.vpad > 0) ? slot_copy.vpad : 0;
     int cw = (int)slot_copy.width - 2 * x0;
     int ch = (int)slot_copy.height - 2 * y0;
     if (cw <= 0 || ch <= 0) {
@@ -2435,6 +2442,225 @@ const char *y1_ipod_native_playlist_track_path(int pl_idx, int tr_idx)
     }
     pthread_mutex_unlock(&g_native_lock);
     return res;
+}
+
+static uint8_t *rebuild_itdb_playlist_mhips(const uint8_t *buf, size_t sz,
+                                            uint32_t target_stype, int pl_idx,
+                                            uint64_t *target_pl_id,
+                                            const uint32_t *tids, const uint64_t *dbids,
+                                            int new_items,
+                                            size_t *out_sz, bool *out_found)
+{
+    *out_found = false;
+    *out_sz = sz;
+    if (!buf || sz < 24 || memcmp(buf, "mhbd", 4) != 0)
+        return NULL;
+
+    uint32_t db_hdr = rd32le(buf + 4);
+    uint32_t mhsd_count = rd32le(buf + 20);
+    size_t mhsd_off = 0, mhlp_off = 0, mhyp_off = 0;
+    uint32_t mhsd_total = 0, mhyp_ptotal = 0;
+    size_t mhod_end_off = 0;
+    bool found = false;
+
+    size_t pos = db_hdr;
+    for (uint32_t s = 0; s < mhsd_count && pos + 16 <= sz; s++) {
+        if (memcmp(buf + pos, "mhsd", 4) != 0)
+            break;
+        uint32_t shdr = rd32le(buf + pos + 4);
+        uint32_t stot = rd32le(buf + pos + 8);
+        uint32_t stype = rd32le(buf + pos + 12);
+        if (stot == 0 || pos + stot > sz)
+            break;
+        if (stype == target_stype && pos + shdr + 12 <= pos + stot &&
+            memcmp(buf + pos + shdr, "mhlp", 4) == 0) {
+            mhsd_off = pos;
+            mhsd_total = stot;
+            mhlp_off = pos + shdr;
+            uint32_t lhdr = rd32le(buf + mhlp_off + 4);
+            uint32_t lists = rd32le(buf + mhlp_off + 8);
+            size_t ppos = mhlp_off + lhdr;
+            int cur_idx = 0;
+            for (uint32_t p = 0; p < lists && ppos + 44 <= pos + stot; p++) {
+                const uint8_t *mhyp = buf + ppos;
+                if (memcmp(mhyp, "mhyp", 4) != 0)
+                    break;
+                uint32_t phdr = rd32le(mhyp + 4);
+                uint32_t ptotal = rd32le(mhyp + 8);
+                uint32_t mhods = rd32le(mhyp + 12);
+                uint8_t is_master = mhyp[20];
+                bool is_folder = (phdr >= 44 && (mhyp[43] & 0x01) != 0);
+                uint64_t pid = rd64le(mhyp + 28);
+                if (ptotal == 0 || ppos + ptotal > pos + stot || phdr < 44)
+                    break;
+                if (is_master == 0 && !is_folder) {
+                    bool match = (target_pl_id && *target_pl_id != 0)
+                                 ? (pid == *target_pl_id)
+                                 : (cur_idx == pl_idx);
+                    if (match) {
+                        size_t cpos = ppos + phdr;
+                        for (uint32_t k = 0; k < mhods && cpos + 16 <= ppos + ptotal; k++) {
+                            if (memcmp(buf + cpos, "mhod", 4) != 0)
+                                break;
+                            uint32_t ctot = rd32le(buf + cpos + 8);
+                            if (ctot == 0 || cpos + ctot > ppos + ptotal)
+                                break;
+                            cpos += ctot;
+                        }
+                        if (target_pl_id && *target_pl_id == 0)
+                            *target_pl_id = pid;
+                        mhyp_off = ppos;
+                        mhyp_ptotal = ptotal;
+                        mhod_end_off = cpos;
+                        found = true;
+                        break;
+                    }
+                    cur_idx++;
+                }
+                ppos += ptotal;
+            }
+            break;
+        }
+        pos += stot;
+    }
+
+    if (!found)
+        return NULL;
+
+    /* Each entry = 76-byte mhip + 44-byte mhod type 100 (explicit playlist order) */
+    const size_t mhip_hdr_sz = 76;
+    const size_t mhod100_sz = 44;
+    const size_t item_sz = mhip_hdr_sz + mhod100_sz;
+    size_t old_items_sz = (mhyp_off + mhyp_ptotal) - mhod_end_off;
+    size_t new_items_sz = (size_t)new_items * item_sz;
+    int64_t delta = (int64_t)new_items_sz - (int64_t)old_items_sz;
+    size_t new_sz = (size_t)((int64_t)sz + delta);
+
+    uint8_t *nbuf = (uint8_t *)malloc(new_sz);
+    if (!nbuf)
+        return NULL;
+
+    memcpy(nbuf, buf, mhod_end_off);
+    for (int i = 0; i < new_items; i++) {
+        uint8_t *mp = nbuf + mhod_end_off + (size_t)i * item_sz;
+        memset(mp, 0, item_sz);
+        memcpy(mp, "mhip", 4);
+        wr32le(mp + 4, (uint32_t)mhip_hdr_sz);
+        wr32le(mp + 8, (uint32_t)item_sz);
+        wr32le(mp + 12, 1); /* 1 child mhod (type 100 position) */
+        wr32le(mp + 24, tids[i]);
+        if (dbids)
+            wr64le(mp + 0x2c, dbids[i]);
+
+        uint8_t *m100 = mp + mhip_hdr_sz;
+        memcpy(m100, "mhod", 4);
+        wr32le(m100 + 4, 24);
+        wr32le(m100 + 8, (uint32_t)mhod100_sz);
+        wr32le(m100 + 12, 100);
+        wr32le(m100 + 24, (uint32_t)i);
+    }
+    size_t tail_off = mhyp_off + mhyp_ptotal;
+    if (tail_off < sz)
+        memcpy(nbuf + mhod_end_off + new_items_sz, buf + tail_off, sz - tail_off);
+
+    wr32le(nbuf + mhyp_off + 8, (uint32_t)((int64_t)mhyp_ptotal + delta));
+    wr32le(nbuf + mhyp_off + 16, (uint32_t)new_items);
+    wr32le(nbuf + mhsd_off + 8, (uint32_t)((int64_t)mhsd_total + delta));
+    wr32le(nbuf + 8, (uint32_t)new_sz);
+
+    *out_found = true;
+    *out_sz = new_sz;
+    return nbuf;
+}
+
+bool y1_ipod_native_save_playlist(int pl_idx, const char **track_paths, int track_count)
+{
+    if (!y1_ipod_native_is_active() || pl_idx < 0 || track_count < 0)
+        return false;
+
+    pthread_mutex_lock(&g_native_lock);
+    if (!ensure_native_loaded_locked() || pl_idx < 0 || pl_idx >= g_playlist_count) {
+        pthread_mutex_unlock(&g_native_lock);
+        return false;
+    }
+
+    size_t sz = 0;
+    uint8_t *buf = read_entire_file(IPOD_ITUNESDB_PATH, &sz);
+    if (!buf || sz < 24 || memcmp(buf, "mhbd", 4) != 0) {
+        free(buf);
+        pthread_mutex_unlock(&g_native_lock);
+        return false;
+    }
+
+    /* Map track paths to iTunesDB track IDs + persistent DBIDs */
+    uint32_t *tids = NULL;
+    uint64_t *dbids = NULL;
+    int new_items = 0;
+    if (track_count > 0 && track_paths) {
+        tids = (uint32_t *)malloc((size_t)track_count * sizeof(uint32_t));
+        dbids = (uint64_t *)malloc((size_t)track_count * sizeof(uint64_t));
+        if (!tids || !dbids) {
+            free(tids);
+            free(dbids);
+            free(buf);
+            pthread_mutex_unlock(&g_native_lock);
+            return false;
+        }
+        for (int i = 0; i < track_count; i++) {
+            if (!track_paths[i])
+                continue;
+            int tidx = find_track_by_path_locked(track_paths[i]);
+            if (tidx >= 0 && tidx < g_itdb.track_count) {
+                tids[new_items] = g_itdb.tracks[tidx].id;
+                dbids[new_items] = g_itdb.tracks[tidx].dbid;
+                new_items++;
+            }
+        }
+    }
+
+    uint64_t target_pl_id = 0;
+    size_t new_sz = sz;
+    bool found = false;
+    uint8_t *nbuf = rebuild_itdb_playlist_mhips(buf, sz, 2, pl_idx, &target_pl_id,
+                                                tids, dbids, new_items, &new_sz, &found);
+    if (found && nbuf) {
+        /* Keep mirrored dataset 3 (if present) synchronized with dataset 2 */
+        size_t new_sz3 = new_sz;
+        bool found3 = false;
+        uint8_t *nbuf3 = rebuild_itdb_playlist_mhips(nbuf, new_sz, 3, pl_idx, &target_pl_id,
+                                                     tids, dbids, new_items, &new_sz3, &found3);
+        if (found3 && nbuf3) {
+            free(nbuf);
+            nbuf = nbuf3;
+            new_sz = new_sz3;
+        } else {
+            free(nbuf3);
+        }
+    } else {
+        free(nbuf);
+        nbuf = rebuild_itdb_playlist_mhips(buf, sz, 3, pl_idx, &target_pl_id,
+                                           tids, dbids, new_items, &new_sz, &found);
+    }
+    if (!found || !nbuf) {
+        free(nbuf);
+        free(tids);
+        free(dbids);
+        free(buf);
+        pthread_mutex_unlock(&g_native_lock);
+        return false;
+    }
+
+    bool ok = write_file_atomic(IPOD_ITUNESDB_PATH, nbuf, new_sz);
+    free(nbuf);
+    free(tids);
+    free(dbids);
+    free(buf);
+    if (ok) {
+        g_native_loaded = false;
+        ensure_native_loaded_locked();
+    }
+    pthread_mutex_unlock(&g_native_lock);
+    return ok;
 }
 
 #if defined(Y1_IPOD_SYNC_MAIN) || defined(IPOD_SYNC_STANDALONE)

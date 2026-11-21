@@ -667,7 +667,18 @@ static const char *get_sdcard_app_binary(void)
 
 static int has_sdcard_rockbox(void)
 {
-    return get_sdcard_app_binary() != NULL;
+    if (get_sdcard_app_binary() == NULL)
+        return 0;
+
+    struct stat st;
+    if (stat("/mnt/sdcard/.system", &st) != 0 || !S_ISDIR(st.st_mode))
+        return 0;
+
+    if (access("/mnt/sdcard/.system/lib/liby1.so", F_OK) != 0 &&
+        access("/mnt/sdcard/.system/bt", F_OK) != 0)
+        return 0;
+
+    return 1;
 }
 
 /* Link all user folders and files from /mnt/sdcard into / so plugins and apps see / as SD root */
@@ -838,16 +849,16 @@ static void boost_cpu_for_boot(void)
     write_sysfs("/sys/devices/system/cpu/cpufreq/hotplug/cpu_num_base", "2\n");
     write_sysfs("/sys/devices/system/cpu/cpufreq/hotplug/cpu_num_limit", "2\n");
 
-    /* 2. Boost both MT6572 Cortex-A7 cores to performance governor at maximum 1.196 GHz (1.2 GHz) */
-    write_sysfs("/sys/devices/system/cpu/cpu0/cpufreq/scaling_min_freq", "598000\n");
-    write_sysfs("/sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq", "1196000\n");
+    /* 2. Boost both MT6572 Cortex-A7 cores to performance governor at 1.209 GHz (1.2 GHz OPP) */
+    write_sysfs("/sys/devices/system/cpu/cpu0/cpufreq/scaling_min_freq", "390000\n");
+    write_sysfs("/sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq", "1209000\n");
     write_sysfs("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor", "performance\n");
-    write_sysfs("/sys/devices/system/cpu/cpu0/cpufreq/scaling_setspeed", "1196000\n");
+    write_sysfs("/sys/devices/system/cpu/cpu0/cpufreq/scaling_setspeed", "1209000\n");
 
-    write_sysfs("/sys/devices/system/cpu/cpu1/cpufreq/scaling_min_freq", "598000\n");
-    write_sysfs("/sys/devices/system/cpu/cpu1/cpufreq/scaling_max_freq", "1196000\n");
+    write_sysfs("/sys/devices/system/cpu/cpu1/cpufreq/scaling_min_freq", "390000\n");
+    write_sysfs("/sys/devices/system/cpu/cpu1/cpufreq/scaling_max_freq", "1209000\n");
     write_sysfs("/sys/devices/system/cpu/cpu1/cpufreq/scaling_governor", "performance\n");
-    write_sysfs("/sys/devices/system/cpu/cpu1/cpufreq/scaling_setspeed", "1196000\n");
+    write_sysfs("/sys/devices/system/cpu/cpu1/cpufreq/scaling_setspeed", "1209000\n");
 
     log_line("Dynamic boot-time CPU clock boosted to 1.2 GHz dual-core.\n");
 }
@@ -856,7 +867,7 @@ static void apply_powersave_cpu(void)
 {
     /* Used when Rockbox exits or crashes to conserve battery while waiting */
     write_sysfs("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor", "ondemand\n");
-    write_sysfs("/sys/devices/system/cpu/cpu0/cpufreq/scaling_min_freq", "598000\n");
+    write_sysfs("/sys/devices/system/cpu/cpu0/cpufreq/scaling_min_freq", "390000\n");
     write_sysfs("/sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq", "1001000\n");
     write_sysfs("/sys/devices/system/cpu/cpufreq/ondemand/up_threshold", "98\n");
     write_sysfs("/sys/devices/system/cpu/cpufreq/ondemand/sampling_down_factor", "1\n");
@@ -1126,7 +1137,7 @@ static void display_screen(const char *name)
 #endif
 
 static void clear_android_bcb(void);
-static void setup_usb_gadget(const char *sd_dev, const char *ext_dev);
+static void setup_usb_gadget(const char *sd_dev, const char *ext_dev, int allow_ipod);
 
 static void clear_android_bcb(void)
 {
@@ -2302,14 +2313,10 @@ static void run_bootloader_menu(void)
                             reboot(RB_POWER_OFF);
                             while (1) sleep(1);
                         } else if (action_id == 5) {
-                            /* Pick 6: USB Mass Storage */
+                            /* Pick 6: USB Mass Storage (standard non-iPod mode, no spoofing) */
                             log_line("Bootloader Menu: USB mode selected.\n");
-                            if (is_ipod_usb_mode_enabled() && access("/bin/ipod_sync", X_OK) == 0) {
-                                log_line("Syncing Rockbox metadata to iTunes before USB attach...\n");
-                                (void)!system("/bin/ipod_sync pre");
-                            }
                             setup_usb_gadget(active_sd_dev[0] ? active_sd_dev : NULL,
-                                             active_ext_dev[0] ? active_ext_dev : NULL);
+                                             active_ext_dev[0] ? active_ext_dev : NULL, 0);
                             display_screen("bootl_usb");
 
                             /* Flush input events and debounce */
@@ -2361,11 +2368,6 @@ static void run_bootloader_menu(void)
                             write_sysfs("/sys/class/android_usb/android0/enable", "0\n");
                             sync();
                             write_sysfs("/proc/sys/vm/drop_caches", "3\n");
-
-                            if (is_ipod_usb_mode_enabled() && access("/bin/ipod_sync", X_OK) == 0) {
-                                log_line("Converting iPod/iTunes database to Rockbox after USB...\n");
-                                (void)!system("/bin/ipod_sync post");
-                            }
 
                             /* Debounce before returning to menu */
                             usleep(200000);
@@ -2909,11 +2911,11 @@ static void ensure_ipod_device_files(void)
     }
 }
 
-static void setup_usb_gadget(const char *sd_dev, const char *ext_dev)
+static void setup_usb_gadget(const char *sd_dev, const char *ext_dev, int allow_ipod)
 {
     log_line("Configuring USB Mass Storage gadget for PC access...\n");
 
-    int ipod_mode = is_ipod_usb_mode_enabled();
+    int ipod_mode = allow_ipod ? is_ipod_usb_mode_enabled() : 0;
     if (ipod_mode) {
         ensure_ipod_device_files();
         if (access("/bin/ipod_sync", X_OK) == 0) {
@@ -3195,7 +3197,8 @@ int main(int argc, char *argv[])
     init_bluetooth_subsystem();
     if (is_usb_power_online() || !has_sdcard_rockbox()) {
         setup_usb_gadget(active_sd_dev[0] ? active_sd_dev : NULL,
-                         active_ext_dev[0] ? active_ext_dev : NULL);
+                         active_ext_dev[0] ? active_ext_dev : NULL,
+                         has_sdcard_rockbox());
     } else {
         write_sysfs("/sys/class/android_usb/android0/f_mass_storage/lun0/file", "\n");
         write_sysfs("/sys/class/android_usb/android0/f_mass_storage/lun/file", "\n");
@@ -3296,13 +3299,15 @@ int main(int argc, char *argv[])
         }
 
         /* Outside of Rockbox:
-         * Drop CPU to powersave while idle in recovery, re-bind USB gadget */
+         * Drop CPU to powersave while idle in recovery, re-bind USB gadget (iPod/spoofing OFF) */
         apply_powersave_cpu();
-        if (is_ipod_usb_mode_enabled() && access("/bin/ipod_sync", X_OK) == 0) {
+        int recovery_allow_ipod = (!crashed && has_sdcard_rockbox());
+        if (recovery_allow_ipod && is_ipod_usb_mode_enabled() && access("/bin/ipod_sync", X_OK) == 0) {
             (void)!system("/bin/ipod_sync init");
         }
         setup_usb_gadget(active_sd_dev[0] ? active_sd_dev : NULL,
-                         active_ext_dev[0] ? active_ext_dev : NULL);
+                         active_ext_dev[0] ? active_ext_dev : NULL,
+                         recovery_allow_ipod);
         int saw_usb_pc = 0;
 
         /* Recovery wait loop:
@@ -3365,7 +3370,7 @@ int main(int argc, char *argv[])
                 write_sysfs("/sys/class/android_usb/android0/enable", "0\n");
                 sync();
                 write_sysfs("/proc/sys/vm/drop_caches", "3\n");
-                if (saw_usb_pc && is_ipod_usb_mode_enabled() && access("/bin/ipod_sync", X_OK) == 0) {
+                if (!crashed && saw_usb_pc && is_ipod_usb_mode_enabled() && access("/bin/ipod_sync", X_OK) == 0) {
                     boost_cpu_for_boot();
                     (void)!system("/bin/ipod_sync post");
                 }

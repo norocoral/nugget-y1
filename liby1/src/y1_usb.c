@@ -5,9 +5,12 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <dirent.h>
+#include <sys/stat.h>
 
 #include "liby1.h"
 
@@ -16,6 +19,91 @@ static bool usb_perf_boosted = false;
 static char saved_scheduler[32] = "cfq";
 static char saved_read_ahead[16] = "128";
 static bool saved_queue_params = false;
+static uint64_t g_pre_usb_sys_hash = 0;
+static bool g_pre_usb_sys_valid = false;
+
+static uint64_t fnv1a_update(uint64_t h, const void *data, size_t len)
+{
+    const uint8_t *p = (const uint8_t *)data;
+    for (size_t i = 0; i < len; i++) {
+        h ^= p[i];
+        h *= 1099511628211ULL;
+    }
+    return h;
+}
+
+static uint64_t hash_single_file(const char *path, uint64_t h)
+{
+    struct stat st;
+    if (lstat(path, &st) != 0)
+        return h;
+
+    h = fnv1a_update(h, path, strlen(path) + 1);
+    uint64_t meta[3] = {
+        (uint64_t)st.st_mode,
+        (uint64_t)st.st_size,
+        (uint64_t)st.st_mtime
+    };
+    return fnv1a_update(h, meta, sizeof(meta));
+}
+
+static uint64_t hash_dir_tree(const char *path, uint64_t h)
+{
+    DIR *d = opendir(path);
+    if (!d)
+        return h;
+
+    struct dirent *ent;
+    char child[512];
+    while ((ent = readdir(d)) != NULL) {
+        if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0)
+            continue;
+        if (strcmp(ent->d_name, "y1_debug.txt") == 0)
+            continue;
+
+        snprintf(child, sizeof(child), "%s/%s", path, ent->d_name);
+        struct stat st;
+        if (lstat(child, &st) != 0)
+            continue;
+
+        h = fnv1a_update(h, child, strlen(child) + 1);
+        uint64_t meta[3] = {
+            (uint64_t)st.st_mode,
+            (uint64_t)st.st_size,
+            (uint64_t)st.st_mtime
+        };
+        h = fnv1a_update(h, meta, sizeof(meta));
+
+        if (S_ISDIR(st.st_mode))
+            h = hash_dir_tree(child, h);
+    }
+    closedir(d);
+    return h;
+}
+
+static uint64_t compute_sys_tree_hash(void)
+{
+    uint64_t h = 14695981039346656037ULL;
+    h = hash_dir_tree("/mnt/sdcard/.system", h);
+    h = hash_single_file("/mnt/sdcard/.rockbox/rockbox", h);
+    h = hash_single_file("/mnt/sdcard/.meui/meui", h);
+    h = hash_single_file("/mnt/sdcard/.custom/launch", h);
+    return h;
+}
+
+static void check_sys_tree_modified_and_reboot(void)
+{
+    if (!g_pre_usb_sys_valid)
+        return;
+
+    g_pre_usb_sys_valid = false;
+    uint64_t post_hash = compute_sys_tree_hash();
+    if (post_hash != g_pre_usb_sys_hash) {
+        y1_log("[liby1-usb] .system or app binary modified over USB; rebooting...\n");
+        sync();
+        y1_sys_reboot();
+    }
+}
 
 static void write_usb_line(const char *path, const char *value)
 {
@@ -372,6 +460,9 @@ bool y1_usb_attach_mass_storage(void)
         write_usb_line("/sys/class/android_usb/android0/f_mass_storage/lun1/file", "");
     }
 
+    g_pre_usb_sys_hash = compute_sys_tree_hash();
+    g_pre_usb_sys_valid = true;
+
     y1_usb_tune_performance(true);
     write_usb_line("/sys/class/android_usb/android0/enable", "1");
     storage_attached = true;
@@ -391,6 +482,7 @@ void y1_usb_detach_mass_storage(void)
     write_usb_line("/proc/sys/vm/drop_caches", "3");
     y1_usb_tune_performance(false);
     storage_attached = false;
+    check_sys_tree_modified_and_reboot();
 }
 
 bool y1_usb_is_storage_attached(void)
@@ -413,6 +505,7 @@ bool y1_usb_check_host_ejected(void)
     if (read_ok && file[0] == '\0') {
         y1_usb_tune_performance(false);
         storage_attached = false;
+        check_sys_tree_modified_and_reboot();
         return true;
     }
     return false;

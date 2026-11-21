@@ -208,6 +208,36 @@ bool y1_power_usb_online(void)
     return false;
 }
 
+#define Y1_VIBRATOR_SYSFS "/sys/class/timed_output/vibrator/enable"
+static int vib_fd = -1;
+
+bool y1_vibrate_available(void)
+{
+    return access(Y1_VIBRATOR_SYSFS, W_OK) == 0;
+}
+
+void y1_vibrate(int ms)
+{
+    if (ms < 0) ms = 0;
+    if (ms > 1000) ms = 1000;
+
+    if (vib_fd < 0)
+        vib_fd = open(Y1_VIBRATOR_SYSFS, O_WRONLY | O_CLOEXEC);
+
+    if (vib_fd >= 0) {
+        char buf[16];
+        int len = snprintf(buf, sizeof(buf), "%d\n", ms);
+        lseek(vib_fd, 0, SEEK_SET);
+        ssize_t w = write(vib_fd, buf, (size_t)len);
+        if (w < 0) {
+            close(vib_fd);
+            vib_fd = open(Y1_VIBRATOR_SYSFS, O_WRONLY | O_CLOEXEC);
+            if (vib_fd >= 0)
+                (void)!write(vib_fd, buf, (size_t)len);
+        }
+    }
+}
+
 void y1_sys_poweroff(void)
 {
     y1_backlight_set_raw(0);

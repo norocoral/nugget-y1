@@ -10,6 +10,8 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <pthread.h>
+#include <time.h>
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <linux/fb.h>
@@ -523,13 +525,33 @@ bool y1_fb_display_raw_screen(const char *name, uint16_t *out_fb16,
     return true;
 }
 
+static pthread_mutex_t bl_mutex = PTHREAD_MUTEX_INITIALIZER;
+static struct timespec last_bl_write_ts = {0, 0};
+
 void y1_backlight_set_raw(int val)
 {
     if (val < 0) val = 0;
     if (val > 255) val = 255;
 
-    if (val == last_bl_hw_val && bl_fd >= 0)
+    pthread_mutex_lock(&bl_mutex);
+
+    if (val == last_bl_hw_val && bl_fd >= 0) {
+        pthread_mutex_unlock(&bl_mutex);
         return;
+    }
+
+    /* Rate-limit consecutive non-zero writes so rapid wheel adjustments
+     * never overwhelm the MT6572 PMIC/PWM backlight kernel driver. */
+    if (val > 0 && last_bl_hw_val > 0 && last_bl_write_ts.tv_sec != 0) {
+        struct timespec now;
+        clock_gettime(CLOCK_MONOTONIC, &now);
+        long long elapsed_us =
+            (long long)(now.tv_sec - last_bl_write_ts.tv_sec) * 1000000LL +
+            (long long)(now.tv_nsec - last_bl_write_ts.tv_nsec) / 1000LL;
+        if (elapsed_us >= 0 && elapsed_us < 35000LL) {
+            usleep((useconds_t)(35000LL - elapsed_us));
+        }
+    }
 
     if (bl_fd < 0) {
         bl_fd = open(Y1_BL_SYSFS_PATH, O_WRONLY | O_CLOEXEC);
@@ -545,11 +567,15 @@ void y1_backlight_set_raw(int val)
             if (bl_fd >= 0)
                 w = write(bl_fd, buf, (size_t)len);
         }
-        if (w >= 0)
+        if (w >= 0) {
             last_bl_hw_val = val;
+            clock_gettime(CLOCK_MONOTONIC, &last_bl_write_ts);
+        }
     } else {
         y1_logf("[liby1-bl] ERROR: failed to open %s (errno=%d)\n", Y1_BL_SYSFS_PATH, errno);
     }
+
+    pthread_mutex_unlock(&bl_mutex);
 }
 
 void y1_backlight_set_percent(int pct)
@@ -598,16 +624,28 @@ void y1_display_enter_early_suspend(void)
 
 void y1_display_exit_early_suspend(void)
 {
+    y1_sysfs_write("/sys/power/wake_lock", "rockbox_active\n");
+    y1_cpu_set_screen_off_clamp(false);
+
     if (y1_sysfs_write("/sys/power/state", "on\n")) {
         y1_log("[liby1-bl] wrote 'on' to /sys/power/state\n");
     }
+
     if (early_suspended) {
-        /* Wait for mtkfb_late_resume (which has a 20ms internal msleep) to finish
-         * enabling display clocks and clearing is_early_suspended before FB/BL writes */
-        usleep(35000);
+        /* Wait for kernel late_resume workqueue, then explicitly issue
+         * MTKFB_POWERON and FBIOBLANK to guarantee mtkfb has re-enabled
+         * all MMSYS/DBI display clocks and cleared is_early_suspended. */
+        usleep(45000);
         early_suspended = false;
         last_bl_hw_val = -1;
     }
+
+    if (fb_fd >= 0) {
+        (void)ioctl(fb_fd, MTKFB_POWERON);
+        (void)ioctl(fb_fd, FBIOBLANK, FB_BLANK_UNBLANK);
+    }
+    y1_fb_set_eco_mode(false);
+    y1_fb_flip();
     y1_input_set_touch_scanning(true);
 }
 
@@ -627,6 +665,7 @@ void y1_power_set_idle_sleep(bool allow_suspend)
         y1_log("[liby1-pwr] Released wakelocks for true mem suspend\n");
     } else {
         y1_sysfs_write("/sys/power/wake_lock", "rockbox_active\n");
+        y1_sysfs_write("/sys/power/state", "on\n");
     }
 }
 

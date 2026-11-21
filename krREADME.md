@@ -41,9 +41,8 @@ Nugget for Y1은 Innioasis Y1 디지털 오디오 플레이어를 위한 오픈 
 
 ## 설치 방법
 
-### 권장: Nugget Y1 Tool
-자동화 설치 도구:
-https://github.com/norocoral/nugget-y1-tool
+### 권장: Innioasis Updater CE
+https://innioasis.app/firmware_ko.html?brand=Innioasis&model=Y1&software=nugget-rock8ox-240p-360p-y1&type=A
 
 ### 수동 설치 방법
 1. `boot_rockbox.img` 및 `rockbox_sdcard.zip`을 준비합니다.
@@ -115,7 +114,6 @@ sudo apt install -y build-essential gcc-arm-linux-gnueabihf python3 python3-pip 
 
 ## 관련 저장소
 Rockbox: https://github.com/norocoral/rockbox
-Installer: https://github.com/norocoral/nugget-y1-tool
 
 ---
 

@@ -41,9 +41,8 @@ Subsystem specifications, architecture notes, and reverse-engineering documentat
 
 ## Installation
 
-### Recommended: Nugget Y1 Tool
-Automated installation tool:
-https://github.com/norocoral/nugget-y1-tool
+### Recommended: Innioasis Updater CE
+https://innioasis.app/firmware_ko.html?brand=Innioasis&model=Y1&software=nugget-rock8ox-240p-360p-y1&type=A
 
 ### Manual Installation
 1. Obtain `boot_rockbox.img` and `rockbox_sdcard.zip`.
@@ -115,7 +114,6 @@ Android partitions on the internal eMMC (`SYSTEM`, `DATA`, `CACHE`) are left unm
 
 ## Linked repositories 
 Rockbox: https://github.com/norocoral/rockbox
-Installer: https://github.com/norocoral/nugget-y1-tool
 
 ---
 

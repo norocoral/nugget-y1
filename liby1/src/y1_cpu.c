@@ -25,7 +25,8 @@ static void write_cpu_node(int cpu, const char *node, const char *val)
 
 static void write_cpu_freq_bounds(int cpu, const char *min_f, const char *max_f)
 {
-    write_cpu_node(cpu, "scaling_min_freq", "598000\n");
+    write_cpu_node(cpu, "scaling_min_freq", "390000\n");
+    write_cpu_node(cpu, "scaling_max_freq", "1300000\n");
     write_cpu_node(cpu, "scaling_max_freq", max_f);
     write_cpu_node(cpu, "scaling_min_freq", min_f);
 }
@@ -38,50 +39,44 @@ void y1_cpu_set_mode(int mode)
     current_cpu_mode = mode;
 
     for (int cpu = 0; cpu < 2; cpu++) {
+        if (cpu == 1 && !y1_cpu_is_dual_core())
+            continue;
+
         switch (mode) {
         case Y1_CPU_MODE_POWERSAVE:
-            /* Lowest available OPP (390 MHz if kernel OPP patched, else 598 MHz) */
+            /* Fixed 390 MHz (lowest MT6572 OPP, 1.05V) using kernel 'powersave' governor
+             * ('userspace' governor is not present in MT6572 kernel; 598000 is not in the
+             * kernel OPP table and caused cpufreq to clamp up to 806000). */
             y1_sysfs_write("/proc/cpufreq/usb_raise_freq", "0\n");
-            y1_sysfs_write("/proc/cpufreq/MTK_PPM_POLICY", "DISABLE\n");
-            y1_sysfs_write("/proc/cpufreq/MTK_PPM_POLICY", "0\n");
-            write_cpu_freq_bounds(cpu, "390000\n", "598000\n");
-            write_cpu_node(cpu, "scaling_governor", "userspace\n");
-            write_cpu_node(cpu, "scaling_setspeed", "598000\n");
-            write_cpu_node(cpu, "scaling_setspeed", "390000\n");
-            y1_sysfs_write("/proc/cpufreq/cpufreq_cur_freq", "598000\n");
+            write_cpu_freq_bounds(cpu, "390000\n", "390000\n");
+            write_cpu_node(cpu, "scaling_governor", "powersave\n");
+            write_cpu_freq_bounds(cpu, "390000\n", "390000\n");
             y1_sysfs_write("/proc/cpufreq/cpufreq_cur_freq", "390000\n");
             break;
 
         case Y1_CPU_MODE_BALANCED:
             /* Fixed 1.0 GHz */
-            y1_sysfs_write("/proc/cpufreq/MTK_PPM_POLICY", "DISABLE\n");
-            y1_sysfs_write("/proc/cpufreq/MTK_PPM_POLICY", "0\n");
             write_cpu_freq_bounds(cpu, "1001000\n", "1001000\n");
-            write_cpu_node(cpu, "scaling_governor", "userspace\n");
-            write_cpu_node(cpu, "scaling_setspeed", "1001000\n");
+            write_cpu_node(cpu, "scaling_governor", "performance\n");
             break;
 
         case Y1_CPU_MODE_PERFORMANCE:
-            /* Fixed 1.2 GHz */
-            write_cpu_freq_bounds(cpu, "1196000\n", "1196000\n");
-            write_cpu_node(cpu, "scaling_governor", "userspace\n");
-            write_cpu_node(cpu, "scaling_setspeed", "1196000\n");
+            /* Fixed 1.209 GHz (actual MT6572 1.2GHz OPP) */
+            write_cpu_freq_bounds(cpu, "1209000\n", "1209000\n");
+            write_cpu_node(cpu, "scaling_governor", "performance\n");
             break;
 
         case Y1_CPU_MODE_TURBO:
             /* Fixed 1.3 GHz */
             write_cpu_freq_bounds(cpu, "1300000\n", "1300000\n");
             write_cpu_node(cpu, "scaling_governor", "performance\n");
-            write_cpu_node(cpu, "scaling_setspeed", "1300000\n");
             break;
 
         case Y1_CPU_MODE_DYNAMIC:
         default:
-            /* Ondemand 598 MHz - 1001 MHz */
+            /* Ondemand 390 MHz - 1001 MHz */
             y1_sysfs_write("/proc/cpufreq/usb_raise_freq", "0\n");
-            y1_sysfs_write("/proc/cpufreq/MTK_PPM_POLICY", "DISABLE\n");
-            y1_sysfs_write("/proc/cpufreq/MTK_PPM_POLICY", "0\n");
-            write_cpu_freq_bounds(cpu, "598000\n", "1001000\n");
+            write_cpu_freq_bounds(cpu, "390000\n", "1001000\n");
             write_cpu_node(cpu, "scaling_governor", "ondemand\n");
             break;
         }
@@ -90,9 +85,9 @@ void y1_cpu_set_mode(int mode)
     if (mode == Y1_CPU_MODE_DYNAMIC) {
         y1_sysfs_write("/sys/devices/system/cpu/cpufreq/ondemand/up_threshold", "98\n");
         y1_sysfs_write("/sys/devices/system/cpu/cpufreq/ondemand/sampling_down_factor", "1\n");
-        y1_sysfs_write("/sys/devices/system/cpu/cpufreq/ondemand/sampling_rate", "100000\n");
+        y1_sysfs_write("/sys/devices/system/cpu/cpufreq/ondemand/sampling_rate", "150000\n");
         y1_sysfs_write("/sys/devices/system/cpu/cpufreq/ondemand/io_is_busy", "0\n");
-        y1_sysfs_write("/sys/devices/system/cpu/cpufreq/ondemand/powersave_bias", "200\n");
+        y1_sysfs_write("/sys/devices/system/cpu/cpufreq/ondemand/powersave_bias", "300\n");
     }
 }
 
@@ -104,16 +99,15 @@ int y1_cpu_get_mode(void)
 void y1_cpu_set_dual_core(bool dual_core)
 {
     if (!dual_core) {
-        /* Disarm MediaTek hotplug drivers and power down Core 1 */
-        y1_sysfs_write("/proc/mtk_hotplug/enable", "0\n");
+        /* Disarm MediaTek hotplug drivers first, then offline CPU 1 */
         y1_sysfs_write("/sys/module/mt_hotplug_mechanism/parameters/g_enable", "0\n");
-        y1_sysfs_write("/sys/devices/system/cpu/cpufreq/hotplug/cpu_hotplug_disable", "1\n");
         y1_sysfs_write("/sys/devices/system/cpu/cpufreq/hotplug/cpu_num_base", "1\n");
         y1_sysfs_write("/sys/devices/system/cpu/cpufreq/hotplug/cpu_num_limit", "1\n");
         y1_sysfs_write("/sys/devices/system/cpu/cpu1/online", "0\n");
+        y1_sysfs_write("/sys/devices/system/cpu/cpufreq/hotplug/cpu_hotplug_disable", "1\n");
+        y1_sysfs_write("/sys/devices/system/cpu/cpu1/online", "0\n");
     } else {
         y1_sysfs_write("/sys/devices/system/cpu/cpufreq/hotplug/cpu_hotplug_disable", "0\n");
-        y1_sysfs_write("/proc/mtk_hotplug/enable", "1\n");
         y1_sysfs_write("/sys/module/mt_hotplug_mechanism/parameters/g_enable", "1\n");
         y1_sysfs_write("/sys/devices/system/cpu/cpufreq/hotplug/cpu_num_base", "1\n");
         y1_sysfs_write("/sys/devices/system/cpu/cpufreq/hotplug/cpu_num_limit", "2\n");
@@ -151,14 +145,14 @@ void y1_cpu_set_screen_off_clamp(bool screen_off)
         if (saved_cpu1_online == -1) {
             saved_cpu1_online = y1_cpu_is_dual_core() ? 1 : 0;
         }
-        y1_log("[liby1-cpu] screen-off: clamping strictly to 598 MHz single-core (lowest VCORE)\n");
+        y1_log("[liby1-cpu] screen-off: clamping strictly to 390 MHz single-core (lowest VCORE)\n");
         y1_sysfs_write("/proc/cpufreq/usb_raise_freq", "0\n");
         y1_sysfs_write("/proc/cpufreq/MTK_PPM_POLICY", "DISABLE\n");
         y1_sysfs_write("/proc/cpufreq/MTK_PPM_POLICY", "0\n");
         current_cpu_mode = -1;
         y1_cpu_set_mode(Y1_CPU_MODE_POWERSAVE);
         y1_cpu_set_dual_core(false);
-        y1_sysfs_write("/proc/cpufreq/cpufreq_cur_freq", "598000\n");
+        y1_sysfs_write("/proc/cpufreq/cpufreq_cur_freq", "390000\n");
     } else {
         if (saved_cpu1_online != -1) {
             y1_cpu_set_dual_core(saved_cpu1_online != 0);
@@ -184,16 +178,15 @@ void y1_cpu_boost_for_conversion(bool enable)
                     conv_saved_mode, conv_saved_dual);
         }
         conv_boost_ref++;
-        y1_sysfs_write("/sys/devices/system/cpu/cpufreq/hotplug/is_cpu_hotplug_disable", "1");
-        y1_sysfs_write("/sys/devices/system/cpu/cpufreq/hotplug/cpu_num_base", "2");
-        y1_sysfs_write("/sys/devices/system/cpu/cpufreq/hotplug/cpu_num_limit", "2");
+        y1_sysfs_write("/sys/devices/system/cpu/cpufreq/hotplug/cpu_hotplug_disable", "1\n");
+        y1_sysfs_write("/sys/devices/system/cpu/cpufreq/hotplug/cpu_num_base", "2\n");
+        y1_sysfs_write("/sys/devices/system/cpu/cpufreq/hotplug/cpu_num_limit", "2\n");
         y1_cpu_set_dual_core(true);
-        y1_sysfs_write("/sys/devices/system/cpu/cpu1/online", "1");
+        y1_sysfs_write("/sys/devices/system/cpu/cpu1/online", "1\n");
         y1_cpu_set_mode(Y1_CPU_MODE_TURBO);
-        y1_sysfs_write("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor", "performance");
-        y1_sysfs_write("/sys/devices/system/cpu/cpu0/cpufreq/scaling_min_freq", "1300000");
-        y1_sysfs_write("/sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq", "1300000");
-        y1_sysfs_write("/sys/devices/system/cpu/cpu0/cpufreq/scaling_setspeed", "1300000");
+        y1_sysfs_write("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor", "performance\n");
+        y1_sysfs_write("/sys/devices/system/cpu/cpu0/cpufreq/scaling_min_freq", "1300000\n");
+        y1_sysfs_write("/sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq", "1300000\n");
     } else {
         if (conv_boost_ref > 0)
             conv_boost_ref--;
@@ -205,7 +198,7 @@ void y1_cpu_boost_for_conversion(bool enable)
             current_cpu_mode = -1;
             y1_logf("[liby1-cpu] conversion boost OFF: restoring mode=%d dual=%d\n",
                     restore_mode, restore_dual);
-            y1_sysfs_write("/sys/devices/system/cpu/cpufreq/hotplug/is_cpu_hotplug_disable", "0");
+            y1_sysfs_write("/sys/devices/system/cpu/cpufreq/hotplug/cpu_hotplug_disable", "0\n");
             y1_cpu_set_mode(restore_mode);
             y1_cpu_set_dual_core(restore_dual != 0);
         }

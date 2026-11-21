@@ -196,9 +196,49 @@ int y1_afe_write_reg(uint32_t offset, uint32_t val, uint32_t mask)
 
 void y1_pmic_tune_accdet_debounce(void)
 {
-    if (eac_fd >= 0) {
-        set_anareg(eac_fd, 0x0786, 0x0180, 0xffff);
-        set_anareg(eac_fd, 0x0788, 0x0180, 0xffff);
+    static int accdet_fd = -1;
+    if (accdet_fd < 0) {
+        accdet_fd = open("/dev/accdet", O_RDWR);
+        if (accdet_fd < 0) {
+            int dfd = open("/sys/class/misc/accdet/dev", O_RDONLY);
+            if (dfd >= 0) {
+                char buf[32];
+                ssize_t n = read(dfd, buf, sizeof(buf) - 1);
+                close(dfd);
+                if (n > 0) {
+                    buf[n] = '\0';
+                    unsigned int maj = 0, min = 0;
+                    if (sscanf(buf, "%u:%u", &maj, &min) == 2 && maj > 0) {
+                        dev_t dev = (dev_t)(((maj & 0xfffU) << 8) | (min & 0xffU));
+                        mknod("/dev/accdet", S_IFCHR | 0666, dev);
+                        accdet_fd = open("/dev/accdet", O_RDWR);
+                    }
+                }
+            }
+        }
+    }
+    if (accdet_fd >= 0) {
+        /* ACCDET_IOC_SET_CALL_STATE (0x4101) = 1 keeps MICBIAS and ACCDET
+         * polling active past 5s idle and across screen-off/suspend when a
+         * 4-pole mic headset is inserted; clear it to 0 otherwise to avoid
+         * unnecessary MICBIAS drain in deep sleep. */
+        ioctl(accdet_fd, 0x4101, y1_jack_has_mic() ? 1 : 0);
+    }
+
+    int fd = eac_fd;
+    bool temp_fd = false;
+    if (fd < 0) {
+        fd = open("/dev/eac", O_RDWR);
+        temp_fd = (fd >= 0);
+    }
+    if (fd >= 0) {
+        set_anareg(fd, 0x010c, 0x0200, 0x0200); /* Clear RG_ACCDET_CK_PDN */
+        set_anareg(fd, 0x077e, 0x0007, 0x0007); /* Enable ACCDET PWM & MICBIAS */
+        set_anareg(fd, 0x077c, 0x0001, 0x0001); /* Enable ACCDET module */
+        set_anareg(fd, 0x0786, 0x0180, 0xffff); /* Fast hook-key debounce0 (~12ms) */
+        set_anareg(fd, 0x0788, 0x0180, 0xffff); /* Fast hook-key debounce1 (~12ms) */
+        if (temp_fd)
+            close(fd);
     }
 }
 
@@ -262,36 +302,47 @@ int y1_audio_open(unsigned long sample_rate)
     /* 4. Program hardware sample rate & wake PMIC digital clock domain (0x4014, top_ctl_trigger, 0x4000) */
     y1_audio_set_sample_rate(current_sampr);
 
-    /* 5. Power up Downlink DAC & analog L/R paths */
+    /* Keep PMIC digital downlink muted while analog DAC & HP amp power up */
+    set_anareg(eac_fd, 0x4006, 0xffff, 0xffff);
+    set_anareg(eac_fd, 0x4008, 0xffff, 0xffff);
+
+    /* 5. Power up Downlink DAC & analog L/R paths with clean unity preamp gain (2 instead of 5) */
     set_anareg(eac_fd, 0x700, 0x7800, 0x7f80);
     set_anareg(eac_fd, 0x704, 0x00f0, 0x00ff);
-    set_anareg(eac_fd, 0x702, 0x0500, 0x0700); /* Maximum preamp buffer gain Right (5 << 8) */
-    set_anareg(eac_fd, 0x700, 0x0050, 0x0070); /* Maximum preamp buffer gain Left (5 << 4) */
+    set_anareg(eac_fd, 0x702, 0x0200, 0x0700); /* Clean unity preamp buffer gain Right (2 << 8) */
+    set_anareg(eac_fd, 0x700, 0x0020, 0x0070); /* Clean unity preamp buffer gain Left (2 << 4) */
     set_anareg(eac_fd, 0x710, 0x0008, 0x0008);
     set_anareg(eac_fd, 0x700, 0x0180, 0x0180);
     set_anareg(eac_fd, 0x704, 0x0003, 0x0003);
 
-    /* 6. Configure MT6323 PMIC Headphone Amplifier with pop suppression */
+    /* 6. Configure MT6323 PMIC Headphone Amplifier with pop suppression and target PGA gain */
+    uint32_t init_con5_gain = ((uint32_t)(saved_hp_idx_l & 0x7) << 12) |
+                              ((uint32_t)(saved_hp_idx_r & 0x7) << 8);
+    current_hp_idx_l = saved_hp_idx_l;
+    current_hp_idx_r = saved_hp_idx_r;
     set_anareg(eac_fd, 0x70c, 0xf7f2, 0xffff);
     set_anareg(eac_fd, 0x700, 0x7000, 0xf000);
-    set_anareg(eac_fd, 0x70a, 0x0014, 0xffff);
+    set_anareg(eac_fd, 0x70a, 0x0014 | init_con5_gain, 0xffff);
     set_anareg(eac_fd, 0x708, 0x007c, 0xffff);
-    usleep(10000); /* 10ms settling time */
+    usleep(12000); /* 12ms depop settling time */
     set_anareg(eac_fd, 0x70c, 0xf5ba, 0xffff);
 
-    /* 7. Ensure maximum clean PMIC digital downlink gain (0 dB unity) */
-    set_anareg(eac_fd, 0x4006, 0, 0xffff);
-    set_anareg(eac_fd, 0x4008, 0, 0xffff);
-
-    current_hp_idx_l = -1;
-    current_hp_idx_r = -1;
-    y1_audio_set_hp_analog_gain(saved_hp_idx_l, saved_hp_idx_r);
+    /* 7. Prefill DMA ring buffer with silence before enabling output */
+    {
+        static const uint8_t zero_buf[4096] = { 0 };
+        (void)write(eac_fd, zero_buf, sizeof(zero_buf));
+    }
 
     /* 8. Finalize PMIC CDC Clock Synchronization, Master Enable, and Headphone Amp Unmute */
     set_anareg(eac_fd, 0x4014, 1, 1);
     top_ctl_trigger(eac_fd);
     set_anareg(eac_fd, 0x4000, 1, 1);
     ioctl(eac_fd, SET_HEADPHONE_ON, 3);
+    usleep(2000);
+
+    /* Unmute PMIC digital downlink gain (0 dB unity) after analog & clocks settle */
+    set_anareg(eac_fd, 0x4006, 0, 0xffff);
+    set_anareg(eac_fd, 0x4008, 0, 0xffff);
 
     if (dma_is_running) {
         set_afereg(eac_fd, 0x10, (1 << 0) | (1 << 1), (1 << 0) | (1 << 1));
@@ -306,7 +357,13 @@ void y1_audio_close(void)
     if (eac_fd < 0)
         return;
 
+    /* Mute PMIC digital downlink and ramp down headphone amp with depop before power-off */
+    set_anareg(eac_fd, 0x4006, 0xffff, 0xffff);
+    set_anareg(eac_fd, 0x4008, 0xffff, 0xffff);
+    usleep(2000);
     set_afereg(eac_fd, 0x10, 0, 1 << 1);
+    set_anareg(eac_fd, 0x70c, 0xf7f2, 0xffff);
+    usleep(5000);
     ioctl(eac_fd, SET_HEADPHONE_OFF, 0);
     set_anareg(eac_fd, 0x4014, 0, 1);
     set_anareg(eac_fd, 0x4000, 0, 1);
@@ -321,9 +378,8 @@ void y1_audio_close(void)
     set_anareg(eac_fd, 0x700, 0x0000, 0xfffa);
     set_anareg(eac_fd, 0x710, 0x0000, 0x0008);
 
-    /* Gate PMIC 13MHz audio clock */
-    set_anareg(eac_fd, 0x10c, 0x0000, 0x0100);
-    set_anareg(eac_fd, 0x106, 0x0000, 0xffff);
+    /* Keep PMIC ACCDET clock active for headset MFB while screen/audio is off */
+    y1_pmic_tune_accdet_debounce();
     set_afereg(eac_fd, 0x10, 0, 1 << 0);
 
     /* Release DL1 DMA buffer and close /dev/eac so AudDrv_release() drops kernel audio wakelocks */
@@ -355,20 +411,31 @@ bool y1_audio_set_sample_rate(unsigned long sampr)
 
     y1_logf("[liby1-audio] program_hw_sampr: %lu Hz\n", sampr);
 
-    /* 1. Pause DL1 DMA during clock and PLL reconfiguration */
+    /* 1. Soft-mute PMIC digital downlink and pause AFE DL1 DMA, SRC2, and I2S Out */
+    set_anareg(eac_fd, 0x4006, 0xffff, 0xffff);
+    set_anareg(eac_fd, 0x4008, 0xffff, 0xffff);
+    usleep(1500);
     set_afereg(eac_fd, 0x10, 0, 1 << 1);
+    set_afereg(eac_fd, 0x108, 0, ~0U);
+    set_afereg(eac_fd, 0x34, 0, 1);
 
-    /* 2. Gate PMIC digital audio paths before reconfiguring clock dividers.
-     * MT6323 internal digital FIR interpolation filters corrupt their history
-     * state if sample rate dividers change while the processing pipeline is active. */
+    /* 2. Gate PMIC digital audio paths and latch via top_ctl_trigger() BEFORE
+     * reconfiguring clock dividers. MT6323 internal digital FIR interpolation
+     * filters corrupt their history state and lose I2S phase sync if sample
+     * rate dividers change before the disable is latched into the PMIC clock domain. */
     set_anareg(eac_fd, 0x4014, 0, 1);  /* Disable PMIC downlink channel */
     set_anareg(eac_fd, 0x4000, 0, 1);  /* Disable PMIC Audio Digital Master */
+    top_ctl_trigger(eac_fd);
+    usleep(2000);
 
-    /* 3. Flush and reset coherent DL1 DMA ring buffer pointers to byte 0. */
+    /* 3. Reset DL1 DMA ring buffer pointers to byte 0 and clear residual samples
+     * without freeing/shrinking the 65536-byte kernel DMA buffer. */
     ioctl(eac_fd, FREE_MEMIF_FP, 0);
-    ioctl(eac_fd, AUDDRV_FREE_DL1_BUF, 0);
-    ioctl(eac_fd, AUDDRV_ALLOCATE_DL1_BUF, 32768);
     ioctl(eac_fd, SET_MEMIF_FP, 0);
+    {
+        static const uint8_t zero_buf[4096] = { 0 };
+        (void)write(eac_fd, zero_buf, sizeof(zero_buf));
+    }
 
     /* 4. Configure AFE digital interconnections: DL1 -> I2S Out */
     set_afereg(eac_fd, 0x24, 1 << 21, 1 << 21);
@@ -378,23 +445,23 @@ bool y1_audio_set_sample_rate(unsigned long sampr)
     if (set_afereg(eac_fd, 0x14, rate_code, 0x0f) < 0) ok = false;
     if (set_afereg(eac_fd, 0x3a0, (rate_code << 4) | 1, 0xf1) < 0) ok = false;
     if (set_afereg(eac_fd, 0x3ac, 1024, ~0U) < 0) ok = false;
-    if (set_afereg(eac_fd, 0x108, dac_con1, ~0U) < 0) ok = false;
-    if (set_afereg(eac_fd, 0x34, (rate_code << 8) | 0x09, ~0U) < 0) ok = false;
     if (set_anareg(eac_fd, 0x4024, (pmic_newif_rate << 12) | 0x330, 0xffff) < 0) ok = false;
     if (set_anareg(eac_fd, 0x4002, rate_code, 0x0f) < 0) ok = false;
+    if (set_afereg(eac_fd, 0x34, (rate_code << 8) | 0x09, ~0U) < 0) ok = false;
+    if (set_afereg(eac_fd, 0x108, dac_con1, ~0U) < 0) ok = false;
 
-    set_anareg(eac_fd, 0x4006, 0, 0xffff);
-    set_anareg(eac_fd, 0x4008, 0, 0xffff);
     set_anareg(eac_fd, 0x4014, 1, 1);
     top_ctl_trigger(eac_fd);
     set_anareg(eac_fd, 0x4000, 1, 1);
 
-    usleep(5000);
+    usleep(3000);
 
-    /* Resume DL1 DMA if active */
+    /* Resume DL1 DMA if active, then unmute PMIC digital downlink */
     if (dma_is_running) {
         set_afereg(eac_fd, 0x10, (1 << 0) | (1 << 1), (1 << 0) | (1 << 1));
     }
+    set_anareg(eac_fd, 0x4006, 0, 0xffff);
+    set_anareg(eac_fd, 0x4008, 0, 0xffff);
 
     if (ok)
         programmed_sampr = sampr;
@@ -422,14 +489,30 @@ void y1_audio_set_hp_analog_gain(int idx_l, int idx_r)
     if (idx_l == current_hp_idx_l && idx_r == current_hp_idx_r)
         return;
 
-    current_hp_idx_l = idx_l;
-    current_hp_idx_r = idx_r;
+    if (current_hp_idx_l < 0 || current_hp_idx_r < 0) {
+        current_hp_idx_l = idx_l;
+        current_hp_idx_r = idx_r;
+        uint32_t con5_gain = ((uint32_t)(idx_l & 0x7) << 12) |
+                             ((uint32_t)(idx_r & 0x7) << 8);
+        set_anareg(eac_fd, MT6323_AUDTOP_CON5, con5_gain, 0x7700);
+        return;
+    }
 
-    /* Bits [14:12] = HPL Gain (0..7), Bits [10:8] = HPR Gain (0..7).
+    /* Step 1 PGA index at a time to avoid analog DC step pops.
+     * Bits [14:12] = HPL Gain (0..7), Bits [10:8] = HPR Gain (0..7).
      * Mask 0x7700 preserves HP mux/power bits [4:0] (0x0014) without pop. */
-    uint32_t con5_gain = ((uint32_t)(idx_l & 0x7) << 12) |
-                         ((uint32_t)(idx_r & 0x7) << 8);
-    set_anareg(eac_fd, MT6323_AUDTOP_CON5, con5_gain, 0x7700);
+    while (current_hp_idx_l != idx_l || current_hp_idx_r != idx_r) {
+        if (current_hp_idx_l < idx_l) current_hp_idx_l++;
+        else if (current_hp_idx_l > idx_l) current_hp_idx_l--;
+        if (current_hp_idx_r < idx_r) current_hp_idx_r++;
+        else if (current_hp_idx_r > idx_r) current_hp_idx_r--;
+
+        uint32_t con5_gain = ((uint32_t)(current_hp_idx_l & 0x7) << 12) |
+                             ((uint32_t)(current_hp_idx_r & 0x7) << 8);
+        set_anareg(eac_fd, MT6323_AUDTOP_CON5, con5_gain, 0x7700);
+        if (current_hp_idx_l != idx_l || current_hp_idx_r != idx_r)
+            usleep(500);
+    }
 }
 
 void y1_audio_set_dma_running(bool running)

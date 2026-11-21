@@ -74,7 +74,9 @@ int  y1_battery_percent(void);       /* 0..100 % */
 int  y1_battery_voltage_mv(void);    /* Millivolts (e.g. 3850) */
 int  y1_battery_current_ma(void);    /* Milliamps */
 bool y1_battery_is_charging(void);
-bool y1_power_usb_online(void);      /* True if USB or AC power is connected */
+bool y1_power_usb_online(void);
+bool y1_vibrate_available(void);
+void y1_vibrate(int ms);      /* True if USB or AC power is connected */
 
 /** System power control. */
 void y1_sys_poweroff(void) __attribute__((noreturn));
@@ -160,10 +162,10 @@ void y1_power_set_idle_sleep(bool allow_suspend);
  * ========================================================================= */
 
 enum y1_cpu_mode_id {
-    Y1_CPU_MODE_DYNAMIC     = 0, /* Ondemand 598 MHz - 1001 MHz */
-    Y1_CPU_MODE_POWERSAVE   = 1, /* Fixed 598 MHz (Lowest VCORE 1.05V) */
+    Y1_CPU_MODE_DYNAMIC     = 0, /* Ondemand 390 MHz - 1001 MHz */
+    Y1_CPU_MODE_POWERSAVE   = 1, /* Fixed 390 MHz (Lowest VCORE 1.05V) */
     Y1_CPU_MODE_BALANCED    = 2, /* Fixed 1001 MHz */
-    Y1_CPU_MODE_PERFORMANCE = 3, /* Fixed 1196 MHz */
+    Y1_CPU_MODE_PERFORMANCE = 3, /* Fixed 1209 MHz */
     Y1_CPU_MODE_TURBO       = 4  /* Fixed 1300 MHz */
 };
 
@@ -341,6 +343,7 @@ int y1_ipod_native_playlist_count(void);
 const char *y1_ipod_native_playlist_name(int pl_idx);
 int y1_ipod_native_playlist_track_count(int pl_idx);
 const char *y1_ipod_native_playlist_track_path(int pl_idx, int tr_idx);
+bool y1_ipod_native_save_playlist(int pl_idx, const char **track_paths, int track_count);
 
 #ifdef __cplusplus
 }
