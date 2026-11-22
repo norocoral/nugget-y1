@@ -1,0 +1,14 @@
+prefix=/mnt/c/Users/dakirb/Documents/rom/!nugget/main/meui/third_party/ffmpeg_arm
+exec_prefix=${prefix}
+libdir=/mnt/c/Users/dakirb/Documents/rom/!nugget/main/meui/third_party/ffmpeg_arm/lib
+includedir=/mnt/c/Users/dakirb/Documents/rom/!nugget/main/meui/third_party/ffmpeg_arm/include
+
+Name: libavutil
+Description: FFmpeg utility library
+Version: 59.39.100
+Requires: 
+Requires.private: 
+Conflicts:
+Libs: -L${libdir}  -lavutil 
+Libs.private: -pthread -lm -latomic
+Cflags: -I${includedir}

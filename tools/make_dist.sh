@@ -29,6 +29,9 @@ fi
 # 3. Stage boot_nugget.img and SD card archives
 echo "[*] Copying core release artifacts to dist/..."
 cp "$SCRIPT_DIR/boot_nugget.img" "$DIST_DIR/"
+if [[ -f "$SCRIPT_DIR/logo.bin" ]]; then
+    cp "$SCRIPT_DIR/logo.bin" "$DIST_DIR/"
+fi
 if [[ -f "$SCRIPT_DIR/rockbox_sdcard.zip" ]]; then
     cp "$SCRIPT_DIR/rockbox_sdcard.zip" "$DIST_DIR/"
 fi
@@ -70,9 +73,15 @@ if [[ "${BUILD_DIST_IUCE:-0}" -eq 1 ]]; then
     IUCE_STAGE="$(mktemp -d "$DIST_DIR/.iuce-stage.XXXXXX")"
     cp "$SCRIPT_DIR/boot_nugget.img" "$IUCE_STAGE/boot.img"
     cp "$SCATTER_FILE" "$IUCE_STAGE/MT6572_Android_scatter.txt"
+    if [[ -s "$SCRIPT_DIR/logo.bin" ]]; then
+        cp "$SCRIPT_DIR/logo.bin" "$IUCE_STAGE/logo.bin"
+    else
+        echo "[!] Error: Missing logo.bin for Innioasis Updater CE: $SCRIPT_DIR/logo.bin"
+        exit 1
+    fi
     (
         cd "$IUCE_STAGE"
-        zip -q "$DIST_DIR/rom.zip" boot.img MT6572_Android_scatter.txt
+        zip -q "$DIST_DIR/rom.zip" boot.img logo.bin MT6572_Android_scatter.txt
     )
     rm -rf "$IUCE_STAGE"
 fi

@@ -8,6 +8,8 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <errno.h>
+#include <pthread.h>
+#include <time.h>
 #include <sys/stat.h>
 #include <sys/reboot.h>
 
@@ -210,17 +212,19 @@ bool y1_power_usb_online(void)
 
 #define Y1_VIBRATOR_SYSFS "/sys/class/timed_output/vibrator/enable"
 static int vib_fd = -1;
+static pthread_mutex_t vib_mtx = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t vib_cond = PTHREAD_COND_INITIALIZER;
+static bool vib_thread_started = false;
+static bool vib_stop_pending = false;
+static struct timespec vib_stop_ts;
 
 bool y1_vibrate_available(void)
 {
     return access(Y1_VIBRATOR_SYSFS, W_OK) == 0;
 }
 
-void y1_vibrate(int ms)
+static void vib_write_ms(int ms)
 {
-    if (ms < 0) ms = 0;
-    if (ms > 1000) ms = 1000;
-
     if (vib_fd < 0)
         vib_fd = open(Y1_VIBRATOR_SYSFS, O_WRONLY | O_CLOEXEC);
 
@@ -236,6 +240,72 @@ void y1_vibrate(int ms)
                 (void)!write(vib_fd, buf, (size_t)len);
         }
     }
+}
+
+static void *vib_timer_thread(void *arg)
+{
+    (void)arg;
+    pthread_mutex_lock(&vib_mtx);
+    while (1) {
+        while (!vib_stop_pending)
+            pthread_cond_wait(&vib_cond, &vib_mtx);
+
+        struct timespec target = vib_stop_ts;
+        int rc = pthread_cond_timedwait(&vib_cond, &vib_mtx, &target);
+        if (rc == ETIMEDOUT && vib_stop_pending) {
+            struct timespec now;
+            clock_gettime(CLOCK_MONOTONIC, &now);
+            if (now.tv_sec > vib_stop_ts.tv_sec ||
+                (now.tv_sec == vib_stop_ts.tv_sec && now.tv_nsec >= vib_stop_ts.tv_nsec)) {
+                vib_stop_pending = false;
+                vib_write_ms(0);
+            }
+        }
+    }
+    return NULL;
+}
+
+void y1_vibrate(int ms)
+{
+    if (ms < 0) ms = 0;
+    if (ms > 1000) ms = 1000;
+
+    pthread_mutex_lock(&vib_mtx);
+    if (ms == 0) {
+        vib_stop_pending = false;
+        vib_write_ms(0);
+        pthread_cond_signal(&vib_cond);
+        pthread_mutex_unlock(&vib_mtx);
+        return;
+    }
+
+    if (!vib_thread_started) {
+        pthread_condattr_t attr;
+        pthread_condattr_init(&attr);
+        pthread_condattr_setclock(&attr, CLOCK_MONOTONIC);
+        pthread_cond_init(&vib_cond, &attr);
+        pthread_condattr_destroy(&attr);
+
+        pthread_t tid;
+        if (pthread_create(&tid, NULL, vib_timer_thread, NULL) == 0) {
+            pthread_detach(tid);
+            vib_thread_started = true;
+        }
+    }
+
+    vib_write_ms(ms);
+    if (vib_thread_started) {
+        clock_gettime(CLOCK_MONOTONIC, &vib_stop_ts);
+        vib_stop_ts.tv_sec += ms / 1000;
+        vib_stop_ts.tv_nsec += (long)(ms % 1000) * 1000000L;
+        if (vib_stop_ts.tv_nsec >= 1000000000L) {
+            vib_stop_ts.tv_sec += 1;
+            vib_stop_ts.tv_nsec -= 1000000000L;
+        }
+        vib_stop_pending = true;
+        pthread_cond_signal(&vib_cond);
+    }
+    pthread_mutex_unlock(&vib_mtx);
 }
 
 void y1_sys_poweroff(void)

@@ -356,6 +356,256 @@ static void diagnostic_monitor(void)
     }
 }
 
+static void write_sysfs(const char *path, const char *val);
+
+static uint64_t hotkey_monotonic_ms(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000ULL + (uint64_t)(ts.tv_nsec / 1000000L);
+}
+
+static int screenshot_enabled_from_config(void)
+{
+    const char *paths[] = {
+        "/mnt/sdcard/.system/configapp/settings.conf",
+        "/.system/configapp/settings.conf",
+        NULL
+    };
+    for (int i = 0; paths[i]; i++) {
+        FILE *f = fopen(paths[i], "r");
+        if (!f) continue;
+        char line[128];
+        int enabled = 0;
+        while (fgets(line, sizeof(line), f)) {
+            char key[64];
+            int val = 0;
+            if (sscanf(line, "%63[^=]=%d", key, &val) == 2) {
+                if (strcmp(key, "screenshot") == 0) {
+                    enabled = val ? 1 : 0;
+                    break;
+                }
+            }
+        }
+        fclose(f);
+        return enabled;
+    }
+    return 0; /* Disabled by default */
+}
+
+static void capture_fb_screenshot(void)
+{
+    if (!is_mounted("/mnt/sdcard"))
+        return;
+
+    int fbfd = open("/dev/graphics/fb0", O_RDONLY | O_CLOEXEC);
+    if (fbfd < 0) fbfd = open("/dev/fb0", O_RDONLY | O_CLOEXEC);
+    if (fbfd < 0) return;
+
+    struct fb_var_screeninfo vinfo;
+    struct fb_fix_screeninfo finfo;
+    if (ioctl(fbfd, FBIOGET_VSCREENINFO, &vinfo) != 0 ||
+        ioctl(fbfd, FBIOGET_FSCREENINFO, &finfo) != 0) {
+        close(fbfd);
+        return;
+    }
+
+    int w = (int)vinfo.xres;
+    int h = (int)vinfo.yres;
+    int bpp = (int)vinfo.bits_per_pixel;
+    if (w <= 0 || h <= 0 || w > 1920 || h > 1920 || (bpp != 16 && bpp != 32)) {
+        close(fbfd);
+        return;
+    }
+
+    size_t map_sz = finfo.smem_len;
+    uint8_t *fb_mem = mmap(NULL, map_sz, PROT_READ, MAP_SHARED, fbfd, 0);
+    if (fb_mem == MAP_FAILED) {
+        close(fbfd);
+        return;
+    }
+
+    mkdir("/mnt/sdcard/Screenshots", 0777);
+    time_t now = time(NULL);
+    struct tm *tm = localtime(&now);
+    char path[128];
+    if (tm) {
+        snprintf(path, sizeof(path), "/mnt/sdcard/Screenshots/screenshot_%04d%02d%02d_%02d%02d%02d.bmp",
+                 tm->tm_year + 1900, tm->tm_mon + 1, tm->tm_mday,
+                 tm->tm_hour, tm->tm_min, tm->tm_sec);
+    } else {
+        snprintf(path, sizeof(path), "/mnt/sdcard/Screenshots/screenshot_%lu.bmp", (unsigned long)now);
+    }
+
+    int row_stride = (w * 3 + 3) & ~3;
+    uint32_t img_sz = (uint32_t)(row_stride * h);
+    uint32_t file_sz = 54 + img_sz;
+
+    uint8_t hdr[54];
+    memset(hdr, 0, sizeof(hdr));
+    hdr[0] = 'B'; hdr[1] = 'M';
+    hdr[2] = (uint8_t)(file_sz & 0xFF);
+    hdr[3] = (uint8_t)((file_sz >> 8) & 0xFF);
+    hdr[4] = (uint8_t)((file_sz >> 16) & 0xFF);
+    hdr[5] = (uint8_t)((file_sz >> 24) & 0xFF);
+    hdr[10] = 54;
+    hdr[14] = 40;
+    hdr[18] = (uint8_t)(w & 0xFF);
+    hdr[19] = (uint8_t)((w >> 8) & 0xFF);
+    hdr[22] = (uint8_t)(h & 0xFF);
+    hdr[23] = (uint8_t)((h >> 8) & 0xFF);
+    hdr[26] = 1;
+    hdr[28] = 24;
+    hdr[34] = (uint8_t)(img_sz & 0xFF);
+    hdr[35] = (uint8_t)((img_sz >> 8) & 0xFF);
+    hdr[36] = (uint8_t)((img_sz >> 16) & 0xFF);
+    hdr[37] = (uint8_t)((img_sz >> 24) & 0xFF);
+
+    FILE *fp = fopen(path, "wb");
+    if (fp) {
+        fwrite(hdr, 1, 54, fp);
+        uint8_t *row_buf = malloc((size_t)row_stride);
+        if (row_buf) {
+            size_t base_off = (size_t)vinfo.yoffset * (size_t)finfo.line_length;
+            if (base_off + (size_t)h * (size_t)finfo.line_length > map_sz)
+                base_off = 0;
+
+            for (int y = h - 1; y >= 0; y--) {
+                const uint8_t *src = fb_mem + base_off + (size_t)y * (size_t)finfo.line_length;
+                memset(row_buf, 0, (size_t)row_stride);
+                if (bpp == 32) {
+                    const uint32_t *s32 = (const uint32_t *)src;
+                    for (int x = 0; x < w; x++) {
+                        uint32_t px = s32[x];
+                        uint8_t r = (uint8_t)((px >> vinfo.red.offset) & 0xFF);
+                        uint8_t g = (uint8_t)((px >> vinfo.green.offset) & 0xFF);
+                        uint8_t b = (uint8_t)((px >> vinfo.blue.offset) & 0xFF);
+                        row_buf[x * 3 + 0] = b;
+                        row_buf[x * 3 + 1] = g;
+                        row_buf[x * 3 + 2] = r;
+                    }
+                } else {
+                    const uint16_t *s16 = (const uint16_t *)src;
+                    for (int x = 0; x < w; x++) {
+                        uint16_t px = s16[x];
+                        uint8_t r = (uint8_t)(((px >> 11) & 0x1F) * 255 / 31);
+                        uint8_t g = (uint8_t)(((px >> 5)  & 0x3F) * 255 / 63);
+                        uint8_t b = (uint8_t)((px & 0x1F) * 255 / 31);
+                        row_buf[x * 3 + 0] = b;
+                        row_buf[x * 3 + 1] = g;
+                        row_buf[x * 3 + 2] = r;
+                    }
+                }
+                fwrite(row_buf, 1, (size_t)row_stride, fp);
+            }
+            free(row_buf);
+        }
+        fclose(fp);
+        write_sysfs("/sys/class/timed_output/vibrator/enable", "35\n");
+    }
+
+    munmap(fb_mem, map_sz);
+    close(fbfd);
+}
+
+static void global_hotkey_monitor(void)
+{
+    int fds[16];
+    int is_accdet[16];
+    int nfds_open = 0;
+
+    for (int i = 0; i < 16; i++) {
+        char p[32];
+        snprintf(p, sizeof(p), "/dev/input/event%d", i);
+        fds[i] = open(p, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+        is_accdet[i] = 0;
+        if (fds[i] >= 0) {
+            char name[64] = {0};
+            if (ioctl(fds[i], EVIOCGNAME(sizeof(name) - 1), name) >= 0) {
+                if (strstr(name, "ACCDET") || strstr(name, "accdet"))
+                    is_accdet[i] = 1;
+            }
+            nfds_open++;
+        }
+    }
+    if (nfds_open == 0)
+        _exit(0);
+
+    int play_held = 0;
+    int menu_held = 0;
+    uint64_t play_press_ms = 0;
+    uint64_t last_ss_ms = 0;
+
+    while (1) {
+        struct pollfd pfds[16];
+        int map[16];
+        nfds_t n = 0;
+        for (int i = 0; i < 16; i++) {
+            if (fds[i] >= 0) {
+                pfds[n].fd = fds[i];
+                pfds[n].events = POLLIN;
+                pfds[n].revents = 0;
+                map[n] = i;
+                n++;
+            }
+        }
+
+        /* 0% CPU when idle; 200ms wake while Play/Pause is held for 10s shutdown */
+        int rc = poll(pfds, n, play_held ? 200 : -1);
+        if (rc > 0) {
+            for (nfds_t k = 0; k < n; k++) {
+                if (!(pfds[k].revents & POLLIN)) continue;
+                int dev = map[k];
+                struct input_event ev;
+                while (read(fds[dev], &ev, sizeof(ev)) == sizeof(ev)) {
+                    if (ev.type != EV_KEY || is_accdet[dev]) continue;
+                    int is_play = (ev.code == KEY_PLAYPAUSE || ev.code == KEY_PLAY || ev.code == 119);
+                    int is_menu = (ev.code == KEY_BACK || ev.code == KEY_MENU);
+                    if (is_play) {
+                        if (ev.value == 1 && !play_held) {
+                            play_held = 1;
+                            play_press_ms = hotkey_monotonic_ms();
+                        } else if (ev.value == 0) {
+                            play_held = 0;
+                        }
+                    } else if (is_menu) {
+                        if (ev.value == 1) menu_held = 1;
+                        else if (ev.value == 0) menu_held = 0;
+                    }
+
+                    /* MENU + Play/Pause -> Global Screenshot (when enabled in ConfigApp) */
+                    if (play_held && menu_held) {
+                        uint64_t now = hotkey_monotonic_ms();
+                        if (now - last_ss_ms >= 1000) {
+                            last_ss_ms = now;
+                            if (screenshot_enabled_from_config())
+                                capture_fb_screenshot();
+                        }
+                    }
+                }
+            }
+        }
+
+        /* 10-second continuous Play/Pause hold -> Hard Power Off regardless of software */
+        if (play_held && (hotkey_monotonic_ms() - play_press_ms >= 10000ULL)) {
+            write_sysfs("/sys/class/timed_output/vibrator/enable", "60\n");
+            write_sysfs("/sys/class/leds/lcd-backlight/brightness", "0\n");
+            sync();
+            reboot(RB_POWER_OFF);
+            while (1) sleep(1);
+        }
+    }
+}
+
+static void start_global_hotkey_monitor(void)
+{
+    pid_t pid = fork();
+    if (pid == 0) {
+        global_hotkey_monitor();
+        _exit(0);
+    }
+}
+
 static void start_diagnostic_monitor(void)
 {
     if (!logging_enabled_from_config())
@@ -651,6 +901,26 @@ static const char *get_sdcard_app_binary(void)
                     chmod("/mnt/sdcard/.rockbox/rockbox", 0755);
                     fclose(dp_fp);
                     return "/mnt/sdcard/.rockbox/rockbox";
+                }
+            } else if (strcmp(p, "meui") == 0) {
+                if (access("/mnt/sdcard/.meui/meui", F_OK) == 0) {
+                    chmod("/mnt/sdcard/.meui/meui", 0755);
+                    fclose(dp_fp);
+                    return "/mnt/sdcard/.meui/meui";
+                }
+            } else if (strcmp(p, "configapp") == 0) {
+                if (access("/mnt/sdcard/.system/configapp/configapp", F_OK) == 0) {
+                    chmod("/mnt/sdcard/.system/configapp/configapp", 0755);
+                    fclose(dp_fp);
+                    return "/mnt/sdcard/.system/configapp/configapp";
+                }
+            } else if (p[0] == '/') {
+                static char custom_dp_path[128];
+                snprintf(custom_dp_path, sizeof(custom_dp_path), "%s", p);
+                if (access(custom_dp_path, F_OK) == 0) {
+                    chmod(custom_dp_path, 0755);
+                    fclose(dp_fp);
+                    return custom_dp_path;
                 }
             }
         }
@@ -2142,82 +2412,64 @@ static void show_debug_info_screen(const char *saved_path, int saved_ok, int *ev
     close(fbfd);
 }
 
-static void run_bootloader_menu(void)
+static void run_fallback_text_menu(int event_fds[16])
 {
-    log_line("Entering Bootloader Menu...\n");
+    int fbfd = open("/dev/graphics/fb0", O_RDWR | O_CLOEXEC);
+    if (fbfd < 0)
+        fbfd = open("/dev/fb0", O_RDWR | O_CLOEXEC);
+    if (fbfd < 0)
+        return;
 
-    int event_fds[16];
-    for (int i = 0; i < 16; i++) {
-        char path[32];
-        snprintf(path, sizeof(path), "/dev/input/event%d", i);
-        event_fds[i] = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+    struct fb_fix_screeninfo finfo;
+    struct fb_var_screeninfo vinfo;
+    memset(&finfo, 0, sizeof(finfo));
+    memset(&vinfo, 0, sizeof(vinfo));
+    ioctl(fbfd, FBIOGET_FSCREENINFO, &finfo);
+    ioctl(fbfd, FBIOGET_VSCREENINFO, &vinfo);
+    ioctl(fbfd, FBIOBLANK, VESA_NO_BLANKING);
+
+    int w = vinfo.xres ? (int)vinfo.xres : 480;
+    int h = vinfo.yres ? (int)vinfo.yres : 360;
+    int bpp = vinfo.bits_per_pixel ? (int)vinfo.bits_per_pixel : 32;
+    int stride = finfo.line_length ? (int)finfo.line_length : (w * (bpp / 8));
+    size_t map_len = finfo.smem_len ? finfo.smem_len : (size_t)(stride * h);
+    uint8_t *fb = (uint8_t *)mmap(NULL, map_len, PROT_READ | PROT_WRITE, MAP_SHARED, fbfd, 0);
+    if (fb == MAP_FAILED || !fb) {
+        close(fbfd);
+        return;
     }
 
-    struct bootl_entry {
-        int id; /* 0=Rockbox, 1=MeUI, 2=Custom, 3=Android, 4=Shutdown, 5=USB, 6=Terminal, 7=Debug */
-        const char *screen;
-    } entries[8];
-    int num_entries = 0;
+    const char *opts[3] = { "USB", "Serial Console", "Shut Down" };
+    int sel = 0;
 
-    /* Pick 1: Rockbox (always present) */
-    entries[num_entries].id = 0;
-    entries[num_entries].screen = "bootl_pick1";
-    num_entries++;
-
-    /* Pick 2: MeUI (only if /.meui/meui or /mnt/sdcard/.meui/meui exists) */
-    if (access("/mnt/sdcard/.meui/meui", F_OK) == 0 || access("/.meui/meui", F_OK) == 0) {
-        entries[num_entries].id = 1;
-        entries[num_entries].screen = "bootl_pick2";
-        num_entries++;
-    }
-
-    /* Pick 3: User defined software (only if /.custom/launch or /mnt/sdcard/.custom/launch exists) */
-    if (access("/mnt/sdcard/.custom/launch", F_OK) == 0 || access("/.custom/launch", F_OK) == 0) {
-        entries[num_entries].id = 2;
-        entries[num_entries].screen = "bootl_pick3";
-        num_entries++;
-    }
-
-    /* Pick 4: Android (always present) */
-    entries[num_entries].id = 3;
-    entries[num_entries].screen = "bootl_pick4";
-    num_entries++;
-
-    /* Pick 5: Shut down (always present) */
-    entries[num_entries].id = 4;
-    entries[num_entries].screen = "bootl_pick5";
-    num_entries++;
-
-    /* Pick 6: USB Mass Storage (always present) */
-    entries[num_entries].id = 5;
-    entries[num_entries].screen = "bootl_pick6";
-    num_entries++;
-
-    /* Pick 7: Linux terminal (USB) (always present) */
-    entries[num_entries].id = 6;
-    entries[num_entries].screen = "bootl_pick7";
-    num_entries++;
-
-    /* Pick 8: Debug info log (always present) */
-    entries[num_entries].id = 7;
-    entries[num_entries].screen = "bootl_pick8";
-    num_entries++;
-
-    int selection = 0;
-    display_screen(entries[selection].screen);
-
-    /* Debounce wait: wait 200ms before accepting confirmation */
     usleep(200000);
-
-    /* Flush any pending press events before interactive loop */
-    for (int i = 0; i < 16; i++) {
-        if (event_fds[i] >= 0) {
-            struct input_event ev;
-            while (read(event_fds[i], &ev, sizeof(ev)) == sizeof(ev));
+    for (int k = 0; k < 16; k++) {
+        if (event_fds[k] >= 0) {
+            struct input_event fev;
+            while (read(event_fds[k], &fev, sizeof(fev)) == sizeof(fev));
         }
     }
 
     while (1) {
+        if (bpp == 32) {
+            for (int y = 0; y < h; y++) {
+                uint32_t *row = (uint32_t *)(fb + y * stride);
+                for (int x = 0; x < w; x++) row[x] = 0xFF10141C;
+            }
+        } else {
+            memset(fb, 0, map_len);
+        }
+
+        dbg_draw_text(fb, stride, w, h, bpp, 24, 24, "SD Card Not Present - Recovery Menu", 0xFF55CCFF);
+        for (int i = 0; i < 3; i++) {
+            char line[64];
+            snprintf(line, sizeof(line), "%s %s", (i == sel) ? ">" : " ", opts[i]);
+            dbg_draw_text(fb, stride, w, h, bpp, 32, 72 + i * 24, line,
+                          (i == sel) ? 0xFF55FF88 : 0xFFE6E6E6);
+        }
+        dbg_draw_text(fb, stride, w, h, bpp, 24, h - 24,
+                      "Wheel/L/R: Select   Center: Confirm", 0xFFAAAAAA);
+
         struct pollfd pfd[16];
         int map_idx[16];
         nfds_t n = 0;
@@ -2233,121 +2485,57 @@ static void run_bootloader_menu(void)
 
         if (poll(pfd, n, 100) > 0) {
             for (nfds_t i = 0; i < n; i++) {
-                if (!(pfd[i].revents & POLLIN))
-                    continue;
-
+                if (!(pfd[i].revents & POLLIN)) continue;
                 struct input_event ev;
                 while (read(event_fds[map_idx[i]], &ev, sizeof(ev)) == sizeof(ev)) {
-                    if (ev.type != EV_KEY || ev.value != 1)
-                        continue;
-
-                    /* Previous / Left / Wheel CCW */
+                    if (ev.type != EV_KEY || ev.value != 1) continue;
                     if (ev.code == 105 || ev.code == 165 || ev.code == 103) {
-                        selection = (selection + num_entries - 1) % num_entries;
-                        display_screen(entries[selection].screen);
-                    }
-                    /* Next / Right / Wheel CW */
-                    else if (ev.code == 106 || ev.code == 163 || ev.code == 108) {
-                        selection = (selection + 1) % num_entries;
-                        display_screen(entries[selection].screen);
-                    }
-                    /* Confirm: Center button */
-                    else if (ev.code == 232 || ev.code == 28 || ev.code == 96 ||
-                             ev.code == 352 || ev.code == 353 || ev.code == 314 ||
-                             ev.code == 315 || ev.code == 304) {
-
-                        int action_id = entries[selection].id;
-                        if (action_id == 0) {
-                            /* Pick 1: Rockbox */
-                            log_line("Bootloader Menu: Rockbox selected.\n");
-                            if (access("/mnt/sdcard/.rockbox/rockbox", F_OK) == 0) {
-                                strncpy(custom_app_override, "/mnt/sdcard/.rockbox/rockbox", sizeof(custom_app_override) - 1);
-                            } else {
-                                strncpy(custom_app_override, "/.rockbox/rockbox", sizeof(custom_app_override) - 1);
-                            }
-                            for (int k = 0; k < 16; k++) {
-                                if (event_fds[k] >= 0) close(event_fds[k]);
-                            }
-                            display_screen("boot");
-                            return;
-                        } else if (action_id == 1) {
-                            /* Pick 2: MeUI */
-                            log_line("Bootloader Menu: MeUI selected.\n");
-                            if (access("/mnt/sdcard/.meui/meui", F_OK) == 0) {
-                                strncpy(custom_app_override, "/mnt/sdcard/.meui/meui", sizeof(custom_app_override) - 1);
-                            } else {
-                                strncpy(custom_app_override, "/.meui/meui", sizeof(custom_app_override) - 1);
-                            }
-                            for (int k = 0; k < 16; k++) {
-                                if (event_fds[k] >= 0) close(event_fds[k]);
-                            }
-                            display_screen("boot");
-                            return;
-                        } else if (action_id == 2) {
-                            /* Pick 3: User defined software */
-                            log_line("Bootloader Menu: User defined software selected.\n");
-                            if (access("/mnt/sdcard/.custom/launch", F_OK) == 0) {
-                                strncpy(custom_app_override, "/mnt/sdcard/.custom/launch", sizeof(custom_app_override) - 1);
-                            } else {
-                                strncpy(custom_app_override, "/.custom/launch", sizeof(custom_app_override) - 1);
-                            }
-                            for (int k = 0; k < 16; k++) {
-                                if (event_fds[k] >= 0) close(event_fds[k]);
-                            }
-                            display_screen("boot");
-                            return;
-                        } else if (action_id == 3) {
-                            /* Pick 4: Android */
-                            log_line("Bootloader Menu: Android selected.\n");
-                            for (int k = 0; k < 16; k++) {
-                                if (event_fds[k] >= 0) close(event_fds[k]);
-                            }
-                            boot_into_android();
-                        } else if (action_id == 4) {
-                            /* Pick 5: Shut down */
-                            log_line("Bootloader Menu: Shut down selected.\n");
-                            for (int k = 0; k < 16; k++) {
-                                if (event_fds[k] >= 0) close(event_fds[k]);
-                            }
-                            sync();
-                            reboot(RB_POWER_OFF);
-                            while (1) sleep(1);
-                        } else if (action_id == 5) {
-                            /* Pick 6: USB Mass Storage (standard non-iPod mode, no spoofing) */
-                            log_line("Bootloader Menu: USB mode selected.\n");
+                        sel = (sel + 2) % 3;
+                    } else if (ev.code == 106 || ev.code == 163 || ev.code == 108) {
+                        sel = (sel + 1) % 3;
+                    } else if (ev.code == 232 || ev.code == 28 || ev.code == 96 ||
+                               ev.code == 352 || ev.code == 353 || ev.code == 314 ||
+                               ev.code == 315 || ev.code == 304) {
+                        if (sel == 0) {
+                            /* USB */
                             setup_usb_gadget(active_sd_dev[0] ? active_sd_dev : NULL,
                                              active_ext_dev[0] ? active_ext_dev : NULL, 0);
-                            display_screen("bootl_usb");
-
-                            /* Flush input events and debounce */
+                            if (bpp == 32) {
+                                for (int y = 0; y < h; y++) {
+                                    uint32_t *row = (uint32_t *)(fb + y * stride);
+                                    for (int x = 0; x < w; x++) row[x] = 0xFF10141C;
+                                }
+                            } else {
+                                memset(fb, 0, map_len);
+                            }
+                            dbg_draw_text(fb, stride, w, h, bpp, 24, 60, "USB Mass Storage Active", 0xFF55FF88);
+                            dbg_draw_text(fb, stride, w, h, bpp, 24, 90, "Press any button to return", 0xFFE6E6E6);
                             usleep(300000);
                             for (int k = 0; k < 16; k++) {
                                 if (event_fds[k] >= 0) {
-                                    struct input_event flush_ev;
-                                    while (read(event_fds[k], &flush_ev, sizeof(flush_ev)) == sizeof(flush_ev));
+                                    struct input_event fev;
+                                    while (read(event_fds[k], &fev, sizeof(fev)) == sizeof(fev));
                                 }
                             }
-
-                            /* Wait for any button press to exit USB mode */
                             int exit_usb = 0;
                             while (!exit_usb) {
-                                struct pollfd usb_pfd[16];
+                                struct pollfd upfd[16];
                                 nfds_t un = 0;
-                                int usb_map[16];
+                                int umap[16];
                                 for (int k = 0; k < 16; k++) {
                                     if (event_fds[k] >= 0) {
-                                        usb_pfd[un].fd = event_fds[k];
-                                        usb_pfd[un].events = POLLIN;
-                                        usb_pfd[un].revents = 0;
-                                        usb_map[un] = k;
+                                        upfd[un].fd = event_fds[k];
+                                        upfd[un].events = POLLIN;
+                                        upfd[un].revents = 0;
+                                        umap[un] = k;
                                         un++;
                                     }
                                 }
-                                if (poll(usb_pfd, un, 100) > 0) {
+                                if (poll(upfd, un, 100) > 0) {
                                     for (nfds_t k = 0; k < un; k++) {
-                                        if (usb_pfd[k].revents & POLLIN) {
+                                        if (upfd[k].revents & POLLIN) {
                                             struct input_event uev;
-                                            while (read(event_fds[usb_map[k]], &uev, sizeof(uev)) == sizeof(uev)) {
+                                            while (read(event_fds[umap[k]], &uev, sizeof(uev)) == sizeof(uev)) {
                                                 if (uev.type == EV_KEY && uev.value == 1) {
                                                     exit_usb = 1;
                                                     break;
@@ -2358,114 +2546,133 @@ static void run_bootloader_menu(void)
                                     }
                                 }
                             }
-
-                            /* Disable USB gadget */
-                            log_line("Exiting USB mode, returning to Bootloader Menu...\n");
                             write_sysfs("/sys/class/android_usb/android0/f_mass_storage/lun0/file", "\n");
                             write_sysfs("/sys/class/android_usb/android0/f_mass_storage/lun/file", "\n");
                             write_sysfs("/sys/class/android_usb/android0/f_mass_storage/lun1/file", "\n");
                             write_sysfs("/sys/class/android_usb/android0/f_mass_storage/bicr", "0\n");
                             write_sysfs("/sys/class/android_usb/android0/enable", "0\n");
                             sync();
-                            write_sysfs("/proc/sys/vm/drop_caches", "3\n");
-
-                            /* Debounce before returning to menu */
-                            usleep(200000);
-                            for (int k = 0; k < 16; k++) {
-                                if (event_fds[k] >= 0) {
-                                    struct input_event flush_ev;
-                                    while (read(event_fds[k], &flush_ev, sizeof(flush_ev)) == sizeof(flush_ev));
-                                }
-                            }
-
-                            display_screen(entries[selection].screen);
-                        } else if (action_id == 6) {
-                            /* Pick 7: Linux terminal (USB) -> Launch multi-tab terminal shells on /dev/ttyGS0 and /dev/ttyGS1.
-                             * Disconnect ONLY when the user turns off the device or types 'exit'/'menu'.
-                             * Button presses on the device will NOT disconnect the terminal. */
-                            log_line("Bootloader Menu: Linux terminal (USB) mode selected (Dual ACM tabs).\n");
-
+                        } else if (sel == 1) {
+                            /* Serial Console */
                             unlink("/tmp/exit_terminal");
-
                             write_sysfs("/sys/class/android_usb/android0/enable", "0\n");
                             write_sysfs("/sys/class/android_usb/android0/idVendor", "0e8d\n");
                             write_sysfs("/sys/class/android_usb/android0/idProduct", "2007\n");
                             write_sysfs("/sys/class/android_usb/android0/f_acm/instances", "2\n");
                             write_sysfs("/sys/class/android_usb/android0/functions", "acm\n");
-                            /* Use bDeviceClass 0 (Interface-defined) so Windows Composite Device Enumerator
-                             * (usbccgp.sys) creates independent COM ports for each ACM interface (e.g. COM5 & COM6). */
                             write_sysfs("/sys/class/android_usb/android0/bDeviceClass", "0\n");
                             write_sysfs("/sys/class/android_usb/android0/bDeviceSubClass", "0\n");
                             write_sysfs("/sys/class/android_usb/android0/bDeviceProtocol", "0\n");
                             write_sysfs("/sys/class/android_usb/android0/enable", "1\n");
 
-                            /* Spawn Tab 2 worker in background (/dev/ttyGS1) */
+                            if (bpp == 32) {
+                                for (int y = 0; y < h; y++) {
+                                    uint32_t *row = (uint32_t *)(fb + y * stride);
+                                    for (int x = 0; x < w; x++) row[x] = 0xFF10141C;
+                                }
+                            } else {
+                                memset(fb, 0, map_len);
+                            }
+                            dbg_draw_text(fb, stride, w, h, bpp, 24, 60, "Serial Console Active (ttyGS0 / ttyGS1)", 0xFF55FF88);
+                            dbg_draw_text(fb, stride, w, h, bpp, 24, 90, "Type 'exit' or 'menu' in shell to return", 0xFFE6E6E6);
+
                             pid_t term_pid2 = fork();
                             if (term_pid2 == 0) {
                                 setpgid(0, 0);
                                 run_usb_serial_shell("ttyGS1", 2);
                                 _exit(0);
                             }
-
-                            /* Spawn Tab 1 worker (/dev/ttyGS0) */
                             pid_t term_pid1 = fork();
                             if (term_pid1 == 0) {
                                 setpgid(0, 0);
                                 run_usb_serial_shell("ttyGS0", 1);
                                 _exit(0);
                             }
-
-                            display_screen("bootl_terminal");
-
-                            /* Wait for user to exit via terminal shell ('exit' command on primary tab or 'menu') */
-                            int status = 0;
-                            waitpid(term_pid1, &status, 0);
-
+                            int st = 0;
+                            waitpid(term_pid1, &st, 0);
                             int ef = open("/tmp/exit_terminal", O_WRONLY | O_CREAT | O_TRUNC, 0666);
                             if (ef >= 0) close(ef);
-
                             if (term_pid2 > 0) {
                                 kill(term_pid2, SIGTERM);
                                 waitpid(term_pid2, NULL, WNOHANG);
                             }
                             unlink("/tmp/exit_terminal");
-
-                            /* Disable USB terminal */
-                            log_line("Terminal shell exited. Disabling USB terminal and returning to Bootloader Menu...\n");
                             write_sysfs("/sys/class/android_usb/android0/enable", "0\n");
-                            write_sysfs("/sys/class/android_usb/android0/bDeviceClass", "0\n");
-
-                            /* Debounce before returning to menu */
-                            usleep(200000);
-                            for (int k = 0; k < 16; k++) {
-                                if (event_fds[k] >= 0) {
-                                    struct input_event flush_ev;
-                                    while (read(event_fds[k], &flush_ev, sizeof(flush_ev)) == sizeof(flush_ev));
-                                }
-                            }
-
-                            display_screen(entries[selection].screen);
-                        } else if (action_id == 7) {
-                            /* Pick 8: Write compact debug info log and display debug info on screen */
-                            log_line("Bootloader Menu: Debug info selected.\n");
-                            char saved_path[128];
-                            int saved_ok = write_compact_debug_info(saved_path, sizeof(saved_path));
-                            show_debug_info_screen(saved_path, saved_ok, event_fds);
-
-                            usleep(200000);
-                            for (int k = 0; k < 16; k++) {
-                                if (event_fds[k] >= 0) {
-                                    struct input_event flush_ev;
-                                    while (read(event_fds[k], &flush_ev, sizeof(flush_ev)) == sizeof(flush_ev));
-                                }
-                            }
-                            current_displayed_screen[0] = '\0';
-                            display_screen(entries[selection].screen);
+                        } else if (sel == 2) {
+                            /* Shut Down */
+                            munmap(fb, map_len);
+                            close(fbfd);
+                            sync();
+                            reboot(RB_POWER_OFF);
+                            while (1) sleep(1);
                         }
                     }
                 }
             }
         }
+    }
+}
+
+static void run_bootloader_menu(void)
+{
+    log_line("Entering Bootloader Menu...\n");
+
+    int event_fds[16];
+    for (int i = 0; i < 16; i++) {
+        char path[32];
+        snprintf(path, sizeof(path), "/dev/input/event%d", i);
+        event_fds[i] = open(path, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+    }
+
+    const char *cfg_bin = NULL;
+    if (access("/mnt/sdcard/.system/configapp/configapp", X_OK) == 0)
+        cfg_bin = "/mnt/sdcard/.system/configapp/configapp";
+    else if (access("/.system/configapp/configapp", X_OK) == 0)
+        cfg_bin = "/.system/configapp/configapp";
+
+    if (cfg_bin) {
+        for (int k = 0; k < 16; k++) {
+            if (event_fds[k] >= 0) {
+                close(event_fds[k]);
+                event_fds[k] = -1;
+            }
+        }
+        unlink("/tmp/configapp_launch");
+        pid_t cpid = fork();
+        if (cpid == 0) {
+            setenv("LD_LIBRARY_PATH", "/mnt/sdcard/.system/lib:/.system/lib:/lib", 1);
+            char *const argv[] = { (char *)cfg_bin, "--bootmenu", NULL };
+            execv(cfg_bin, argv);
+            _exit(127);
+        }
+        if (cpid > 0) {
+            int st = 0;
+            waitpid(cpid, &st, 0);
+        }
+        FILE *lf = fopen("/tmp/configapp_launch", "r");
+        if (lf) {
+            char target[256] = {0};
+            if (fgets(target, sizeof(target), lf)) {
+                size_t len = strlen(target);
+                while (len > 0 && (target[len - 1] == '\n' || target[len - 1] == '\r'))
+                    target[--len] = '\0';
+            }
+            fclose(lf);
+            unlink("/tmp/configapp_launch");
+            if (strcmp(target, "__ANDROID__") == 0) {
+                boot_into_android();
+            } else if (target[0] != '\0') {
+                strncpy(custom_app_override, target, sizeof(custom_app_override) - 1);
+                custom_app_override[sizeof(custom_app_override) - 1] = '\0';
+            }
+        }
+        display_screen("boot");
+        return;
+    }
+
+    run_fallback_text_menu(event_fds);
+    for (int k = 0; k < 16; k++) {
+        if (event_fds[k] >= 0) close(event_fds[k]);
     }
 }
 
@@ -3180,6 +3387,9 @@ int main(int argc, char *argv[])
         sync();
         reboot_to_android();
     }
+
+    /* Start global hotkey daemon (10s Play/Pause hard shutdown + MENU+Play screenshot) */
+    start_global_hotkey_monitor();
 
     /* Bootloader Menu check:
      * Holding MENU while booting will always show this menu, regardless of disablement.

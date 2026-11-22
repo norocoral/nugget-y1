@@ -11,6 +11,10 @@
 #include <fcntl.h>
 #include <dirent.h>
 #include <sys/stat.h>
+#include <sys/time.h>
+#include <sys/ioctl.h>
+#include <time.h>
+#include <linux/rtc.h>
 
 #include "liby1.h"
 
@@ -30,21 +34,6 @@ static uint64_t fnv1a_update(uint64_t h, const void *data, size_t len)
         h *= 1099511628211ULL;
     }
     return h;
-}
-
-static uint64_t hash_single_file(const char *path, uint64_t h)
-{
-    struct stat st;
-    if (lstat(path, &st) != 0)
-        return h;
-
-    h = fnv1a_update(h, path, strlen(path) + 1);
-    uint64_t meta[3] = {
-        (uint64_t)st.st_mode,
-        (uint64_t)st.st_size,
-        (uint64_t)st.st_mtime
-    };
-    return fnv1a_update(h, meta, sizeof(meta));
 }
 
 static uint64_t hash_dir_tree(const char *path, uint64_t h)
@@ -85,9 +74,6 @@ static uint64_t compute_sys_tree_hash(void)
 {
     uint64_t h = 14695981039346656037ULL;
     h = hash_dir_tree("/mnt/sdcard/.system", h);
-    h = hash_single_file("/mnt/sdcard/.rockbox/rockbox", h);
-    h = hash_single_file("/mnt/sdcard/.meui/meui", h);
-    h = hash_single_file("/mnt/sdcard/.custom/launch", h);
     return h;
 }
 
@@ -99,7 +85,7 @@ static void check_sys_tree_modified_and_reboot(void)
     g_pre_usb_sys_valid = false;
     uint64_t post_hash = compute_sys_tree_hash();
     if (post_hash != g_pre_usb_sys_hash) {
-        y1_log("[liby1-usb] .system or app binary modified over USB; rebooting...\n");
+        y1_log("[liby1-usb] .system modified over USB; rebooting...\n");
         sync();
         y1_sys_reboot();
     }
@@ -469,6 +455,78 @@ bool y1_usb_attach_mass_storage(void)
     return true;
 }
 
+bool y1_rtc_set_time(time_t t)
+{
+    if (t <= 0)
+        return false;
+
+    struct timeval tv = { .tv_sec = t, .tv_usec = 0 };
+    bool ok = (settimeofday(&tv, NULL) == 0);
+
+    struct tm tm_utc;
+    if (gmtime_r(&t, &tm_utc)) {
+        int rfd = open("/dev/rtc0", O_WRONLY | O_CLOEXEC);
+        if (rfd < 0)
+            rfd = open("/dev/rtc", O_WRONLY | O_CLOEXEC);
+        if (rfd >= 0) {
+            struct rtc_time rtm;
+            memset(&rtm, 0, sizeof(rtm));
+            rtm.tm_sec  = tm_utc.tm_sec;
+            rtm.tm_min  = tm_utc.tm_min;
+            rtm.tm_hour = tm_utc.tm_hour;
+            rtm.tm_mday = tm_utc.tm_mday;
+            rtm.tm_mon  = tm_utc.tm_mon;
+            rtm.tm_year = tm_utc.tm_year;
+            rtm.tm_wday = tm_utc.tm_wday;
+            rtm.tm_yday = tm_utc.tm_yday;
+            if (ioctl(rfd, RTC_SET_TIME, &rtm) == 0)
+                ok = true;
+            close(rfd);
+        }
+    }
+    return ok;
+}
+
+bool y1_usb_sync_clock_from_sdcard(void)
+{
+    time_t now = time(NULL);
+    time_t best_mtime = 0;
+
+    static const char * const probe_paths[] = {
+        "/mnt/sdcard",
+        "/mnt/sdcard/iPod_Control/iTunes/iTunesDB",
+        "/mnt/sdcard/iPod_Control/iTunes",
+        "/mnt/sdcard/.rockbox",
+        "/mnt/sdcard/Playlists",
+    };
+
+    for (size_t i = 0; i < sizeof(probe_paths) / sizeof(probe_paths[0]); i++) {
+        struct stat st;
+        if (stat(probe_paths[i], &st) == 0 && st.st_mtime > best_mtime)
+            best_mtime = st.st_mtime;
+    }
+
+    DIR *d = opendir("/mnt/sdcard");
+    if (d) {
+        struct dirent *ent;
+        char full[300];
+        while ((ent = readdir(d)) != NULL) {
+            if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0)
+                continue;
+            snprintf(full, sizeof(full), "/mnt/sdcard/%s", ent->d_name);
+            struct stat st;
+            if (stat(full, &st) == 0 && st.st_mtime > best_mtime)
+                best_mtime = st.st_mtime;
+        }
+        closedir(d);
+    }
+
+    if (best_mtime >= 1700000000L && best_mtime > now)
+        return y1_rtc_set_time(best_mtime);
+
+    return false;
+}
+
 void y1_usb_detach_mass_storage(void)
 {
     if (y1_usb_is_serial_active())
@@ -482,6 +540,7 @@ void y1_usb_detach_mass_storage(void)
     write_usb_line("/proc/sys/vm/drop_caches", "3");
     y1_usb_tune_performance(false);
     storage_attached = false;
+    y1_usb_sync_clock_from_sdcard();
     check_sys_tree_modified_and_reboot();
 }
 
@@ -505,6 +564,7 @@ bool y1_usb_check_host_ejected(void)
     if (read_ok && file[0] == '\0') {
         y1_usb_tune_performance(false);
         storage_attached = false;
+        y1_usb_sync_clock_from_sdcard();
         check_sys_tree_modified_and_reboot();
         return true;
     }

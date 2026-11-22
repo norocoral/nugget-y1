@@ -1,0 +1,14 @@
+prefix=/mnt/c/Users/dakirb/Documents/rom/!nugget/main/meui/third_party/ffmpeg_arm_static
+exec_prefix=${prefix}
+libdir=/mnt/c/Users/dakirb/Documents/rom/!nugget/main/meui/third_party/ffmpeg_arm_static/lib
+includedir=/mnt/c/Users/dakirb/Documents/rom/!nugget/main/meui/third_party/ffmpeg_arm_static/include
+
+Name: libswresample
+Description: FFmpeg audio resampling library
+Version: 5.3.100
+Requires: libavutil >= 59.39.100
+Requires.private: 
+Conflicts:
+Libs: -L${libdir}  -lswresample -lm -latomic
+Libs.private: 
+Cflags: -I${includedir}

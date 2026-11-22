@@ -18,13 +18,13 @@ Nugget for Y1은 Innioasis Y1 디지털 오디오 플레이어를 위한 오픈 
 | 오디오 출력 경로 | 안드로이드 AudioFlinger -> 안드로이드 오디오 HAL -> `/dev/eac` | 안드로이드 AudioFlinger (`AudioTrack`/OpenSL) -> 안드로이드 오디오 HAL -> `/dev/eac` | `pcm-eac.c`에서 `/dev/eac`로 직접 출력 (AudioFlinger 미경유) |
 | 샘플 레이트 처리 | AudioFlinger에서 리샘플링/믹싱 | AudioFlinger에서 리샘플링/믹싱 | 44.1 kHz 및 48 kHz 하드웨어 클록 직접 전환 |
 | 볼륨 / 게인 제어 | 안드로이드 오디오 스트림 단계 + MT6323 아날로그 PGA | Rockbox 소프트웨어 볼륨 + 안드로이드 미디어 스트림 | Rockbox 로그 스케일 볼륨을 PCM 감쇠 + MT6323 아날로그 PGA(`0x70a`)에 매핑 |
-| 블루투스 오디오 | 안드로이드 블루투스 스택 (Bluedroid) | 안드로이드 블루투스 스택 (Bluedroid) | MediaTek `stp_uart_launcher` + `mtk_wmt_bt` + BlueZ/A2DP (SBC) |
+| 블루투스 오디오 | 안드로이드 블루투스 스택 (Bluedroid) | 안드로이드 블루투스 스택 (Bluedroid) | `liby1` 직접 MT6572 CONNSYS (`/dev/stpwmt`, `/dev/stpbt`) + 커스텀 A2DP (SBC, SBC-XQ, AAC) 및 수신기 모드 |
 | 전원 / 절전 | 안드로이드 `earlysuspend` + `wakelock` (`mem` 절전) | 안드로이드 `earlysuspend` + `wakelock` (`mem` 절전) | 직접 `wakelock` / `earlysuspend` + `/sys/power/state` (`mem` 절전) + CPU 핫플러그/거버너 제어 |
 | 디스플레이 해상도 | 480x360 | APK 빌드에 따라 다름 (일반적으로 480x360) | 480x360 네이티브 및 런타임 320x240 스케일링 모드 |
 | 키 잠금 (HOLD) | 없음 | Rockbox 키 잠금 | Rockbox 키 잠금 (MENU 더블 클릭 토글, 홀드 라이트, 잠금 백라이트 규칙, 예외 키 설정) |
 | USB 모드 | MTP / 안드로이드 USB 대용량 저장소 | MTP / 안드로이드 USB 대용량 저장소 (OS 경유) | USB 대용량 저장소 및 선택적 Apple iPod 5.5세대 에뮬레이션 (`ipod_vpd.ko`, 기본 비활성화) |
 | iTunes 연동 | 없음 | 없음 | 선택적 `iTunesDB` / `ArtworkDB` / `.ithmb` TagCache 및 재생목록 파싱, `Play Counts` / `OTGPlaylistInfo` 기록 |
-| 듀얼 부팅 | 순정 OS 단일 부팅 | 안드로이드 앱 | Rockbox, MeUI, 사용자 바이너리 및 순정 안드로이드 전환을 지원하는 부트로더 메뉴 |
+| 듀얼 부팅 | 순정 OS 단일 부팅 | 안드로이드 앱 | 부팅 시 **ConfigApp** (`--bootmenu`) 실행 (숨김 폴더 앱 자동 탐색, 안드로이드 전환, USB, 시리얼 터미널, Wi-Fi/BT, SD 미인식 시 텍스트 GUI 지원) |
 
 ---
 
@@ -79,36 +79,34 @@ sudo apt install -y build-essential gcc-arm-linux-gnueabihf python3 python3-pip 
 
 빌드 스크립트 실행 동작:
 1. `!stock_rom/boot.img`에서 순정 커널을 추출합니다(없는 경우).
-2. ARM 하드 플로트 GCC를 사용하여 커스텀 PID 1 C `/init` 및 `unmute_eac` 유틸리티를 컴파일합니다.
-3. 스플래시 화면 PNG 이미지를 32비트 원시 프레임버퍼 파일로 변환합니다.
+2. ARM 하드 플로트 GCC를 사용하여 커스텀 PID 1 C `/init`, `unmute_eac`, `liby1`, `configapp`을 컴파일합니다.
+3. `splash/bootorg.png`를 Wanted Sans 폰트 및 배경 대비 자동 흑/백 텍스트가 적용된 32비트 원시 프레임버퍼 파일로 변환합니다.
 4. Innioasis Y1용 호스티드 록박스를 컴파일합니다(`build_y1/`).
-5. `.rockbox` SD 카드 리소스를 `rockbox_sdcard.zip`으로 패키징합니다.
-6. 최소 구성의 initramfs 램디스크를 빌드하고 MediaTek 헤더가 포함된 플래시용 `boot_rockbox.img`를 생성합니다.
+5. `.rockbox` 및 `.system` SD 카드 리소스(`configapp`, `bt_blobs/`, `make_dist.sh`/scatter용 `logo.bin` 포함)를 `rockbox_sdcard.zip`으로 패키징합니다.
+6. 최소 구성의 initramfs 램디스크를 빌드하고 MediaTek 헤더가 포함된 플래시용 `boot.img` / `boot_nugget.img`를 생성합니다.
 
 *참고: 오픈 소스 라이선스 규정을 준수하기 위해 MediaTek 독점 바이너리(`bt_blobs/`, `stock_unpacked/`, `logo.bin`)는 Git 추적에서 제외되어 있습니다.*
 
 ---
 
-### 듀얼 부팅 서브시스템 및 부트로더 메뉴
+### 듀얼 부팅 서브시스템 및 ConfigApp 부팅 메뉴
 
 내부 eMMC의 안드로이드 파티션(`SYSTEM`, `DATA`, `CACHE`)을 변경하지 않고 유지하므로 안드로이드와 듀얼 부팅이 가능합니다:
 
-- **부트로더 메뉴:**
-  - Rockbox 실행 전 부팅 초기 단계에서 실행됩니다.
-  - 지원 항목:
-    - **Pick 1: Rockbox** — MicroSD 카드에서 Rockbox를 부팅합니다.
-    - **Pick 2: MeUI** — `.meui/meui`가 존재할 때 MeUI를 실행합니다.
-    - **Pick 3: User Software** — `.custom/launch`가 존재할 때 사용자 바이너리를 실행합니다.
-    - **Pick 4: Android** — BCB 플래그를 초기화하고 순정 램디스크를 압축 해제한 뒤 `SYSTEM`/`DATA`/`CACHE`를 마운트하여 안드로이드 `init`을 PID 1로 실행합니다.
-    - **Pick 5: Shut down** — 기기 전원을 끕니다.
-    - **Pick 6: USB Mass Storage** — 부트로더에서 USB 대용량 저장소 모드를 활성화합니다. 아무 버튼이나 누르면 종료되고 메뉴로 복귀합니다.
-    - **Pick 7: Linux terminal (USB)** — `/dev/ttyGS0` 및 `/dev/ttyGS1`에서 USB 시리얼 루트 셸을 시작합니다.
-    - **Pick 8: Debug Info** — MicroSD 카드 루트에 간략한 진단 로그(`debuginfoYYYYMMDD_HHMMSS.txt`)를 생성합니다.
-  - **조작법:** 클릭 휠 또는 **좌/우 버튼**으로 항목을 선택하고 **센터 버튼** 또는 **재생 버튼**으로 확정합니다.
-  - **하드웨어 강제 진입:** 부팅 중 **MENU** 버튼을 누르고 있으면 설정과 무관하게 부트로더 메뉴가 표시됩니다.
-  - **설정 옵션:** `설정 -> Nugget -> 부트로더 메뉴` (`예` / `아니오`).
-- **Rockbox에서 안드로이드로 재부팅:**
-  - `설정 -> Nugget -> 안드로이드로 재부팅`을 선택하면 버퍼를 플러시하고 순정 안드로이드로 전환합니다.
+- **ConfigApp (`--bootmenu` 및 Rockbox `메인 메뉴 -> 시스템 -> 시스템 설정`):**
+  - 기존 Bootpick 메뉴를 대체하는 라이트 테마 네이티브 C UI(`/.system/configapp/configapp`, 한국어/영어 전환, 12시간제 시계)입니다.
+  - **지원 페이지:**
+    - **실행(Launch)** — SD 카드의 숨김 폴더(폴더명에 `.` 포함 및 내부에 실행 파일이 있는 앱) 자동 탐색 및 순정 안드로이드 전환.
+    - **시스템 상태**, **화면 및 진동**, **CPU 및 전력**, **날짜 및 시간**(12시간제 시계 및 RTC).
+    - **블루투스** (`y1_bt_*`) 및 **Wi-Fi** (`y1_wifi_*`, `wlan_mt6582.ko` / `mtk_wmt_wifi.ko` / `/dev/wmtWifi` 기반).
+    - **USB 및 저장소** (USB 대용량 저장소, iPod 5.5세대 모드, 성능 튜닝).
+    - **시리얼 터미널** (`/dev/ttyGS0` 및 `/dev/ttyGS1` 듀얼 USB ACM 루트 셸).
+    - **디버그 정보** (ConfigApp UI 내 실시간 하드웨어 정보 표시 및 `debuginfo*.txt` 저장).
+    - **시스템 및 전원** (언어 전환, 디버그 로그) 및 **종료 / 전원 끄기** (앱 종료, 재부팅, 전원 끄기).
+  - **SD 카드 미인식 폴백:** 부팅 시 MicroSD 카드가 없으면 PID 1 `/init`이 3가지 항목(**USB**, **Serial Console**, **Shut Down**)의 기본 텍스트 GUI를 표시합니다.
+  - **하드웨어 강제 진입:** 부팅 중 **MENU** 버튼을 누르고 있으면 설정과 무관하게 ConfigApp(`--bootmenu`)이 표시됩니다.
+- **Rockbox 화면 및 절전 설정:**
+  - `절전 (백라이트 꺼짐 후)` (`HAVE_LCD_SLEEP_SETTING`) 및 `절전 백라이트 꺼짐 밝기`, 잠금 화면 백라이트 완전 끄기 기능을 지원합니다.
 
 ---
 

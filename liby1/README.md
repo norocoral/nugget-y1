@@ -17,8 +17,9 @@ The Y1 bootloader features dynamic multi-experience auto-discovery directly from
 
 | Location | Purpose |
 | :--- | :--- |
-| `/mnt/sdcard/.meui/meui` | **Pick 2 in Bootloader Carousel:** MeUI frontend (automatically discovered) |
-| `/mnt/sdcard/.custom/launch` | **Pick 3 in Bootloader Carousel:** User defined software (automatically discovered) |
+| `/mnt/sdcard/.system/configapp/configapp` | **ConfigApp:** Pre-boot & `Main Menu -> System -> System Settings` UI (Launch, BT/Wi-Fi, USB, Serial, Debug) |
+| `/mnt/sdcard/.meui/meui` | **Launch in ConfigApp:** MeUI frontend (auto-discovered via hidden-folder scan) |
+| `/mnt/sdcard/.custom/launch` | **Launch in ConfigApp:** User-defined software (any hidden `.folder` with an executable) |
 | `/mnt/sdcard/.system/app` | Standalone auto-boot application (runs at power-on without menu) |
 | `/mnt/sdcard/.system/lib/liby1.a` | Static `liby1` hardware abstraction archive for offline linking |
 | `/mnt/sdcard/.system/lib/liby1.so` | Shared dynamic hardware library |
@@ -66,6 +67,11 @@ The Y1 bootloader features dynamic multi-experience auto-discovery directly from
    - `y1_ipod_native_playlist_count()`, `y1_ipod_native_playlist_name()`, `y1_ipod_native_playlist_track_count()`, `y1_ipod_native_playlist_track_path()` (reads `iTunesDB` playlists & `SLst` smart playlists directly from memory)
    - `y1_ipod_native_record_play()`, `y1_ipod_native_record_rating()`, `y1_ipod_native_record_favorite()` (writes live `/iPod_Control/iTunes/Play Counts` `mhdp` and `OTGPlaylistInfo` `mhpo`)
    - Standalone CLI utility: `/bin/ipod_sync init`
+9. **Bluetooth A2DP & Receiver Mode (`y1_bt.c`)**
+   - `y1_bt_init()`, `y1_bt_set_enabled()`, `y1_bt_start_scan()`, `y1_bt_connect_device()`, `y1_bt_disconnect()`, `y1_bt_forget_device()`
+   - `y1_bt_set_active_device_codec()` (`SBC`, `SBC XQ`, `AAC`), `y1_bt_set_receiver_mode()`
+10. **Wi-Fi (`y1_wifi.c`)**
+   - `y1_wifi_init()`, `y1_wifi_set_enabled()`, `y1_wifi_start_scan()`, `y1_wifi_get_networks()`, `y1_wifi_connect()`, `y1_wifi_disconnect()`, `y1_wifi_forget()` (used by ConfigApp; loads `wlan_mt6582.ko` / `mtk_wmt_wifi.ko` and `WIFI_RAM_CODE_MT6582`)
 
 ---
 
@@ -81,8 +87,8 @@ arm-linux-gnueabihf-gcc -O2 -Ihosted_linux_port/liby1/include \
     my_app.c hosted_linux_port/liby1/build/liby1.a -o launch -lpthread -lm -lrt
 ```
 
-### 2. Live Interactive Debugging Over USB (Pick 7)
-Hold **MENU** at boot and select **Pick 7: Linux terminal (USB)**. Connect the Y1 to your PC via USB and connect with a serial terminal (`115200 8N1` on `/dev/ttyACM0` or `COMx`) for a full BusyBox root shell with live debugging utilities (`ps`, `top`, `dmesg`, `kill`).
+### 2. Live Interactive Debugging Over USB (ConfigApp Serial Terminal)
+Hold **MENU** at boot (or open **System Settings** in Rockbox) and open **Serial Terminal** -> enable **Serial Console** (or select **Serial Console** in the SD-missing Text GUI). Connect the Y1 to your PC via USB and open a serial terminal (`115200 8N1` on `/dev/ttyACM0` or `COMx`) for a full BusyBox root shell with live debugging utilities (`ps`, `top`, `dmesg`, `kill`).
 
 ### 3. Fail-Safe Watchdog
 If your software deadlocks during development, hold **Play/Pause for 10 seconds** to trigger a hardware shutdown at any time.

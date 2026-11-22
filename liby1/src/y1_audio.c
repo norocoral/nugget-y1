@@ -62,8 +62,8 @@ static int current_hp_idx_r = -1;
 static int saved_hp_idx_l = 7;
 static int saved_hp_idx_r = 7;
 static bool dma_is_running = false;
-static bool deep_idle_enabled = true;
-static bool cpu_powerdown_enabled = true;
+static bool deep_idle_enabled = false;
+static bool cpu_powerdown_enabled = false;
 static int wakelock_fd = -1;
 
 static inline int set_afereg(int fd, uint32_t offset, uint32_t val, uint32_t mask)
@@ -275,8 +275,8 @@ int y1_audio_open(unsigned long sample_rate)
     ioctl(eac_fd, AUDDRV_FREE_DL1_BUF, 0);
     ioctl(eac_fd, FREE_MEMIF_BUF, 0);
 
-    int ret_alloc = ioctl(eac_fd, AUDDRV_ALLOCATE_DL1_BUF, 65536);
-    y1_logf("[liby1-audio] AUDDRV_ALLOCATE_DL1_BUF(65536) returned %d (errno=%d %s)\n",
+    int ret_alloc = ioctl(eac_fd, AUDDRV_ALLOCATE_DL1_BUF, 32768);
+    y1_logf("[liby1-audio] AUDDRV_ALLOCATE_DL1_BUF(32768) returned %d (errno=%d %s)\n",
             ret_alloc, errno, ret_alloc < 0 ? strerror(errno) : "OK");
 
     int ret_fp = ioctl(eac_fd, SET_MEMIF_FP, 0);
@@ -327,9 +327,9 @@ int y1_audio_open(unsigned long sample_rate)
     usleep(12000); /* 12ms depop settling time */
     set_anareg(eac_fd, 0x70c, 0xf5ba, 0xffff);
 
-    /* 7. Prefill DMA ring buffer with silence before enabling output */
+    /* 7. Prefill DMA ring buffer with brief silence before enabling output */
     {
-        static const uint8_t zero_buf[4096] = { 0 };
+        static const uint8_t zero_buf[1024] = { 0 };
         (void)write(eac_fd, zero_buf, sizeof(zero_buf));
     }
 
@@ -433,7 +433,7 @@ bool y1_audio_set_sample_rate(unsigned long sampr)
     ioctl(eac_fd, FREE_MEMIF_FP, 0);
     ioctl(eac_fd, SET_MEMIF_FP, 0);
     {
-        static const uint8_t zero_buf[4096] = { 0 };
+        static const uint8_t zero_buf[1024] = { 0 };
         (void)write(eac_fd, zero_buf, sizeof(zero_buf));
     }
 

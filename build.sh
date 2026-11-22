@@ -16,6 +16,9 @@ BUILD_ROOTFS=1
 BUILD_BOOTIMG=1
 BUILD_VIDEO_LIB=1
 BUILD_ROCKBOX=1
+BUILD_MEUI=1
+BUILD_CONFIGAPP=1
+DEFAULT_PLAYER="${DEFAULT_PLAYER:-}"
 PACKAGE_SDCARD=1
 BUILD_DIST=0
 BUILD_DIST_IUCE=0
@@ -47,7 +50,11 @@ Options:
   --only-bootimg                     Build only liby1, rootfs, and boot_nugget.img
   --only-video                       Build only liby1video.so
   --only-rockbox                     Build only Rockbox (rockbox + rockbox.zip)
+  --only-meui                        Build only liby1 + MeUI standalone player
+  --only-configapp                   Build only liby1 + ConfigApp
   --no-rockbox                       Build standalone Y1 SDK & boot image without Rockbox
+  --no-meui                          Skip building/staging MeUI
+  --default-player <name>            Set default_player (rockbox, meui, configapp)
   --custom-app <path>                Bundle custom ARM binary at /.system/app on SD card
   -j, --jobs <N>                     Number of parallel build jobs (0 = auto-detect)
   -h, --help                         Show this help message
@@ -122,9 +129,39 @@ while [[ $# -gt 0 ]]; do
             PACKAGE_SDCARD=0
             shift
             ;;
+        --only-meui)
+            BUILD_LIBY1=1
+            BUILD_ROOTFS=0
+            BUILD_BOOTIMG=0
+            BUILD_VIDEO_LIB=0
+            BUILD_ROCKBOX=0
+            BUILD_MEUI=1
+            BUILD_CONFIGAPP=0
+            PACKAGE_SDCARD=0
+            shift
+            ;;
+        --only-configapp)
+            BUILD_LIBY1=1
+            BUILD_ROOTFS=0
+            BUILD_BOOTIMG=0
+            BUILD_VIDEO_LIB=0
+            BUILD_ROCKBOX=0
+            BUILD_MEUI=0
+            BUILD_CONFIGAPP=1
+            PACKAGE_SDCARD=0
+            shift
+            ;;
         --no-rockbox)
             BUILD_ROCKBOX=0
             shift
+            ;;
+        --no-meui)
+            BUILD_MEUI=0
+            shift
+            ;;
+        --default-player)
+            DEFAULT_PLAYER="${2:-}"
+            shift 2
             ;;
         --custom-app)
             CUSTOM_APP_BIN="${2:-}"
@@ -368,7 +405,9 @@ if [[ "$BUILD_ROOTFS" -eq 1 ]]; then
     for img in boot sdcard connect errconnect error; do
         SRC_IMG=""
 
-        if [[ -f "$SPLASH_DIR/$img.png" ]]; then
+        if [[ "$img" == "boot" && -f "$SPLASH_DIR/bootorg.png" ]]; then
+            SRC_IMG="$SPLASH_DIR/bootorg.png"
+        elif [[ -f "$SPLASH_DIR/$img.png" ]]; then
             SRC_IMG="$SPLASH_DIR/$img.png"
         elif [[ -n "$WORKSPACE_ROOT" && -f "$WORKSPACE_ROOT/$img.png" ]]; then
             SRC_IMG="$WORKSPACE_ROOT/$img.png"
@@ -634,11 +673,11 @@ if [[ "$BUILD_ROCKBOX" -eq 1 ]]; then
 
     if [[ -d "$SCRIPT_DIR/liby1/src" ]]; then
         mkdir -p "$ROCKBOX_WORK_SRC/vendor/liby1/include" "$ROCKBOX_WORK_SRC/vendor/liby1/src"
-        cp -u "$SCRIPT_DIR/liby1/include/"* "$ROCKBOX_WORK_SRC/vendor/liby1/include/" 2>/dev/null || cp -f "$SCRIPT_DIR/liby1/include/"* "$ROCKBOX_WORK_SRC/vendor/liby1/include/"
-        cp -u "$SCRIPT_DIR/liby1/src/"* "$ROCKBOX_WORK_SRC/vendor/liby1/src/" 2>/dev/null || cp -f "$SCRIPT_DIR/liby1/src/"* "$ROCKBOX_WORK_SRC/vendor/liby1/src/"
+        cp -ru "$SCRIPT_DIR/liby1/include/"* "$ROCKBOX_WORK_SRC/vendor/liby1/include/" 2>/dev/null || cp -rf "$SCRIPT_DIR/liby1/include/"* "$ROCKBOX_WORK_SRC/vendor/liby1/include/"
+        cp -ru "$SCRIPT_DIR/liby1/src/"* "$ROCKBOX_WORK_SRC/vendor/liby1/src/" 2>/dev/null || cp -rf "$SCRIPT_DIR/liby1/src/"* "$ROCKBOX_WORK_SRC/vendor/liby1/src/"
         if [[ "$ROCKBOX_WORK_SRC" != "$ROCKBOX_SRC" && -d "$ROCKBOX_SRC/vendor/liby1" ]]; then
-            cp -u "$SCRIPT_DIR/liby1/include/"* "$ROCKBOX_SRC/vendor/liby1/include/" 2>/dev/null || true
-            cp -u "$SCRIPT_DIR/liby1/src/"* "$ROCKBOX_SRC/vendor/liby1/src/" 2>/dev/null || true
+            cp -ru "$SCRIPT_DIR/liby1/include/"* "$ROCKBOX_SRC/vendor/liby1/include/" 2>/dev/null || true
+            cp -ru "$SCRIPT_DIR/liby1/src/"* "$ROCKBOX_SRC/vendor/liby1/src/" 2>/dev/null || true
         fi
     fi
 
@@ -749,8 +788,17 @@ if [[ "$PACKAGE_SDCARD" -eq 1 ]]; then
         "$SD_STAGE/.system/video_cache" \
         "$SD_STAGE/Videos"
 
-    # Set default player to Rockbox
-    echo "rockbox" > "$SD_STAGE/.system/default_player"
+    # Set default player (auto-select meui when Rockbox is disabled)
+    if [[ -z "$DEFAULT_PLAYER" ]]; then
+        if [[ "$BUILD_ROCKBOX" -eq 1 ]]; then
+            DEFAULT_PLAYER="rockbox"
+        elif [[ "$BUILD_MEUI" -eq 1 ]]; then
+            DEFAULT_PLAYER="meui"
+        else
+            DEFAULT_PLAYER="configapp"
+        fi
+    fi
+    echo "$DEFAULT_PLAYER" > "$SD_STAGE/.system/default_player"
 
     # Stage liby1 SDK artifacts into /.system/lib and /.system/include
     if [[ -f "$SCRIPT_DIR/liby1/build/liby1.so" ]]; then
@@ -827,6 +875,18 @@ if [[ "$PACKAGE_SDCARD" -eq 1 ]]; then
         cp -a "$SCRIPT_DIR/bootl_raw"/*.raw "$SD_STAGE/.system/" 2>/dev/null || true
     fi
 
+    # Build and stage standalone Pick 9 System Settings app into /.system/configapp/
+    if [[ "$BUILD_CONFIGAPP" -eq 1 && -f "$SCRIPT_DIR/configapp/Makefile" ]]; then
+        make -C "$SCRIPT_DIR/configapp" CROSS_COMPILE="$CROSS_COMPILE" STAGE_DIR="$SD_STAGE" clean stage
+        chmod +x "$SD_STAGE/.system/configapp/configapp"
+    fi
+
+    # Build and stage standalone MeUI media player into /.meui/
+    if [[ "$BUILD_MEUI" -eq 1 && -f "$SCRIPT_DIR/meui/Makefile" ]]; then
+        make -C "$SCRIPT_DIR/meui" CROSS_COMPILE="$CROSS_COMPILE" STAGE_DIR="$SD_STAGE" clean stage
+        chmod +x "$SD_STAGE/.meui/meui"
+    fi
+
     # Stage optional custom standalone C application binary at /.system/app
     if [[ -n "$CUSTOM_APP_BIN" ]]; then
         if [[ ! -f "$CUSTOM_APP_BIN" ]]; then
@@ -883,14 +943,18 @@ EOF_SYSINFO
 
         cd "$SD_STAGE"
         zip -u -q "$SD_STAGE/rockbox_sdcard.zip" .rockbox/rockbox
-        zip -u -q -r "$SD_STAGE/rockbox_sdcard.zip" .system Videos iPod_Control Playlists
+        ZIP_EXTRAS=(.system Videos iPod_Control Playlists)
+        [[ -d "$SD_STAGE/.meui" ]] && ZIP_EXTRAS+=(.meui)
+        zip -u -q -r "$SD_STAGE/rockbox_sdcard.zip" "${ZIP_EXTRAS[@]}"
         mv -f "$SD_STAGE/rockbox_sdcard.zip" "$SCRIPT_DIR/rockbox_sdcard.zip"
         cd "$SCRIPT_DIR"
         echo "[+] Created SD card archive: $SCRIPT_DIR/rockbox_sdcard.zip"
     else
         rm -f "$SCRIPT_DIR/y1_sdcard.zip"
         cd "$SD_STAGE"
-        zip -q -r "$SD_STAGE/y1_sdcard.zip" .system Videos iPod_Control Playlists
+        ZIP_EXTRAS=(.system Videos iPod_Control Playlists)
+        [[ -d "$SD_STAGE/.meui" ]] && ZIP_EXTRAS+=(.meui)
+        zip -q -r "$SD_STAGE/y1_sdcard.zip" "${ZIP_EXTRAS[@]}"
         mv -f "$SD_STAGE/y1_sdcard.zip" "$SCRIPT_DIR/y1_sdcard.zip"
         cd "$SCRIPT_DIR"
         echo "[+] Created standalone SD card archive: $SCRIPT_DIR/y1_sdcard.zip"
@@ -959,6 +1023,8 @@ if [[ "$BUILD_BOOTIMG" -eq 1 ]]; then
         echo "[!] Boot image packaging failed."
         exit 1
     fi
+
+    cp -f "$SCRIPT_DIR/boot_nugget.img" "$SCRIPT_DIR/boot.img"
 
     BOOT_SIZE="$(stat -c%s "$SCRIPT_DIR/boot_nugget.img")"
 

@@ -33,7 +33,7 @@ flowchart TD
     subgraph INITRAMFS["Initramfs (PID 1 /init)"]
         INIT_BOOST["Boot CPU Clock Boost (1.2 GHz Dual-Core)"]
         INIT_STORAGE["Reactive MicroSD Mount (/mnt/sdcard)"]
-        INIT_MENU["Graphical Bootloader Menu (Nugget / Android / Poweroff / USB)"]
+        INIT_MENU["ConfigApp Pre-Boot (--bootmenu) / SD-Missing Text GUI"]
         INIT_EXEC["Handoff to Rockbox or Standalone App"]
     end
 
@@ -44,6 +44,7 @@ flowchart TD
         Y1_INP["Click-Wheel, Tactile Keys, ACCDET Headphone Jack"]
         Y1_AUDIO["EAC DL1 DMA, MT6323 PMIC DAC & HP Amp, Mic ADC"]
         Y1_TUNER["MT6627 FM Radio Control"]
+        Y1_BT_WIFI["MT6572 CONNSYS Bluetooth (A2DP) & Wi-Fi"]
         Y1_USB["USB Mass Storage Gadget Control"]
     end
 
@@ -83,7 +84,7 @@ sequenceDiagram
         I->>SD: Mount mmcblk1p1 to /mnt/sdcard
         I->>I: Create symlink /.system -> /mnt/sdcard/.system
         alt Bootloader Menu Enabled or MENU button held
-            I->>I: Display Bootloader Menu (Nugget / Android / Poweroff / USB)
+            I->>I: Launch ConfigApp (--bootmenu)
             opt Android Selected
                 I->>I: Clean rootfs & extract ramdisk_android.cpio.gz -> execve("/init")
             end

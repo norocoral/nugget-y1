@@ -18,13 +18,13 @@ Nugget for Y1 is an open-source custom firmware for the Innioasis Y1 digital aud
 | Audio Output Path | Android AudioFlinger -> Android audio HAL -> `/dev/eac` | Android AudioFlinger (`AudioTrack`/OpenSL) -> Android audio HAL -> `/dev/eac` | Direct `/dev/eac` writes from `pcm-eac.c` (bypasses AudioFlinger) |
 | Sample Rate Handling | Resampled/mixed by AudioFlinger | Resampled/mixed by AudioFlinger | Direct 44.1 kHz and 48 kHz hardware rate switching |
 | Volume / Gain Control | Android audio stream steps + MT6323 analog PGA | Rockbox software volume + Android media stream | Rockbox logarithmic volume mapped to PCM attenuation + MT6323 analog PGA (`0x70a`) |
-| Bluetooth Audio | Android Bluetooth stack (Bluedroid) | Android Bluetooth stack (Bluedroid) | MediaTek `stp_uart_launcher` + `mtk_wmt_bt` + BlueZ/A2DP (SBC) |
+| Bluetooth Audio | Android Bluetooth stack (Bluedroid) | Android Bluetooth stack (Bluedroid) | Direct `liby1` MT6572 CONNSYS (`/dev/stpwmt`, `/dev/stpbt`) + custom A2DP (SBC, SBC-XQ, AAC) & Receiver mode |
 | Power / Suspend | Android `earlysuspend` + `wakelock` (`mem` suspend) | Android `earlysuspend` + `wakelock` (`mem` suspend) | Direct `wakelock` / `earlysuspend` + `/sys/power/state` (`mem` suspend) + CPU hotplug/governor control |
 | Display Resolution | 480x360 | Depends on APK build (typically 480x360) | 480x360 native with runtime 320x240 scaling mode |
 | Key Lock (HOLD) | None | Rockbox key lock | Rockbox key lock with double-click MENU toggle, Hold Light, lock backlight rules, and selective key exemptions |
 | USB Modes | MTP / Android USB Mass Storage | MTP / Android USB Mass Storage (via OS) | USB Mass Storage and optional Apple iPod 5.5G emulation (`ipod_vpd.ko`, disabled by default) |
 | iTunes Integration | None | None | Optional `iTunesDB` / `ArtworkDB` / `.ithmb` TagCache & playlist parsing, `Play Counts` / `OTGPlaylistInfo` writing |
-| Dual Boot | Stock OS only | Android app | Pre-boot menu supporting Rockbox, MeUI, custom user binary, and stock Android handoff |
+| Dual Boot | Stock OS only | Android app | Pre-boot **ConfigApp** (`--bootmenu`) supporting Launch (hidden-folder auto-discovery), Android handoff, USB, Serial Terminal, Wi-Fi/BT, and SD-missing Text GUI |
 
 ---
 
@@ -79,36 +79,34 @@ sudo apt install -y build-essential gcc-arm-linux-gnueabihf python3 python3-pip 
 
 The build script will:
 1. Extract vendor kernel from `!stock_rom/boot.img` if not already present.
-2. Compile custom PID 1 C `/init` and `unmute_eac` utilities with ARM hard-float GCC.
-3. Convert splash screen PNG assets into raw 32-bit framebuffer files.
+2. Compile custom PID 1 C `/init`, `unmute_eac`, `liby1`, and `configapp` with ARM hard-float GCC.
+3. Convert `splash/bootorg.png` into raw 32-bit framebuffer splash assets using Wanted Sans with adaptive black/white contrast.
 4. Compile Hosted Rockbox for the Innioasis Y1 (`build_y1/`).
-5. Package `.rockbox` SD card assets into `rockbox_sdcard.zip`.
-6. Assemble minimal initramfs ramdisk and package flashable `boot_rockbox.img` with MediaTek headers.
+5. Package `.rockbox` and `.system` SD card assets (including `configapp`, `bt_blobs/`, and `logo.bin` in `make_dist.sh` / scatter) into `rockbox_sdcard.zip`.
+6. Assemble minimal initramfs ramdisk and package flashable `boot.img` / `boot_nugget.img` with MediaTek headers.
 
 *Note: Proprietary MediaTek binaries (`bt_blobs/`, `stock_unpacked/`, `logo.bin`) are excluded from Git to maintain open-source compliance.*
 
 ---
 
-### Dual-Boot Subsystem & Bootloader Menu
+### Dual-Boot Subsystem & ConfigApp Pre-Boot Menu
 
 Android partitions on the internal eMMC (`SYSTEM`, `DATA`, `CACHE`) are left unmodified, allowing dual-booting alongside Android:
 
-- **Bootloader Menu:**
-  - Runs at startup before Rockbox is launched.
-  - Available entries:
-    - **Pick 1: Rockbox** — Boots Rockbox from the MicroSD card.
-    - **Pick 2: MeUI** — Launches MeUI when `.meui/meui` is present.
-    - **Pick 3: User Software** — Launches a user binary when `.custom/launch` is present.
-    - **Pick 4: Android** — Clears BCB flags, unpacks the stock ramdisk, mounts `SYSTEM`/`DATA`/`CACHE`, and execs Android `init` as PID 1.
-    - **Pick 5: Shut down** — Powers off the device.
-    - **Pick 6: USB Mass Storage** — Enables USB Mass Storage from the bootloader; pressing any button exits USB mode and returns to the menu.
-    - **Pick 7: Linux terminal (USB)** — Starts USB serial root shells on `/dev/ttyGS0` and `/dev/ttyGS1`.
-    - **Pick 8: Debug Info** — Writes a compact diagnostic report (`debuginfoYYYYMMDD_HHMMSS.txt`) to the MicroSD card root.
-  - **Navigation:** Click Wheel or **Left / Right** selects an entry; **Center** or **Play** confirms.
-  - **Hardware Override:** Holding **MENU** during boot forces the Bootloader Menu to appear regardless of settings.
-  - **Settings Toggle:** `Settings -> Nugget -> Bootloader Menu` (`Yes` / `No`).
-- **Reboot to Android from Rockbox:**
-  - `Settings -> Nugget -> Reboot to Android` flushes buffers and hands off to stock Android.
+- **ConfigApp (`--bootmenu` & `Main Menu -> System -> System Settings`):**
+  - Replaces the legacy Bootpick menu with a touch/wheel-friendly light-theme C UI (`/.system/configapp/configapp`, English/Korean switcher, 12-hour clock).
+  - **Pages:**
+    - **Launch** — Auto-discovers hidden folders on SD (`.` in folder name with an executable inside, e.g. `.rockbox`, `.meui`, `.custom`) plus Stock Android handoff.
+    - **System Status**, **Display & Haptics**, **CPU & Power**, **Date & Time** (12h clock & RTC).
+    - **Bluetooth** (`y1_bt_*`) & **Wi-Fi** (`y1_wifi_*` via `wlan_mt6582.ko` / `mtk_wmt_wifi.ko` / `/dev/wmtWifi`).
+    - **USB & Storage** (USB Mass Storage, iPod 5.5G mode, performance tuning).
+    - **Serial Terminal** (dual USB ACM root shells on `/dev/ttyGS0` and `/dev/ttyGS1`).
+    - **Debug Info** (live hardware telemetry in ConfigApp UI + `debuginfo*.txt` export).
+    - **System & Power** (ENG/KOR language, debug log) and **Exit / Shut Down** (Exit, Reboot, Shut Down).
+  - **Missing SD Card Fallback:** If no MicroSD card is present at boot, PID 1 `/init` displays a basic 3-option Text GUI (**USB**, **Serial Console**, **Shut Down**).
+  - **Hardware Override:** Holding **MENU** during boot forces ConfigApp (`--bootmenu`) to appear regardless of settings.
+- **Rockbox Display & Sleep Settings:**
+  - `Sleep (After Backlight Off)` (`HAVE_LCD_SLEEP_SETTING`) and `Sleep Backlight Off Brightness` are available in Rockbox display settings, alongside Lock Backlight Off support.
 
 ---
 

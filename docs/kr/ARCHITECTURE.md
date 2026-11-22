@@ -33,7 +33,7 @@ flowchart TD
     subgraph INITRAMFS["Initramfs (PID 1 /init)"]
         INIT_BOOST["부팅 CPU 클록 부스트 (1.2 GHz 듀얼 코어)"]
         INIT_STORAGE["반응형 MicroSD 마운트 (/mnt/sdcard)"]
-        INIT_MENU["그래픽 부트로더 메뉴 (Nugget / Android / Poweroff / USB)"]
+        INIT_MENU["ConfigApp 부팅 메뉴 (--bootmenu) / SD 미인식 텍스트 GUI"]
         INIT_EXEC["Rockbox 또는 독립형 앱으로 제어권 전환"]
     end
 
@@ -44,6 +44,7 @@ flowchart TD
         Y1_INP["클릭 휠, 택타일 키, ACCDET 이어폰 단자"]
         Y1_AUDIO["EAC DL1 DMA, MT6323 PMIC DAC & 헤드폰 앰프, 마이크 ADC"]
         Y1_TUNER["MT6627 FM 라디오 제어"]
+        Y1_BT_WIFI["MT6572 CONNSYS 블루투스 (A2DP) 및 Wi-Fi"]
         Y1_USB["USB 대용량 저장소 가젯 제어"]
     end
 
@@ -83,7 +84,7 @@ sequenceDiagram
         I->>SD: mmcblk1p1을 /mnt/sdcard에 마운트
         I->>I: 심볼릭 링크 /.system -> /mnt/sdcard/.system 생성
         alt 부트로더 메뉴 활성화 또는 MENU 버튼 누름 감지
-            I->>I: 부트로더 메뉴 표시 (Nugget / Android / Poweroff / USB)
+            I->>I: ConfigApp (--bootmenu) 실행
             opt Android 선택 시
                 I->>I: rootfs 정리 및 ramdisk_android.cpio.gz 압축 해제 -> execve("/init")
             end

@@ -1,0 +1,1402 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Rockbox Theme Studio — Innioasis Y1 (480×360)</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+  <style>
+    * { box-sizing: border-box; user-select: none; }
+    input, textarea, select { user-select: text; }
+    body { margin: 0; background: #1e1e1e; color: #e5e5e5; font-family: Inter, system-ui, -apple-system, sans-serif; overflow: hidden; }
+    .figma-canvas-bg {
+      background-color: #1e1e1e;
+      background-image: radial-gradient(#333333 1px, transparent 1px);
+      background-size: 16px 16px;
+    }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #444; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #555; }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback } = React;
+
+const TARGET_W = 480;
+const TARGET_H = 360;
+
+const ROCKBOX_TAGS = [
+  { tag: '%?it<%it|%fn>', label: 'Title/File' },
+  { tag: '%ia', label: 'Artist' },
+  { tag: '%id', label: 'Album' },
+  { tag: '%iy', label: 'Year' },
+  { tag: '%pc', label: 'Elapsed' },
+  { tag: '%pt', label: 'Total' },
+  { tag: '%pr', label: 'Remain' },
+  { tag: '%pp/%pe', label: 'Track #' },
+  { tag: '%?cf<%cH:%cM|%cl:%cM %cp>', label: '12/24h Clock' },
+  { tag: '%bl%%', label: 'Battery %' },
+  { tag: '%pv dB', label: 'Volume' },
+  { tag: '%fc %fbk', label: 'Codec' },
+  { tag: '%tf MHz', label: 'FM Freq' },
+  { tag: '%Lt', label: 'Menu Title' },
+  { tag: '%t(5)%ia;%t(5)%id', label: 'Alt 5s' },
+];
+
+const COND_OPTIONS = [
+  { id: 'always', label: 'Always Visible' },
+  { id: 'has_art', label: 'Has Album Art (%?C<...>)' },
+  { id: 'no_art', label: 'No Album Art (%?C<|...>)' },
+  { id: 'hold', label: 'Hold / Lockscreen (%?mh<...>)' },
+  { id: 'no_hold', label: 'Not Held (%?mh<|...>)' },
+  { id: 'vol_popup', label: 'Volume Popup (%?mv(1.5)<...>)' },
+  { id: 'charging', label: 'Charging (%?bp<...>)' },
+  { id: 'playing', label: 'Playing (%?mp<|...>)' },
+];
+
+const SAMPLE_TAG_MAP = {
+  '%?it<%it|%fn>': 'Midnight City',
+  '%?cf<%cH:%cM|%cl:%cM %cp>': '11:42 AM',
+  '%it': 'Midnight City',
+  '%fn': '04_Midnight_City.flac',
+  '%ia': 'M83',
+  '%id': "Hurry Up, We're Dreaming",
+  '%iy': '2011',
+  '%pc': '1:42',
+  '%pt': '4:03',
+  '%pr': '-2:21',
+  '%pp': '4',
+  '%pe': '12',
+  '%cl': '11',
+  '%cH': '11',
+  '%cM': '42',
+  '%cp': 'AM',
+  '%cP': 'AM',
+  '%bl': '86',
+  '%pv': '-12',
+  '%fc': 'FLAC',
+  '%fb': '942',
+  '%tf': '98.5',
+  '%Lt': 'Settings',
+};
+
+const PRESETS = {
+  nugget_dark: {
+    version: 4,
+    cfg: {
+      name: 'NuggetDark',
+      uiFontFile: '20-Inter.fnt',
+      uiFontPx: 20,
+      fgColor: '#EAEAEA',
+      bgColor: '#12151C',
+      selStartColor: '#3B82F6',
+      selEndColor: '#2563EB',
+      selTextColor: '#FFFFFF',
+      selectorType: 'bar (gradient)',
+      scrollbar: 'right',
+      showIcons: 'on',
+      statusbar: 'off',
+      batteryDisplay: 'graphic',
+      volumeDisplay: 'graphic',
+      iconset: 'NuggetDark.bmp',
+      viewersIconset: '-',
+      backdrop: '-',
+      scrollSpeed: 12,
+      scrollDelay: 1200,
+      scrollStep: 1,
+    },
+    fonts: [
+      { id: 2, file: '24-Inter-Bold.fnt', px: 24, family: 'Inter', weight: '700' },
+      { id: 3, file: '18-Inter-Regular.fnt', px: 18, family: 'Inter', weight: '400' },
+      { id: 4, file: '14-Inter-Regular.fnt', px: 14, family: 'Inter', weight: '400' },
+    ],
+    screens: [
+      {
+        id: 'wps', title: 'WPS (.wps)', ext: 'wps', disableStatusbar: true,
+        elements: [
+          { id: 'bg_card', type: 'rect', x: 12, y: 48, w: 456, h: 214, fill: '#1B202B', backdropLayer: true },
+          { id: 'album_art', type: 'albumart', x: 24, y: 64, w: 180, h: 180, halign: 'c', valign: 'c', cond: 'always' },
+          { id: 'art_fallback', type: 'rect', x: 24, y: 64, w: 180, h: 180, fill: '#252B38', cond: 'no_art' },
+          { id: 'vp_title', type: 'viewport', x: 218, y: 74, w: 238, h: 32, fontId: 2, fg: '#FFFFFF', bg: '-', align: 'l', scroll: true, cond: 'always', text: '%?it<%it|%fn>' },
+          { id: 'vp_artist', type: 'viewport', x: 218, y: 112, w: 238, h: 24, fontId: 3, fg: '#A3B1C6', bg: '-', align: 'l', scroll: true, cond: 'always', text: '%ia' },
+          { id: 'vp_album', type: 'viewport', x: 218, y: 142, w: 238, h: 22, fontId: 4, fg: '#78869B', bg: '-', align: 'l', scroll: false, cond: 'always', text: '%id (%iy)' },
+          { id: 'vp_codec', type: 'viewport', x: 218, y: 178, w: 238, h: 20, fontId: 4, fg: '#60A5FA', bg: '-', align: 'l', scroll: false, cond: 'always', text: '%fc %fbkbps  •  %pp/%pe' },
+          { id: 'bat_sprite', type: 'sprite', x: 432, y: 14, w: 32, h: 16, bmp: 'BatteryStatus.bmp', subimages: 12, tag: '%bl', presetKind: 'battery', cond: 'always' },
+          { id: 'play_sprite', type: 'sprite', x: 16, y: 14, w: 18, h: 18, bmp: 'PlayStatus.bmp', subimages: 5, tag: '%mp', presetKind: 'play', cond: 'always' },
+          { id: 'vp_clock', type: 'viewport', x: 42, y: 12, w: 130, h: 22, fontId: 3, fg: '#94A3B8', bg: '-', align: 'l', scroll: false, cond: 'always', text: '%?cf<%cH:%cM|%cl:%cM %cp>' },
+          { id: 'progress_bar', type: 'progressbar', x: 24, y: 280, w: 432, h: 12, fg: '#3B82F6', bg: '#252B38', bmp: '-', cond: 'always' },
+          { id: 'vp_elapsed', type: 'viewport', x: 24, y: 300, w: 100, h: 20, fontId: 4, fg: '#94A3B8', bg: '-', align: 'l', scroll: false, cond: 'always', text: '%pc' },
+          { id: 'vp_remain', type: 'viewport', x: 356, y: 300, w: 100, h: 20, fontId: 4, fg: '#94A3B8', bg: '-', align: 'r', scroll: false, cond: 'always', text: '%pr / %pt' },
+          { id: 'vol_popup_bg', type: 'rect', x: 110, y: 140, w: 260, h: 72, fill: '#0F172A', cond: 'vol_popup' },
+          { id: 'vol_popup_txt', type: 'viewport', x: 124, y: 158, w: 232, h: 32, fontId: 2, fg: '#60A5FA', bg: '-', align: 'c', scroll: false, cond: 'vol_popup', text: 'Volume: %pv dB' },
+        ]
+      },
+      {
+        id: 'sbs', title: 'Statusbar (.sbs)', ext: 'sbs', disableStatusbar: true,
+        elements: [
+          { id: 'sb_bar', type: 'rect', x: 0, y: 0, w: 480, h: 38, fill: '#181C26', backdropLayer: true },
+          { id: 'vp_sb_title', type: 'viewport', x: 14, y: 8, w: 240, h: 22, fontId: 3, fg: '#E2E8F0', bg: '-', align: 'l', scroll: true, cond: 'always', text: '%Lt' },
+          { id: 'vp_sb_clock', type: 'viewport', x: 260, y: 8, w: 130, h: 22, fontId: 3, fg: '#94A3B8', bg: '-', align: 'r', scroll: false, cond: 'always', text: '%?cf<%cH:%cM|%cl:%cM %cp>' },
+          { id: 'vp_sb_bat', type: 'viewport', x: 398, y: 8, w: 68, h: 22, fontId: 3, fg: '#4ADE80', bg: '-', align: 'r', scroll: false, cond: 'always', text: '%bl%%' },
+          { id: 'ui_area', type: 'ui_viewport', label: '-', x: 10, y: 44, w: 460, h: 308, fontId: 1, fg: '#EAEAEA', bg: '#12151C' },
+        ]
+      },
+      {
+        id: 'fms', title: 'FM Radio (.fms)', ext: 'fms', disableStatusbar: true,
+        elements: [
+          { id: 'fm_card', type: 'rect', x: 24, y: 64, w: 432, h: 190, fill: '#1B202B', backdropLayer: true },
+          { id: 'vp_fm_label', type: 'viewport', x: 40, y: 82, w: 400, h: 22, fontId: 3, fg: '#60A5FA', bg: '-', align: 'c', scroll: false, cond: 'always', text: 'FM RADIO' },
+          { id: 'vp_fm_freq', type: 'viewport', x: 40, y: 122, w: 400, h: 36, fontId: 2, fg: '#FFFFFF', bg: '-', align: 'c', scroll: false, cond: 'always', text: '%tf MHz' },
+          { id: 'fm_bar', type: 'progressbar', x: 48, y: 204, w: 384, h: 12, fg: '#3B82F6', bg: '#252B38', bmp: '-', cond: 'always' },
+        ]
+      }
+    ]
+  },
+  ipod_split: {
+    version: 4,
+    cfg: {
+      name: 'ClassicSplitY1',
+      uiFontFile: '18-Inter.fnt',
+      uiFontPx: 18,
+      fgColor: '#111827',
+      bgColor: '#FFFFFF',
+      selStartColor: '#6BA6DE',
+      selEndColor: '#186DBD',
+      selTextColor: '#FFFFFF',
+      selectorType: 'bar (gradient)',
+      scrollbar: 'off',
+      showIcons: 'off',
+      statusbar: 'off',
+      batteryDisplay: 'graphic',
+      volumeDisplay: 'numeric',
+      iconset: '-',
+      viewersIconset: '-',
+      backdrop: '-',
+      scrollSpeed: 10,
+      scrollDelay: 1000,
+      scrollStep: 1,
+    },
+    fonts: [
+      { id: 2, file: '20-Inter-Bold.fnt', px: 20, family: 'Inter', weight: '700' },
+      { id: 3, file: '16-Inter-Regular.fnt', px: 16, family: 'Inter', weight: '400' },
+      { id: 4, file: '13-Inter-Regular.fnt', px: 13, family: 'Inter', weight: '400' },
+    ],
+    screens: [
+      {
+        id: 'wps', title: 'WPS (.wps)', ext: 'wps', disableStatusbar: true,
+        elements: [
+          { id: 'hdr_bg', type: 'rect', x: 0, y: 0, w: 480, h: 34, fill: '#E5E7EB', backdropLayer: true },
+          { id: 'hdr_txt', type: 'viewport', x: 14, y: 7, w: 220, h: 20, fontId: 3, fg: '#111827', bg: '-', align: 'l', scroll: false, cond: 'always', text: 'Now Playing' },
+          { id: 'hdr_bat', type: 'viewport', x: 390, y: 7, w: 76, h: 20, fontId: 3, fg: '#111827', bg: '-', align: 'r', scroll: false, cond: 'always', text: '%bl%%' },
+          { id: 'album_art', type: 'albumart', x: 24, y: 58, w: 196, h: 196, halign: 'c', valign: 'c', cond: 'always' },
+          { id: 'vp_title', type: 'viewport', x: 236, y: 86, w: 224, h: 28, fontId: 2, fg: '#111827', bg: '-', align: 'l', scroll: true, cond: 'always', text: '%?it<%it|%fn>' },
+          { id: 'vp_artist', type: 'viewport', x: 236, y: 120, w: 224, h: 22, fontId: 3, fg: '#374151', bg: '-', align: 'l', scroll: true, cond: 'always', text: '%ia' },
+          { id: 'vp_album', type: 'viewport', x: 236, y: 148, w: 224, h: 20, fontId: 4, fg: '#6B7280', bg: '-', align: 'l', scroll: false, cond: 'always', text: '%id' },
+          { id: 'vp_pos', type: 'viewport', x: 236, y: 184, w: 224, h: 20, fontId: 4, fg: '#6B7280', bg: '-', align: 'l', scroll: false, cond: 'always', text: '%pp of %pe' },
+          { id: 'progress_bar', type: 'progressbar', x: 24, y: 290, w: 432, h: 14, fg: '#186DBD', bg: '#E5E7EB', bmp: '-', cond: 'always' },
+          { id: 'vp_elapsed', type: 'viewport', x: 24, y: 312, w: 100, h: 20, fontId: 4, fg: '#374151', bg: '-', align: 'l', scroll: false, cond: 'always', text: '%pc' },
+          { id: 'vp_remain', type: 'viewport', x: 356, y: 312, w: 100, h: 20, fontId: 4, fg: '#374151', bg: '-', align: 'r', scroll: false, cond: 'always', text: '-%pr' },
+        ]
+      },
+      {
+        id: 'sbs', title: 'Statusbar (.sbs)', ext: 'sbs', disableStatusbar: true,
+        elements: [
+          { id: 'sb_top', type: 'rect', x: 0, y: 0, w: 240, h: 32, fill: '#E5E7EB', backdropLayer: true },
+          { id: 'sb_title', type: 'viewport', x: 10, y: 6, w: 160, h: 20, fontId: 3, fg: '#111827', bg: '-', align: 'l', scroll: true, cond: 'always', text: '%Lt' },
+          { id: 'sb_bat', type: 'viewport', x: 174, y: 6, w: 58, h: 20, fontId: 4, fg: '#111827', bg: '-', align: 'r', scroll: false, cond: 'always', text: '%bl%%' },
+          { id: 'split_divider', type: 'rect', x: 240, y: 0, w: 1, h: 360, fill: '#D1D5DB', backdropLayer: true },
+          { id: 'right_pane_bg', type: 'rect', x: 241, y: 0, w: 239, h: 360, fill: '#F3F4F6', backdropLayer: true },
+          { id: 'right_art', type: 'albumart', x: 270, y: 40, w: 180, h: 180, halign: 'c', valign: 'c', cond: 'has_art' },
+          { id: 'right_clock', type: 'viewport', x: 252, y: 240, w: 216, h: 28, fontId: 2, fg: '#111827', bg: '-', align: 'c', scroll: false, cond: 'always', text: '%?cf<%cH:%cM|%cl:%cM %cp>' },
+          { id: 'right_track', type: 'viewport', x: 252, y: 276, w: 216, h: 22, fontId: 4, fg: '#4B5563', bg: '-', align: 'c', scroll: true, cond: 'always', text: '%?it<%it|%fn>' },
+          { id: 'ui_area', type: 'ui_viewport', label: '-', x: 4, y: 36, w: 232, h: 320, fontId: 1, fg: '#111827', bg: '#FFFFFF' },
+        ]
+      },
+      {
+        id: 'fms', title: 'FM Radio (.fms)', ext: 'fms', disableStatusbar: true,
+        elements: [
+          { id: 'vp_fm_freq', type: 'viewport', x: 40, y: 140, w: 400, h: 36, fontId: 2, fg: '#111827', bg: '-', align: 'c', scroll: false, cond: 'always', text: '%tf MHz' },
+        ]
+      }
+    ]
+  }
+};
+
+function stripHash(hex) {
+  return (hex || 'FFFFFF').replace('#', '').toUpperCase();
+}
+
+function resolveRockboxTags(str, sampleMode) {
+  if (!sampleMode || !str) return str || '';
+  let out = str;
+  if (out.includes(';') && out.includes('%t(')) {
+    out = out.split(';')[0].replace(/%t\([^)]+\)/g, '');
+  }
+  out = out.replace(/%s/g, '');
+  Object.entries(SAMPLE_TAG_MAP).forEach(([k, v]) => {
+    out = out.split(k).join(v);
+  });
+  return out;
+}
+
+// Generate authentic Rockbox RB12 binary .fnt file from browser Canvas font rasterizer
+function generateRockboxFntBinary(family, px, weight = '400') {
+  const firstChar = 32;
+  const lastChar = 126;
+  const count = lastChar - firstChar + 1;
+  const height = Math.max(8, Math.min(64, Math.round(px)));
+  const ascent = Math.round(height * 0.8);
+  const stripes = Math.ceil(height / 8);
+
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(32, height * 2);
+  canvas.height = height + 4;
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+  ctx.font = `${weight} ${height}px "${family}", system-ui, sans-serif`;
+  ctx.textBaseline = 'alphabetic';
+
+  const glyphBytes = [];
+  const offsets = [];
+  const widths = [];
+  let maxwidth = 0;
+
+  for (let i = 0; i < count; i++) {
+    const ch = String.fromCharCode(firstChar + i);
+    const m = ctx.measureText(ch);
+    const gw = Math.max(1, Math.min(canvas.width, Math.ceil(m.width)));
+    if (gw > maxwidth) maxwidth = gw;
+    widths.push(gw);
+    offsets.push(glyphBytes.length);
+
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = '#ffffff';
+    ctx.font = `${weight} ${height}px "${family}", system-ui, sans-serif`;
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillText(ch, 0, ascent);
+    const img = ctx.getImageData(0, 0, gw, height).data;
+
+    for (let s = 0; s < stripes; s++) {
+      for (let x = 0; x < gw; x++) {
+        let byte = 0;
+        for (let b = 0; b < 8; b++) {
+          const y = s * 8 + b;
+          if (y < height) {
+            const alpha = img[(y * gw + x) * 4 + 3];
+            if (alpha >= 110) byte |= (1 << b);
+          }
+        }
+        glyphBytes.push(byte);
+      }
+    }
+  }
+
+  const bitsWords = glyphBytes.length;
+  const use32Off = bitsWords >= 65535;
+  const padAfterBits = (!use32Off && (bitsWords & 1)) ? 1 : (use32Off && (bitsWords & 3) ? (4 - (bitsWords & 3)) : 0);
+  const offTableSize = count * (use32Off ? 4 : 2);
+  const headerSize = 32;
+  const totalSize = headerSize + bitsWords + padAfterBits + offTableSize + count;
+
+  const buf = new ArrayBuffer(totalSize);
+  const dv = new DataView(buf);
+  const u8 = new Uint8Array(buf);
+  // Magic "RB12"
+  u8[0] = 0x52; u8[1] = 0x42; u8[2] = 0x31; u8[3] = 0x32;
+  dv.setUint16(4, maxwidth, true);
+  dv.setUint16(6, height, true);
+  dv.setUint16(8, ascent, true);
+  dv.setUint16(10, 0, true); // 1bpp
+  dv.setUint32(12, firstChar, true);
+  dv.setUint32(16, firstChar, true);
+  dv.setUint32(20, count, true);
+  dv.setUint32(24, bitsWords, true);
+  dv.setUint32(28, count, true);
+  // Wait: RB12 header has width_count at 32 -> let's write 36-byte header!
+  const buf2 = new ArrayBuffer(36 + bitsWords + padAfterBits + offTableSize + count);
+  const dv2 = new DataView(buf2);
+  const u8_2 = new Uint8Array(buf2);
+  u8_2[0] = 0x52; u8_2[1] = 0x42; u8_2[2] = 0x31; u8_2[3] = 0x32;
+  dv2.setUint16(4, maxwidth, true);
+  dv2.setUint16(6, height, true);
+  dv2.setUint16(8, ascent, true);
+  dv2.setUint16(10, 0, true);
+  dv2.setUint32(12, firstChar, true);
+  dv2.setUint32(16, firstChar, true);
+  dv2.setUint32(20, count, true);
+  dv2.setUint32(24, bitsWords, true);
+  dv2.setUint32(28, count, true);
+  dv2.setUint32(32, count, true);
+  u8_2.set(glyphBytes, 36);
+  let pos = 36 + bitsWords + padAfterBits;
+  for (let i = 0; i < count; i++) {
+    if (use32Off) { dv2.setUint32(pos, offsets[i], true); pos += 4; }
+    else { dv2.setUint16(pos, offsets[i], true); pos += 2; }
+  }
+  for (let i = 0; i < count; i++) u8_2[pos++] = widths[i];
+  return u8_2;
+}
+
+// Generate 24-bit uncompressed BMP from a canvas
+function canvasToBmp24(canvas) {
+  const w = canvas.width, h = canvas.height;
+  const ctx = canvas.getContext('2d');
+  const img = ctx.getImageData(0, 0, w, h).data;
+  const rowBytes = (w * 3 + 3) & ~3;
+  const pixelSize = rowBytes * h;
+  const buf = new ArrayBuffer(54 + pixelSize);
+  const dv = new DataView(buf);
+  const u8 = new Uint8Array(buf);
+  u8[0] = 0x42; u8[1] = 0x4D; // "BM"
+  dv.setUint32(2, 54 + pixelSize, true);
+  dv.setUint32(10, 54, true);
+  dv.setUint32(14, 40, true);
+  dv.setInt32(18, w, true);
+  dv.setInt32(22, h, true);
+  dv.setUint16(26, 1, true);
+  dv.setUint16(28, 24, true);
+  dv.setUint32(34, pixelSize, true);
+  for (let y = 0; y < h; y++) {
+    const srcY = h - 1 - y;
+    const dstRow = 54 + y * rowBytes;
+    for (let x = 0; x < w; x++) {
+      const si = (srcY * w + x) * 4;
+      const di = dstRow + x * 3;
+      u8[di] = img[si + 2];
+      u8[di + 1] = img[si + 1];
+      u8[di + 2] = img[si];
+    }
+  }
+  return u8;
+}
+
+function generateSpriteBmp(sp) {
+  const w = sp.w || 24, h = sp.h || 16, n = sp.subimages || 1;
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h * n;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#FF00FF'; // Rockbox magenta transparency key
+  ctx.fillRect(0, 0, c.width, c.height);
+  for (let i = 0; i < n; i++) {
+    const y0 = i * h;
+    if (sp.presetKind === 'battery') {
+      ctx.strokeStyle = '#EAEAEA';
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(2, y0 + 2, w - 7, h - 4);
+      ctx.fillStyle = '#EAEAEA';
+      ctx.fillRect(w - 5, y0 + 5, 3, h - 10);
+      const pct = i / Math.max(1, n - 1);
+      ctx.fillStyle = pct < 0.2 ? '#EF4444' : '#4ADE80';
+      ctx.fillRect(4, y0 + 4, Math.max(2, Math.round((w - 11) * pct)), h - 8);
+    } else {
+      ctx.fillStyle = '#60A5FA';
+      ctx.beginPath();
+      ctx.arc(w / 2, y0 + h / 2, Math.min(w, h) * 0.35, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  return canvasToBmp24(c);
+}
+
+function generateIconsetBmp() {
+  const c = document.createElement('canvas');
+  c.width = 16; c.height = 16 * 12;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#FF00FF';
+  ctx.fillRect(0, 0, c.width, c.height);
+  for (let i = 0; i < 12; i++) {
+    ctx.fillStyle = '#93C5FD';
+    ctx.fillRect(3, i * 16 + 3, 10, 10);
+  }
+  return canvasToBmp24(c);
+}
+
+function generateCfg(project) {
+  const c = project.cfg;
+  const slug = (c.name || 'custom_theme').replace(/\s+/g, '_');
+  return [
+    `# Rockbox Theme Config — Innioasis Y1 (480x360)`,
+    `wps: /.rockbox/wps/${slug}.wps`,
+    `sbs: /.rockbox/wps/${slug}.sbs`,
+    `fms: /.rockbox/wps/${slug}.fms`,
+    `font: /.rockbox/fonts/${c.uiFontFile || '20-Inter.fnt'}`,
+    `foreground color: ${stripHash(c.fgColor)}`,
+    `background color: ${stripHash(c.bgColor)}`,
+    `line selector start color: ${stripHash(c.selStartColor)}`,
+    `line selector end color: ${stripHash(c.selEndColor)}`,
+    `line selector text color: ${stripHash(c.selTextColor)}`,
+    `selector type: ${c.selectorType || 'bar (gradient)'}`,
+    `scrollbar: ${c.scrollbar || 'right'}`,
+    `show icons: ${c.showIcons || 'on'}`,
+    `statusbar: ${c.statusbar || 'off'}`,
+    `battery display: ${c.batteryDisplay || 'graphic'}`,
+    `volume display: ${c.volumeDisplay || 'graphic'}`,
+    `iconset: ${c.iconset && c.iconset !== '-' ? '/.rockbox/icons/' + c.iconset : '-'}`,
+    `viewers iconset: ${c.viewersIconset && c.viewersIconset !== '-' ? '/.rockbox/icons/' + c.viewersIconset : '-'}`,
+    `backdrop: ${c.backdrop || '-'}`,
+    `scroll speed: ${c.scrollSpeed ?? 12}`,
+    `scroll delay: ${c.scrollDelay ?? 1200}`,
+    `scroll step: ${c.scrollStep ?? 1}`,
+  ].join('\n');
+}
+
+function wrapCond(condId, inner) {
+  if (!condId || condId === 'always') return inner;
+  if (condId === 'has_art') return `%?C<${inner}|>`;
+  if (condId === 'no_art') return `%?C<|${inner}>`;
+  if (condId === 'hold') return `%?mh<${inner}|>`;
+  if (condId === 'no_hold') return `%?mh<|${inner}>`;
+  if (condId === 'vol_popup') return `%?mv(1.5)<${inner}|>`;
+  if (condId === 'charging') return `%?bp<${inner}|>`;
+  if (condId === 'playing') return `%?mp<|${inner}>`;
+  return inner;
+}
+
+function generateSkinFile(screen, project) {
+  const lines = [`# Rockbox ${screen.title} — Innioasis Y1 (480x360)`];
+  if (screen.disableStatusbar !== false) lines.push('%wd');
+  lines.push(project.cfg.backdrop && project.cfg.backdrop !== '-' ? `%X(${project.cfg.backdrop})` : '%X(d)');
+  (project.fonts || []).forEach(f => lines.push(`%Fl(${f.id},${f.file})`));
+
+  const sprites = screen.elements.filter(e => !e.hidden && e.type === 'sprite');
+  sprites.forEach(sp => {
+    lines.push(`%xl(${sp.id},${sp.bmp || 'Sprite.bmp'},0,0,${sp.subimages || 1})`);
+  });
+  lines.push('');
+
+  const condElems = screen.elements.filter(e => !e.hidden && e.cond && e.cond !== 'always');
+  if (condElems.length) {
+    lines.push('# --- Conditional Viewport Triggers ---');
+    condElems.forEach(el => lines.push(wrapCond(el.cond, `%Vd(${el.id})`)));
+    lines.push('');
+  }
+
+  screen.elements.forEach(el => {
+    if (el.hidden) return;
+    const isCond = el.cond && el.cond !== 'always';
+    const vTag = isCond ? `%Vl(${el.id},` : `%V(`;
+    const vb = el.backdropLayer ? '%VB' : '';
+    lines.push(`# ${el.id}`);
+
+    if (el.type === 'rect') {
+      lines.push(`${vTag}${el.x},${el.y},${el.w},${el.h},-)${vb}`);
+      lines.push(`%dr(0,0,${el.w},${el.h},${stripHash(el.fill)})`);
+    } else if (el.type === 'albumart') {
+      lines.push(`%Cl(${el.x},${el.y},${el.w},${el.h},${el.halign || 'c'},${el.valign || 'c'})`);
+      lines.push(`${vTag}${el.x},${el.y},${el.w},${el.h},-)`);
+      lines.push(`%?C<%Cd|>`);
+    } else if (el.type === 'progressbar') {
+      lines.push(`${vTag}${el.x},${el.y},${el.w},${el.h},-)`);
+      lines.push(`%Vf(${stripHash(el.fg)})%Vb(${stripHash(el.bg)})`);
+      lines.push(`%pb(0,0,${el.w},${el.h},${el.bmp || '-'})`);
+    } else if (el.type === 'sprite') {
+      lines.push(`${vTag}${el.x},${el.y},${el.w},${el.h},-)`);
+      lines.push(`%xd(${el.id},${el.tag || '%bl'})`);
+    } else if (el.type === 'ui_viewport') {
+      const fg = el.fg && el.fg !== '-' ? stripHash(el.fg) : '-';
+      const bg = el.bg && el.bg !== '-' ? stripHash(el.bg) : '-';
+      lines.push(`%Vi(${el.label || '-'},${el.x},${el.y},${el.w},${el.h},${el.fontId ?? 1},${fg},${bg})`);
+    } else if (el.type === 'viewport') {
+      lines.push(`${vTag}${el.x},${el.y},${el.w},${el.h},${el.fontId ?? 1})${vb}`);
+      const fg = el.fg && el.fg !== '-' ? `%Vf(${stripHash(el.fg)})` : '';
+      const bg = el.bg && el.bg !== '-' ? `%Vb(${stripHash(el.bg)})` : '';
+      if (fg || bg) lines.push(`${fg}${bg}`);
+      const align = el.align === 'c' ? '%ac' : (el.align === 'r' ? '%ar' : '%al');
+      const rawText = (el.text || '').replace(/^%s/, '');
+      lines.push(`${el.scroll ? '%s' : ''}${align}${rawText}`);
+    }
+  });
+  return lines.join('\n');
+}
+
+function App() {
+  const [project, setProject] = useState(() => {
+    try {
+      const saved = localStorage.getItem('rb_theme_studio_v4');
+      return saved ? JSON.parse(saved) : PRESETS.nugget_dark;
+    } catch { return PRESETS.nugget_dark; }
+  });
+  const [history, setHistory] = useState([]);
+  const [redoStack, setRedoStack] = useState([]);
+  const [curScreenIdx, setCurScreenIdx] = useState(0);
+  const [selElIdx, setSelElIdx] = useState(0);
+  const [tool, setTool] = useState('select');
+  const [zoom, setZoom] = useState(1.15);
+  const [pan, setPan] = useState({ x: 48, y: 44 });
+  const [sampleMode, setSampleMode] = useState(true);
+  const [simState, setSimState] = useState({ hasArt: true, hold: false, volPopup: false, charging: false, playing: true });
+  const [rightTab, setRightTab] = useState('design'); // design | fonts | wps | sbs | fms | cfg
+  const [openMenu, setOpenMenu] = useState(null); // file | edit | view | export | help
+  const [guides, setGuides] = useState([]);
+  const [spaceDown, setSpaceDown] = useState(false);
+
+  const fileInputRef = useRef(null);
+  const fontInputRef = useRef(null);
+  const dragRef = useRef(null);
+
+  useEffect(() => {
+    try { localStorage.setItem('rb_theme_studio_v4', JSON.stringify(project)); } catch {}
+  }, [project]);
+
+  const commitProject = useCallback((updater, pushHist = true) => {
+    setProject(prev => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      if (pushHist) {
+        setHistory(h => [...h.slice(-39), prev]);
+        setRedoStack([]);
+      }
+      return next;
+    });
+  }, []);
+
+  const undo = useCallback(() => {
+    setHistory(h => {
+      if (!h.length) return h;
+      const prev = h[h.length - 1];
+      setRedoStack(r => [...r, project]);
+      setProject(prev);
+      return h.slice(0, -1);
+    });
+  }, [project]);
+
+  const redo = useCallback(() => {
+    setRedoStack(r => {
+      if (!r.length) return r;
+      const next = r[r.length - 1];
+      setHistory(h => [...h, project]);
+      setProject(next);
+      return r.slice(0, -1);
+    });
+  }, [project]);
+
+  const curScreen = project.screens[curScreenIdx] || project.screens[0];
+  const selElem = curScreen?.elements[selElIdx] || null;
+
+  const updateElem = useCallback((sIdx, eIdx, patch, pushHist = true) => {
+    commitProject(prev => ({
+      ...prev,
+      screens: prev.screens.map((s, si) => si !== sIdx ? s : {
+        ...s,
+        elements: s.elements.map((el, ei) => ei === eIdx ? { ...el, ...patch } : el)
+      })
+    }), pushHist);
+  }, [commitProject]);
+
+  const addElement = useCallback((type, x = 40, y = 60) => {
+    const scr = project.screens[curScreenIdx];
+    const n = scr.elements.length + 1;
+    let el = { id: `${type}_${n}`, type, x: Math.round(x), y: Math.round(y), w: 200, h: 28, cond: 'always' };
+    if (type === 'viewport') el = { ...el, fontId: 3, fg: '#EAEAEA', bg: '-', align: 'l', scroll: false, text: '%it' };
+    else if (type === 'rect') el = { ...el, w: 180, h: 60, fill: '#1B202B', backdropLayer: true };
+    else if (type === 'progressbar') el = { ...el, w: 320, h: 12, fg: '#3B82F6', bg: '#252B38', bmp: '-' };
+    else if (type === 'albumart') el = { ...el, w: 140, h: 140, halign: 'c', valign: 'c' };
+    else if (type === 'sprite') el = { ...el, w: 28, h: 20, bmp: 'Icon.bmp', subimages: 4, tag: '%mp', presetKind: 'play' };
+    else if (type === 'ui_viewport') el = { ...el, label: '-', w: 460, h: 300, fontId: 1, fg: '#EAEAEA', bg: '#12151C' };
+    commitProject(prev => ({
+      ...prev,
+      screens: prev.screens.map((s, i) => i === curScreenIdx ? { ...s, elements: [...s.elements, el] } : s)
+    }));
+    setSelElIdx(scr.elements.length);
+    setTool('select');
+  }, [project, curScreenIdx, commitProject]);
+
+  const duplicateSelected = useCallback(() => {
+    if (!selElem) return;
+    const copy = { ...selElem, id: `${selElem.id}_copy`, x: selElem.x + 12, y: selElem.y + 12 };
+    commitProject(prev => ({
+      ...prev,
+      screens: prev.screens.map((s, i) => i === curScreenIdx ? { ...s, elements: [...s.elements, copy] } : s)
+    }));
+    setSelElIdx(curScreen.elements.length);
+  }, [selElem, curScreen, curScreenIdx, commitProject]);
+
+  const deleteSelected = useCallback(() => {
+    if (selElIdx < 0 || !selElem) return;
+    commitProject(prev => ({
+      ...prev,
+      screens: prev.screens.map((s, i) => i === curScreenIdx
+        ? { ...s, elements: s.elements.filter((_, ei) => ei !== selElIdx) } : s)
+    }));
+    setSelElIdx(Math.max(0, selElIdx - 1));
+  }, [selElIdx, selElem, curScreenIdx, commitProject]);
+
+  const reorderElem = useCallback((dir) => {
+    const arr = curScreen.elements;
+    const target = selElIdx + dir;
+    if (target < 0 || target >= arr.length) return;
+    commitProject(prev => ({
+      ...prev,
+      screens: prev.screens.map((s, i) => {
+        if (i !== curScreenIdx) return s;
+        const next = [...s.elements];
+        [next[selElIdx], next[target]] = [next[target], next[selElIdx]];
+        return { ...s, elements: next };
+      })
+    }));
+    setSelElIdx(target);
+  }, [curScreen, selElIdx, curScreenIdx, commitProject]);
+
+  useEffect(() => {
+    const onKeyDown = (e) => {
+      if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) return;
+      if (e.code === 'Space') { setSpaceDown(true); e.preventDefault(); }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); undo(); }
+      else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); }
+      else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') { e.preventDefault(); duplicateSelected(); }
+      else if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); deleteSelected(); }
+      else if (e.key.toLowerCase() === 'v') setTool('select');
+      else if (e.key.toLowerCase() === 't') setTool('viewport');
+      else if (e.key.toLowerCase() === 'r') setTool('rect');
+      else if (e.key.toLowerCase() === 'p') setTool('progressbar');
+      else if (e.key.toLowerCase() === 'a') setTool('albumart');
+      else if (selElem && ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) {
+        e.preventDefault();
+        const step = e.shiftKey ? 10 : 1;
+        const dx = e.key === 'ArrowLeft' ? -step : (e.key === 'ArrowRight' ? step : 0);
+        const dy = e.key === 'ArrowUp' ? -step : (e.key === 'ArrowDown' ? step : 0);
+        updateElem(curScreenIdx, selElIdx, { x: selElem.x + dx, y: selElem.y + dy });
+      }
+    };
+    const onKeyUp = (e) => { if (e.code === 'Space') setSpaceDown(false); };
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    return () => { window.removeEventListener('keydown', onKeyDown); window.removeEventListener('keyup', onKeyUp); };
+  }, [undo, redo, duplicateSelected, deleteSelected, selElem, curScreenIdx, selElIdx, updateElem]);
+
+  const startWorkspacePan = (e) => {
+    setOpenMenu(null);
+    if (e.button === 1 || spaceDown || e.target.dataset.workspace === '1') {
+      dragRef.current = { mode: 'pan', sx: e.clientX, sy: e.clientY, origPan: { ...pan } };
+    }
+  };
+
+  const startDragElem = (e, sIdx, eIdx, mode, handle = '') => {
+    e.stopPropagation();
+    setOpenMenu(null);
+    if (spaceDown || e.button === 1) return;
+    setCurScreenIdx(sIdx);
+    setSelElIdx(eIdx);
+    const el = project.screens[sIdx].elements[eIdx];
+    if (el.locked) return;
+    setHistory(h => [...h.slice(-39), project]);
+    setRedoStack([]);
+    dragRef.current = { mode, handle, sIdx, eIdx, sx: e.clientX, sy: e.clientY, orig: { ...el } };
+  };
+
+  useEffect(() => {
+    const onMove = (e) => {
+      const d = dragRef.current;
+      if (!d) return;
+      if (d.mode === 'pan') {
+        setPan({ x: d.origPan.x + (e.clientX - d.sx), y: d.origPan.y + (e.clientY - d.sy) });
+        return;
+      }
+      const dx = Math.round((e.clientX - d.sx) / zoom);
+      const dy = Math.round((e.clientY - d.sy) / zoom);
+      const { orig, sIdx, eIdx } = d;
+
+      if (d.mode === 'move') {
+        let nx = orig.x + dx, ny = orig.y + dy;
+        const newGuides = [];
+        const scr = project.screens[sIdx];
+        const snapX = [0, 240, 480], snapY = [0, 180, 360];
+        scr.elements.forEach((o, idx) => {
+          if (idx === eIdx) return;
+          snapX.push(o.x, o.x + o.w / 2, o.x + o.w);
+          snapY.push(o.y, o.y + o.h / 2, o.y + o.h);
+        });
+        for (const tx of snapX) {
+          if (Math.abs(nx - tx) <= 4) { nx = tx; newGuides.push({ type: 'v', pos: tx, sIdx }); break; }
+          if (Math.abs(nx + orig.w / 2 - tx) <= 4) { nx = Math.round(tx - orig.w / 2); newGuides.push({ type: 'v', pos: tx, sIdx }); break; }
+          if (Math.abs(nx + orig.w - tx) <= 4) { nx = Math.round(tx - orig.w); newGuides.push({ type: 'v', pos: tx, sIdx }); break; }
+        }
+        for (const ty of snapY) {
+          if (Math.abs(ny - ty) <= 4) { ny = ty; newGuides.push({ type: 'h', pos: ty, sIdx }); break; }
+          if (Math.abs(ny + orig.h / 2 - ty) <= 4) { ny = Math.round(ty - orig.h / 2); newGuides.push({ type: 'h', pos: ty, sIdx }); break; }
+          if (Math.abs(ny + orig.h - ty) <= 4) { ny = Math.round(ty - orig.h); newGuides.push({ type: 'h', pos: ty, sIdx }); break; }
+        }
+        setGuides(newGuides);
+        updateElem(sIdx, eIdx, { x: nx, y: ny }, false);
+      } else if (d.mode === 'resize') {
+        let { x, y, w, h } = orig;
+        if (d.handle.includes('e')) w = Math.max(8, orig.w + dx);
+        if (d.handle.includes('s')) h = Math.max(4, orig.h + dy);
+        if (d.handle.includes('w')) { const nw = Math.max(8, orig.w - dx); x = orig.x + (orig.w - nw); w = nw; }
+        if (d.handle.includes('n')) { const nh = Math.max(4, orig.h - dy); y = orig.y + (orig.h - nh); h = nh; }
+        updateElem(sIdx, eIdx, { x, y, w, h }, false);
+      }
+    };
+    const onUp = () => { if (dragRef.current) { dragRef.current = null; setGuides([]); } };
+    window.addEventListener('mousemove', onMove);
+    window.addEventListener('mouseup', onUp);
+    return () => { window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', onUp); };
+  }, [zoom, project, updateElem]);
+
+  const onWheel = (e) => {
+    if (e.ctrlKey || e.metaKey) {
+      e.preventDefault();
+      setZoom(z => Math.min(3, Math.max(0.4, +(z - e.deltaY * 0.0015).toFixed(2))));
+    } else {
+      setPan(p => ({ x: p.x - e.deltaX, y: p.y - e.deltaY }));
+    }
+  };
+
+  const downloadBlob = (filename, blob) => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    a.click();
+  };
+
+  const downloadText = (filename, content) => {
+    downloadBlob(filename, new Blob([content], { type: 'text/plain' }));
+  };
+
+  const exportZipBundle = async () => {
+    if (!window.JSZip) {
+      alert('JSZip not loaded; downloading individual files.');
+      return;
+    }
+    const zip = new window.JSZip();
+    const slug = (project.cfg.name || 'custom_theme').replace(/\s+/g, '_');
+    zip.file(`.rockbox/themes/${slug}.cfg`, generateCfg(project));
+    project.screens.forEach(s => {
+      zip.file(`.rockbox/wps/${slug}.${s.ext}`, generateSkinFile(s, project));
+      s.elements.filter(e => !e.hidden && e.type === 'sprite').forEach(sp => {
+        const bmpBytes = generateSpriteBmp(sp);
+        zip.file(`.rockbox/wps/${slug}/${sp.bmp || 'Sprite.bmp'}`, bmpBytes);
+      });
+    });
+    // Generate real RB12 .fnt files
+    const uiFnt = generateRockboxFntBinary('Inter', project.cfg.uiFontPx || 20, '400');
+    zip.file(`.rockbox/fonts/${project.cfg.uiFontFile || '20-Inter.fnt'}`, uiFnt);
+    (project.fonts || []).forEach(f => {
+      const fnt = generateRockboxFntBinary(f.family || 'Inter', f.px || 18, f.weight || '400');
+      zip.file(`.rockbox/fonts/${f.file}`, fnt);
+    });
+    if (project.cfg.iconset && project.cfg.iconset !== '-') {
+      zip.file(`.rockbox/icons/${project.cfg.iconset}`, generateIconsetBmp());
+    }
+    const blob = await zip.generateAsync({ type: 'blob' });
+    downloadBlob(`${slug}_rockbox_theme.zip`, blob);
+  };
+
+  const uploadCustomTtf = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const buf = await file.arrayBuffer();
+    const fam = file.name.replace(/\.[^.]+$/, '');
+    try {
+      const ff = new FontFace(fam, buf);
+      await ff.load();
+      document.fonts.add(ff);
+      const nextId = Math.max(2, ...(project.fonts || []).map(f => f.id + 1));
+      const fntName = `20-${fam}.fnt`;
+      commitProject(p => ({
+        ...p,
+        fonts: [...(p.fonts || []), { id: nextId, file: fntName, px: 20, family: fam, weight: '400' }]
+      }));
+    } catch { alert('Failed to load TTF/OTF font'); }
+    e.target.value = '';
+  };
+
+  const importProjectJson = (e) => {
+    const f = e.target.files[0];
+    if (!f) return;
+    const r = new FileReader();
+    r.onload = () => {
+      try {
+        const parsed = JSON.parse(r.result);
+        if (parsed.screens && parsed.cfg) {
+          commitProject(parsed);
+          setCurScreenIdx(0);
+          setSelElIdx(0);
+        }
+      } catch { alert('Invalid Rockbox Theme Project JSON'); }
+    };
+    r.readAsText(f);
+    e.target.value = '';
+  };
+
+  const alignSel = (mode) => {
+    if (!selElem) return;
+    if (mode === 'left') updateElem(curScreenIdx, selElIdx, { x: 0 });
+    if (mode === 'hcenter') updateElem(curScreenIdx, selElIdx, { x: Math.round((TARGET_W - selElem.w) / 2) });
+    if (mode === 'right') updateElem(curScreenIdx, selElIdx, { x: TARGET_W - selElem.w });
+    if (mode === 'top') updateElem(curScreenIdx, selElIdx, { y: 0 });
+    if (mode === 'vcenter') updateElem(curScreenIdx, selElIdx, { y: Math.round((TARGET_H - selElem.h) / 2) });
+    if (mode === 'bottom') updateElem(curScreenIdx, selElIdx, { y: TARGET_H - selElem.h });
+  };
+
+  const isElemVisibleInSim = (el) => {
+    if (el.hidden) return false;
+    if (!sampleMode) return true;
+    const c = el.cond || 'always';
+    if (c === 'has_art') return simState.hasArt;
+    if (c === 'no_art') return !simState.hasArt;
+    if (c === 'hold') return simState.hold;
+    if (c === 'no_hold') return !simState.hold;
+    if (c === 'vol_popup') return simState.volPopup;
+    if (c === 'charging') return simState.charging;
+    if (c === 'playing') return simState.playing;
+    return true;
+  };
+
+  const fontInfoForSlot = (fontId) => {
+    if (fontId === 0) return { px: 14, family: 'monospace', weight: '400' };
+    if (fontId === 1) return { px: project.cfg.uiFontPx || 20, family: 'Inter', weight: '400' };
+    const found = (project.fonts || []).find(f => f.id === fontId);
+    return found || { px: 18, family: 'Inter', weight: '400' };
+  };
+
+  const getInspectorCode = () => {
+    if (rightTab === 'cfg') return generateCfg(project);
+    const scr = project.screens.find(s => s.ext === rightTab);
+    return scr ? generateSkinFile(scr, project) : '';
+  };
+
+  return (
+    <div className="flex flex-col h-screen w-screen bg-[#1e1e1e] text-[#e5e5e5]">
+      {/* Classic Desktop Menu Bar */}
+      <div className="h-7 bg-[#202020] border-b border-[#333] flex items-center px-2 gap-1 text-xs relative z-50 shrink-0">
+        <span className="font-bold text-[#f59e0b] px-2">RB Studio</span>
+        {[
+          { id: 'file', label: 'File', items: [
+            ['New: Nugget Dark', () => { commitProject(PRESETS.nugget_dark); setOpenMenu(null); }],
+            ['New: Classic Split (.sbs)', () => { commitProject(PRESETS.ipod_split); setOpenMenu(null); }],
+            ['Import Project (.json)...', () => { fileInputRef.current.click(); setOpenMenu(null); }],
+            ['Save Project (.json)', () => { downloadText('rockbox_theme_project.json', JSON.stringify(project, null, 2)); setOpenMenu(null); }],
+            ['Upload TTF Font...', () => { fontInputRef.current.click(); setOpenMenu(null); }],
+          ]},
+          { id: 'edit', label: 'Edit', items: [
+            ['Undo (Ctrl+Z)', () => { undo(); setOpenMenu(null); }],
+            ['Redo (Ctrl+Y)', () => { redo(); setOpenMenu(null); }],
+            ['Duplicate (Ctrl+D)', () => { duplicateSelected(); setOpenMenu(null); }],
+            ['Delete (Del)', () => { deleteSelected(); setOpenMenu(null); }],
+          ]},
+          { id: 'view', label: 'View', items: [
+            ['Toggle Sample Tags', () => { setSampleMode(v => !v); setOpenMenu(null); }],
+            ['Zoom In', () => { setZoom(z => Math.min(3, +(z + 0.2).toFixed(2))); setOpenMenu(null); }],
+            ['Zoom Out', () => { setZoom(z => Math.max(0.4, +(z - 0.2).toFixed(2))); setOpenMenu(null); }],
+            ['Reset View', () => { setZoom(1.15); setPan({ x: 48, y: 44 }); setOpenMenu(null); }],
+          ]},
+          { id: 'export', label: 'Export', items: [
+            ['Export Full Theme (.zip with .fnt + .bmp)', () => { exportZipBundle(); setOpenMenu(null); }],
+            ['Download .cfg', () => { downloadText(`${project.cfg.name}.cfg`, generateCfg(project)); setOpenMenu(null); }],
+            ['Download .wps', () => { downloadText(`${project.cfg.name}.wps`, generateSkinFile(project.screens[0], project)); setOpenMenu(null); }],
+            ['Download .sbs', () => { downloadText(`${project.cfg.name}.sbs`, generateSkinFile(project.screens[1], project)); setOpenMenu(null); }],
+          ]},
+        ].map(m => (
+          <div key={m.id} className="relative">
+            <button onClick={() => setOpenMenu(openMenu === m.id ? null : m.id)}
+              className={`px-2.5 py-0.5 rounded ${openMenu === m.id ? 'bg-[#0d99ff] text-white' : 'hover:bg-[#333] text-[#d4d4d4]'}`}>
+              {m.label}
+            </button>
+            {openMenu === m.id && (
+              <div className="absolute left-0 top-6 w-64 bg-[#2c2c2c] border border-[#444] rounded shadow-xl py-1 z-50">
+                {m.items.map(([lbl, fn]) => (
+                  <button key={lbl} onClick={fn} className="w-full text-left px-3 py-1.5 hover:bg-[#0d99ff] hover:text-white text-xs">
+                    {lbl}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+        <div className="flex-1" />
+        <span className="text-[11px] text-[#888] px-2">Innioasis Y1 • 480×360 • RB12 .fnt + 24-bit .bmp</span>
+      </div>
+
+      {/* Top Toolbar */}
+      <div className="h-11 bg-[#2c2c2c] border-b border-[#3c3c3c] flex items-center px-3 gap-2 shrink-0 overflow-x-auto">
+        <div className="flex items-center gap-1 bg-[#1e1e1e] p-1 rounded-lg shrink-0">
+          {[
+            ['select', 'Move'],
+            ['viewport', '%V Text'],
+            ['rect', '%dr Rect'],
+            ['progressbar', '%pb Bar'],
+            ['albumart', '%Cl Art'],
+            ['sprite', '%xl Sprite'],
+            ['ui_viewport', '%Vi UI'],
+          ].map(([id, label]) => (
+            <button key={id} onClick={() => setTool(id)}
+              className={`px-2 py-1 rounded-md text-xs font-medium transition ${tool === id ? 'bg-[#0d99ff] text-white' : 'text-[#b3b3b3] hover:bg-[#383838]'}`}>
+              {label}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex items-center gap-1.5 pl-2 border-l border-[#3c3c3c] text-[11px] shrink-0">
+          <button onClick={() => setSampleMode(v => !v)} className={`px-2 py-1 rounded ${sampleMode ? 'bg-[#10b981]/20 text-[#34d399]' : 'bg-[#1e1e1e] text-[#888]'}`}>Tags</button>
+          {[['hasArt','Art'],['hold','Hold'],['volPopup','Vol'],['charging','Chg']].map(([k, lbl]) => (
+            <button key={k} onClick={() => setSimState(s => ({ ...s, [k]: !s[k] }))}
+              className={`px-1.5 py-1 rounded ${simState[k] ? 'bg-[#0d99ff]/25 text-[#60a5fa]' : 'bg-[#1e1e1e] text-[#777]'}`}>{lbl}</button>
+          ))}
+        </div>
+
+        <div className="flex-1" />
+
+        <div className="flex items-center gap-1 bg-[#1e1e1e] px-2 py-1 rounded-lg text-xs shrink-0">
+          <button onClick={() => setZoom(z => Math.max(0.4, +(z - 0.15).toFixed(2)))} className="px-1.5 hover:text-white">-</button>
+          <span className="w-10 text-center font-mono">{Math.round(zoom * 100)}%</span>
+          <button onClick={() => setZoom(z => Math.min(3, +(z + 0.15).toFixed(2)))} className="px-1.5 hover:text-white">+</button>
+        </div>
+
+        <button onClick={exportZipBundle} className="px-3 py-1.5 rounded-md bg-[#0d99ff] hover:bg-[#0b87e3] text-white text-xs font-semibold shrink-0">Export .zip (.cfg + .wps + .fnt + .bmp)</button>
+        <input ref={fileInputRef} type="file" accept=".json" onChange={importProjectJson} className="hidden" />
+        <input ref={fontInputRef} type="file" accept=".ttf,.otf" onChange={uploadCustomTtf} className="hidden" />
+      </div>
+
+      {/* Main 3-Pane Studio */}
+      <div className="flex flex-1 min-h-0">
+        {/* Left Layers */}
+        <div className="w-60 bg-[#2c2c2c] border-r border-[#3c3c3c] flex flex-col shrink-0">
+          <div className="p-2.5 border-b border-[#3c3c3c] text-[11px] font-semibold uppercase tracking-wider text-[#999]">Skin Files</div>
+          <div className="p-1.5 space-y-0.5 border-b border-[#3c3c3c]">
+            {project.screens.map((s, si) => (
+              <div key={s.id} onClick={() => { setCurScreenIdx(si); setSelElIdx(0); }}
+                className={`px-2.5 py-1.5 rounded text-xs flex items-center justify-between cursor-pointer ${si === curScreenIdx ? 'bg-[#383838] text-white font-semibold' : 'text-[#b3b3b3] hover:bg-[#333]'}`}>
+                <span>{s.title}</span>
+                <span className="text-[10px] text-[#777]">{s.elements.length}</span>
+              </div>
+            ))}
+          </div>
+
+          <div className="p-2.5 border-b border-[#3c3c3c] flex items-center justify-between">
+            <span className="text-[11px] font-semibold uppercase tracking-wider text-[#999]">Viewports & Layers</span>
+            <div className="flex gap-1">
+              <button onClick={() => reorderElem(-1)} className="px-1.5 py-0.5 text-[10px] bg-[#383838] rounded hover:bg-[#444]">↓</button>
+              <button onClick={() => reorderElem(1)} className="px-1.5 py-0.5 text-[10px] bg-[#383838] rounded hover:bg-[#444]">↑</button>
+            </div>
+          </div>
+          <div className="flex-1 overflow-y-auto p-1.5 space-y-0.5">
+            {[...curScreen.elements].map((el, i) => ({ el, i })).reverse().map(({ el, i }) => (
+              <div key={el.id + '_' + i} onClick={() => setSelElIdx(i)}
+                className={`px-2 py-1.5 rounded text-xs flex items-center justify-between cursor-pointer group ${i === selElIdx ? 'bg-[#0d99ff]/25 border border-[#0d99ff] text-white' : 'text-[#ccc] hover:bg-[#333] border border-transparent'}`}>
+                <div className="flex items-center gap-1.5 truncate">
+                  <span className="text-[10px] px-1 rounded bg-[#1e1e1e] text-[#f59e0b] font-mono">
+                    {el.type === 'viewport' ? (el.cond && el.cond !== 'always' ? '%Vl' : '%V') : el.type === 'ui_viewport' ? '%Vi' : el.type === 'rect' ? '%dr' : el.type === 'progressbar' ? '%pb' : el.type === 'sprite' ? '%xd' : '%Cl'}
+                  </span>
+                  <span className={`truncate ${el.hidden ? 'opacity-40 line-through' : ''}`}>{el.id}</span>
+                </div>
+                <div className="flex items-center gap-1 opacity-60 group-hover:opacity-100">
+                  <button onClick={(e) => { e.stopPropagation(); updateElem(curScreenIdx, i, { hidden: !el.hidden }); }} className="text-[10px] px-1 hover:text-white">{el.hidden ? '🚫' : '👁'}</button>
+                  <button onClick={(e) => { e.stopPropagation(); updateElem(curScreenIdx, i, { locked: !el.locked }); }} className="text-[10px] px-1 hover:text-white">{el.locked ? '🔒' : '🔓'}</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Center Canvas */}
+        <div data-workspace="1" onMouseDown={startWorkspacePan} onWheel={onWheel}
+          className={`flex-1 figma-canvas-bg relative overflow-hidden ${spaceDown ? 'cursor-grab' : (tool !== 'select' ? 'cursor-crosshair' : 'cursor-default')}`}>
+          <div style={{ transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`, transformOrigin: '0 0' }}
+            className="absolute top-0 left-0 flex gap-14 items-start">
+            {project.screens.map((scr, sIdx) => (
+              <div key={scr.id} className="relative">
+                <div onClick={() => setCurScreenIdx(sIdx)}
+                  className={`mb-2 text-xs font-medium cursor-pointer flex items-center gap-2 ${sIdx === curScreenIdx ? 'text-[#0d99ff]' : 'text-[#888]'}`}>
+                  <span>{scr.title}</span>
+                  <span className="text-[10px] opacity-60">480 × 360</span>
+                </div>
+
+                <div
+                  onClick={(e) => {
+                    if (tool !== 'select') {
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      const x = (e.clientX - rect.left) / zoom;
+                      const y = (e.clientY - rect.top) / zoom;
+                      setCurScreenIdx(sIdx);
+                      addElement(tool, x - 40, y - 14);
+                    }
+                  }}
+                  style={{ width: TARGET_W, height: TARGET_H, backgroundColor: project.cfg.bgColor || '#12151C' }}
+                  className={`relative shadow-2xl overflow-hidden ${sIdx === curScreenIdx ? 'ring-2 ring-[#0d99ff]' : 'ring-1 ring-[#444]'}`}>
+                  {scr.elements.map((el, eIdx) => {
+                    if (!isElemVisibleInSim(el)) return null;
+                    const isSel = (sIdx === curScreenIdx && eIdx === selElIdx);
+                    const fi = fontInfoForSlot(el.fontId ?? 1);
+                    return (
+                      <div key={el.id + '_' + eIdx}
+                        onMouseDown={(e) => startDragElem(e, sIdx, eIdx, 'move')}
+                        style={{ position: 'absolute', left: el.x, top: el.y, width: el.w, height: el.h, cursor: el.locked ? 'not-allowed' : 'move' }}>
+                        {el.type === 'rect' && (
+                          <div style={{ width: '100%', height: '100%', backgroundColor: el.fill || '#1B202B' }} />
+                        )}
+                        {el.type === 'albumart' && (
+                          <div className="w-full h-full bg-[#242b38] border border-[#3b475e] flex flex-col items-center justify-center text-[#60a5fa]">
+                            <div className="text-2xl font-bold">♪</div>
+                            <div className="text-[10px] font-mono opacity-80 mt-1">%Cd ({el.w}×{el.h})</div>
+                          </div>
+                        )}
+                        {el.type === 'sprite' && (
+                          <div className="w-full h-full bg-[#242b38]/80 border border-dashed border-[#f59e0b]/70 flex items-center justify-center text-[9px] font-mono text-[#fbbf24]">
+                            {el.presetKind === 'battery' ? '🔋' : el.presetKind === 'play' ? '▶' : (el.bmp || 'bmp')}
+                          </div>
+                        )}
+                        {el.type === 'progressbar' && (
+                          <div style={{ width: '100%', height: '100%', backgroundColor: el.bg || '#252B38' }} className="relative overflow-hidden">
+                            <div style={{ width: '42%', height: '100%', backgroundColor: el.fg || '#3B82F6' }} />
+                          </div>
+                        )}
+                        {el.type === 'ui_viewport' && (
+                          <div style={{
+                            width: '100%', height: '100%',
+                            backgroundColor: el.bg && el.bg !== '-' ? el.bg : project.cfg.bgColor,
+                            color: el.fg && el.fg !== '-' ? el.fg : project.cfg.fgColor,
+                            fontSize: fi.px,
+                            fontFamily: `"${fi.family}", system-ui, sans-serif`
+                          }} className="border border-dashed border-[#0d99ff]/60 p-2 overflow-hidden">
+                            <div style={{
+                              background: project.cfg.selectorType === 'bar (gradient)'
+                                ? `linear-gradient(180deg, ${project.cfg.selStartColor}, ${project.cfg.selEndColor})`
+                                : project.cfg.selStartColor,
+                              color: project.cfg.selTextColor
+                            }} className="px-2 py-1 rounded-sm font-medium mb-1 flex items-center gap-2">
+                              {project.cfg.showIcons === 'on' && <span className="w-3 h-3 bg-white/70 rounded-sm inline-block" />} Database
+                            </div>
+                            <div className="px-2 py-1 opacity-85 flex items-center gap-2">{project.cfg.showIcons === 'on' && <span className="w-3 h-3 bg-white/40 rounded-sm inline-block" />} Playlists</div>
+                            <div className="px-2 py-1 opacity-85 flex items-center gap-2">{project.cfg.showIcons === 'on' && <span className="w-3 h-3 bg-white/40 rounded-sm inline-block" />} Files</div>
+                            <div className="px-2 py-1 opacity-85 flex items-center gap-2">{project.cfg.showIcons === 'on' && <span className="w-3 h-3 bg-white/40 rounded-sm inline-block" />} Settings</div>
+                          </div>
+                        )}
+                        {el.type === 'viewport' && (
+                          <div style={{
+                            width: '100%', height: '100%',
+                            backgroundColor: el.bg && el.bg !== '-' ? el.bg : 'transparent',
+                            color: el.fg && el.fg !== '-' ? el.fg : project.cfg.fgColor,
+                            fontSize: fi.px,
+                            fontWeight: fi.weight || '400',
+                            fontFamily: `"${fi.family}", system-ui, sans-serif`,
+                            lineHeight: 1.15,
+                            textAlign: el.align === 'c' ? 'center' : (el.align === 'r' ? 'right' : 'left'),
+                            whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                          }}>
+                            {resolveRockboxTags(el.text || '', sampleMode)}
+                          </div>
+                        )}
+                        {isSel && (
+                          <div className="absolute inset-0 border-[1.5px] border-[#0d99ff] pointer-events-none">
+                            {['nw','n','ne','e','se','s','sw','w'].map(h => {
+                              const posStyle = {
+                                nw: { left: -4, top: -4, cursor: 'nwse-resize' },
+                                n:  { left: '50%', top: -4, marginLeft: -4, cursor: 'ns-resize' },
+                                ne: { right: -4, top: -4, cursor: 'nesw-resize' },
+                                e:  { right: -4, top: '50%', marginTop: -4, cursor: 'ew-resize' },
+                                se: { right: -4, bottom: -4, cursor: 'nwse-resize' },
+                                s:  { left: '50%', bottom: -4, marginLeft: -4, cursor: 'ns-resize' },
+                                sw: { left: -4, bottom: -4, cursor: 'nesw-resize' },
+                                w:  { left: -4, top: '50%', marginTop: -4, cursor: 'ew-resize' },
+                              }[h];
+                              return (
+                                <div key={h} style={posStyle}
+                                  onMouseDown={(e) => startDragElem(e, sIdx, eIdx, 'resize', h)}
+                                  className="absolute w-2 h-2 bg-white border border-[#0d99ff] pointer-events-auto" />
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+
+                  {guides.filter(g => g.sIdx === sIdx).map((g, gi) => (
+                    g.type === 'v'
+                      ? <div key={gi} style={{ left: g.pos }} className="absolute top-0 bottom-0 w-px bg-[#ff3b30] pointer-events-none" />
+                      : <div key={gi} style={{ top: g.pos }} className="absolute left-0 right-0 h-px bg-[#ff3b30] pointer-events-none" />
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* Right Inspector & Rockbox Code */}
+        <div className="w-80 bg-[#2c2c2c] border-l border-[#3c3c3c] flex flex-col shrink-0">
+          <div className="flex border-b border-[#3c3c3c] text-[11px]">
+            {[['design','Design'],['fonts','Fonts'],['wps','.wps'],['sbs','.sbs'],['fms','.fms'],['cfg','.cfg']].map(([id, lbl]) => (
+              <button key={id} onClick={() => setRightTab(id)}
+                className={`flex-1 py-2 font-semibold ${rightTab === id ? 'text-white border-b-2 border-[#0d99ff]' : 'text-[#888]'}`}>
+                {lbl}
+              </button>
+            ))}
+          </div>
+
+          {rightTab === 'fonts' ? (
+            <div className="flex-1 overflow-y-auto p-3 space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold">Rockbox Fonts (%Fl + .fnt)</span>
+                <button onClick={() => fontInputRef.current.click()} className="px-2 py-1 bg-[#0d99ff] text-white rounded text-[11px] font-semibold">+ Upload TTF</button>
+              </div>
+              <div className="p-2 bg-[#1e1e1e] rounded border border-[#3c3c3c] space-y-1.5">
+                <div className="text-[11px] text-[#94a3b8]">UI Theme Font (.cfg)</div>
+                <div className="grid grid-cols-3 gap-1.5">
+                  <input value={project.cfg.uiFontFile || ''} onChange={e => commitProject(p => ({ ...p, cfg: { ...p.cfg, uiFontFile: e.target.value } }))} className="col-span-2 bg-[#2c2c2c] border border-[#3c3c3c] rounded px-1.5 py-1 text-xs font-mono" />
+                  <input type="number" value={project.cfg.uiFontPx || 20} onChange={e => commitProject(p => ({ ...p, cfg: { ...p.cfg, uiFontPx: parseInt(e.target.value || 20, 10) } }))} className="bg-[#2c2c2c] border border-[#3c3c3c] rounded px-1.5 py-1 text-xs font-mono" />
+                </div>
+              </div>
+              {(project.fonts || []).map((f, fi) => (
+                <div key={f.id} className="p-2 bg-[#1e1e1e] rounded border border-[#3c3c3c] space-y-1.5">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-mono text-[#f59e0b]">%Fl({f.id}, ...)</span>
+                    <button onClick={() => downloadBlob(f.file, generateRockboxFntBinary(f.family || 'Inter', f.px, f.weight || '400'))}
+                      className="text-[10px] px-1.5 py-0.5 bg-[#383838] rounded hover:bg-[#444]">Download .fnt</button>
+                  </div>
+                  <div className="grid grid-cols-3 gap-1.5">
+                    <input value={f.file} onChange={e => commitProject(p => ({ ...p, fonts: p.fonts.map((x, idx) => idx === fi ? { ...x, file: e.target.value } : x) }))} className="col-span-2 bg-[#2c2c2c] border border-[#3c3c3c] rounded px-1.5 py-1 text-xs font-mono" />
+                    <input type="number" min="8" max="64" value={f.px} onChange={e => commitProject(p => ({ ...p, fonts: p.fonts.map((x, idx) => idx === fi ? { ...x, px: parseInt(e.target.value || 16, 10) } : x) }))} className="bg-[#2c2c2c] border border-[#3c3c3c] rounded px-1.5 py-1 text-xs font-mono" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : rightTab !== 'design' ? (
+            <div className="flex-1 p-2.5 flex flex-col gap-2 min-h-0">
+              <textarea readOnly value={getInspectorCode()}
+                className="flex-1 w-full bg-[#1e1e1e] text-[#a5f3fc] font-mono text-[11px] p-2.5 rounded border border-[#3c3c3c] resize-none outline-none" />
+              <div className="grid grid-cols-2 gap-2">
+                <button onClick={() => navigator.clipboard.writeText(getInspectorCode())}
+                  className="py-1.5 bg-[#383838] hover:bg-[#444] rounded text-xs font-semibold">Copy</button>
+                <button onClick={() => {
+                  const slug = (project.cfg.name || 'custom_theme').replace(/\s+/g, '_');
+                  downloadText(`${slug}.${rightTab}`, getInspectorCode());
+                }} className="py-1.5 bg-[#0d99ff] hover:bg-[#0b87e3] text-white rounded text-xs font-semibold">Download .{rightTab}</button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex-1 overflow-y-auto p-3 space-y-4">
+              {/* Theme .cfg Options */}
+              <div className="space-y-2 pb-3 border-b border-[#3c3c3c]">
+                <div className="text-[11px] font-semibold uppercase tracking-wider text-[#999]">Theme Settings (.cfg)</div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-[10px] text-[#888]">Theme Name</label>
+                    <input value={project.cfg.name} onChange={e => commitProject(p => ({ ...p, cfg: { ...p.cfg, name: e.target.value } }))}
+                      className="w-full bg-[#1e1e1e] border border-[#3c3c3c] rounded px-2 py-1 text-xs" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-[#888]">Selector Type</label>
+                    <select value={project.cfg.selectorType} onChange={e => commitProject(p => ({ ...p, cfg: { ...p.cfg, selectorType: e.target.value } }))}
+                      className="w-full bg-[#1e1e1e] border border-[#3c3c3c] rounded px-1.5 py-1 text-xs">
+                      <option value="bar (gradient)">bar (gradient)</option>
+                      <option value="bar (color)">bar (color)</option>
+                      <option value="bar (inverse)">bar (inverse)</option>
+                      <option value="pointer">pointer</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-[#888]">BG Color</label>
+                    <div className="flex gap-1">
+                      <input type="color" value={project.cfg.bgColor} onChange={e => commitProject(p => ({ ...p, cfg: { ...p.cfg, bgColor: e.target.value } }))} className="w-6 h-6 bg-transparent border-0 p-0 cursor-pointer" />
+                      <input value={project.cfg.bgColor} onChange={e => commitProject(p => ({ ...p, cfg: { ...p.cfg, bgColor: e.target.value } }))} className="w-full bg-[#1e1e1e] border border-[#3c3c3c] rounded px-1.5 py-0.5 text-xs font-mono" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-[#888]">FG Color</label>
+                    <div className="flex gap-1">
+                      <input type="color" value={project.cfg.fgColor} onChange={e => commitProject(p => ({ ...p, cfg: { ...p.cfg, fgColor: e.target.value } }))} className="w-6 h-6 bg-transparent border-0 p-0 cursor-pointer" />
+                      <input value={project.cfg.fgColor} onChange={e => commitProject(p => ({ ...p, cfg: { ...p.cfg, fgColor: e.target.value } }))} className="w-full bg-[#1e1e1e] border border-[#3c3c3c] rounded px-1.5 py-0.5 text-xs font-mono" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-[#888]">Selector Start</label>
+                    <div className="flex gap-1">
+                      <input type="color" value={project.cfg.selStartColor} onChange={e => commitProject(p => ({ ...p, cfg: { ...p.cfg, selStartColor: e.target.value } }))} className="w-6 h-6 bg-transparent border-0 p-0 cursor-pointer" />
+                      <input value={project.cfg.selStartColor} onChange={e => commitProject(p => ({ ...p, cfg: { ...p.cfg, selStartColor: e.target.value } }))} className="w-full bg-[#1e1e1e] border border-[#3c3c3c] rounded px-1.5 py-0.5 text-xs font-mono" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-[#888]">Selector End</label>
+                    <div className="flex gap-1">
+                      <input type="color" value={project.cfg.selEndColor} onChange={e => commitProject(p => ({ ...p, cfg: { ...p.cfg, selEndColor: e.target.value } }))} className="w-6 h-6 bg-transparent border-0 p-0 cursor-pointer" />
+                      <input value={project.cfg.selEndColor} onChange={e => commitProject(p => ({ ...p, cfg: { ...p.cfg, selEndColor: e.target.value } }))} className="w-full bg-[#1e1e1e] border border-[#3c3c3c] rounded px-1.5 py-0.5 text-xs font-mono" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-[#888]">Iconset (.bmp)</label>
+                    <input value={project.cfg.iconset || '-'} onChange={e => commitProject(p => ({ ...p, cfg: { ...p.cfg, iconset: e.target.value } }))} className="w-full bg-[#1e1e1e] border border-[#3c3c3c] rounded px-1.5 py-1 text-xs font-mono" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-[#888]">Show Icons</label>
+                    <select value={project.cfg.showIcons} onChange={e => commitProject(p => ({ ...p, cfg: { ...p.cfg, showIcons: e.target.value } }))}
+                      className="w-full bg-[#1e1e1e] border border-[#3c3c3c] rounded px-1.5 py-1 text-xs">
+                      <option value="on">on</option>
+                      <option value="off">off</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              {selElem ? (
+                <>
+                  <div className="space-y-1.5 pb-3 border-b border-[#3c3c3c]">
+                    <div className="text-[11px] font-semibold uppercase tracking-wider text-[#999]">Align to 480×360</div>
+                    <div className="grid grid-cols-6 gap-1">
+                      {[['left','⇤'],['hcenter','↔'],['right','⇥'],['top','⤒'],['vcenter','↕'],['bottom','⤓']].map(([m, sym]) => (
+                        <button key={m} onClick={() => alignSel(m)} className="py-1 bg-[#1e1e1e] hover:bg-[#383838] rounded text-xs">{sym}</button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="space-y-2 pb-3 border-b border-[#3c3c3c]">
+                    <div className="text-[11px] font-semibold uppercase tracking-wider text-[#999]">Viewport & Condition</div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-[10px] text-[#888]">ID / Label</label>
+                        <input value={selElem.id} onChange={e => updateElem(curScreenIdx, selElIdx, { id: e.target.value })}
+                          className="w-full bg-[#1e1e1e] border border-[#3c3c3c] rounded px-2 py-1 text-xs font-mono" />
+                      </div>
+                      <div>
+                        <label className="text-[10px] text-[#888]">Condition (%Vd)</label>
+                        <select value={selElem.cond || 'always'} onChange={e => updateElem(curScreenIdx, selElIdx, { cond: e.target.value })}
+                          className="w-full bg-[#1e1e1e] border border-[#3c3c3c] rounded px-1.5 py-1 text-xs">
+                          {COND_OPTIONS.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+                        </select>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-4 gap-1.5">
+                      {[['X','x'],['Y','y'],['W','w'],['H','h']].map(([lbl, k]) => (
+                        <div key={k}>
+                          <label className="text-[10px] text-[#888]">{lbl}</label>
+                          <input type="number" value={selElem[k]} onChange={e => updateElem(curScreenIdx, selElIdx, { [k]: parseInt(e.target.value || 0, 10) })}
+                            className="w-full bg-[#1e1e1e] border border-[#3c3c3c] rounded px-1.5 py-1 text-xs font-mono" />
+                        </div>
+                      ))}
+                    </div>
+                    {(selElem.type === 'rect' || selElem.type === 'viewport') && (
+                      <label className="flex items-center gap-1.5 text-xs cursor-pointer pt-1">
+                        <input type="checkbox" checked={!!selElem.backdropLayer} onChange={e => updateElem(curScreenIdx, selElIdx, { backdropLayer: e.target.checked })} className="accent-[#0d99ff]" />
+                        Draw to Backdrop Layer (%VB)
+                      </label>
+                    )}
+                  </div>
+
+                  {(selElem.type === 'rect' || selElem.type === 'viewport' || selElem.type === 'progressbar' || selElem.type === 'ui_viewport') && (
+                    <div className="space-y-2 pb-3 border-b border-[#3c3c3c]">
+                      <div className="text-[11px] font-semibold uppercase tracking-wider text-[#999]">Colors (%Vf / %Vb / %dr)</div>
+                      {selElem.type === 'rect' ? (
+                        <div className="flex gap-2 items-center">
+                          <input type="color" value={selElem.fill || '#1B202B'} onChange={e => updateElem(curScreenIdx, selElIdx, { fill: e.target.value })} className="w-8 h-8 bg-transparent border-0 p-0 cursor-pointer" />
+                          <input value={selElem.fill || ''} onChange={e => updateElem(curScreenIdx, selElIdx, { fill: e.target.value })} className="flex-1 bg-[#1e1e1e] border border-[#3c3c3c] rounded px-2 py-1 text-xs font-mono" />
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-2 gap-2">
+                          <div>
+                            <label className="text-[10px] text-[#888]">Foreground (%Vf)</label>
+                            <input value={selElem.fg || '-'} onChange={e => updateElem(curScreenIdx, selElIdx, { fg: e.target.value })} className="w-full bg-[#1e1e1e] border border-[#3c3c3c] rounded px-2 py-1 text-xs font-mono" />
+                          </div>
+                          <div>
+                            <label className="text-[10px] text-[#888]">Background (%Vb)</label>
+                            <input value={selElem.bg || '-'} onChange={e => updateElem(curScreenIdx, selElIdx, { bg: e.target.value })} className="w-full bg-[#1e1e1e] border border-[#3c3c3c] rounded px-2 py-1 text-xs font-mono" />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {selElem.type === 'sprite' && (
+                    <div className="space-y-2 pb-3 border-b border-[#3c3c3c]">
+                      <div className="text-[11px] font-semibold uppercase tracking-wider text-[#999]">Bitmap Sprite (%xl / %xd)</div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="text-[10px] text-[#888]">BMP Filename</label>
+                          <input value={selElem.bmp || ''} onChange={e => updateElem(curScreenIdx, selElIdx, { bmp: e.target.value })} className="w-full bg-[#1e1e1e] border border-[#3c3c3c] rounded px-2 py-1 text-xs font-mono" />
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-[#888]">Subimages</label>
+                          <input type="number" min="1" value={selElem.subimages || 1} onChange={e => updateElem(curScreenIdx, selElIdx, { subimages: Math.max(1, parseInt(e.target.value || 1, 10)) })} className="w-full bg-[#1e1e1e] border border-[#3c3c3c] rounded px-2 py-1 text-xs font-mono" />
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-2">
+                        <div>
+                          <label className="text-[10px] text-[#888]">Driver Tag</label>
+                          <input value={selElem.tag || '%bl'} onChange={e => updateElem(curScreenIdx, selElIdx, { tag: e.target.value })} className="w-full bg-[#1e1e1e] border border-[#3c3c3c] rounded px-2 py-1 text-xs font-mono" />
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-[#888]">Generator Preset</label>
+                          <select value={selElem.presetKind || 'battery'} onChange={e => updateElem(curScreenIdx, selElIdx, { presetKind: e.target.value })} className="w-full bg-[#1e1e1e] border border-[#3c3c3c] rounded px-1.5 py-1 text-xs">
+                            <option value="battery">Battery</option>
+                            <option value="play">Play/Pause</option>
+                            <option value="custom">Custom</option>
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {(selElem.type === 'viewport' || selElem.type === 'ui_viewport') && (
+                    <div className="space-y-2 pb-3 border-b border-[#3c3c3c]">
+                      <div className="text-[11px] font-semibold uppercase tracking-wider text-[#999]">Font & Format</div>
+                      <div>
+                        <label className="text-[10px] text-[#888]">Font Slot (%Fl)</label>
+                        <select value={selElem.fontId ?? 1} onChange={e => updateElem(curScreenIdx, selElIdx, { fontId: parseInt(e.target.value, 10) })}
+                          className="w-full bg-[#1e1e1e] border border-[#3c3c3c] rounded px-2 py-1 text-xs">
+                          {(project.fonts || []).map(f => <option key={f.id} value={f.id}>{f.id}: {f.file} ({f.px}px)</option>)}
+                          <option value={1}>1: Theme UI Font</option>
+                          <option value={0}>0: Sysfixed</option>
+                        </select>
+                      </div>
+                      {selElem.type === 'viewport' && (
+                        <>
+                          <div className="grid grid-cols-2 gap-2">
+                            <div>
+                              <label className="text-[10px] text-[#888]">Align</label>
+                              <select value={selElem.align || 'l'} onChange={e => updateElem(curScreenIdx, selElIdx, { align: e.target.value })}
+                                className="w-full bg-[#1e1e1e] border border-[#3c3c3c] rounded px-2 py-1 text-xs">
+                                <option value="l">%al Left</option>
+                                <option value="c">%ac Center</option>
+                                <option value="r">%ar Right</option>
+                              </select>
+                            </div>
+                            <div className="flex items-end pb-1">
+                              <label className="flex items-center gap-1.5 text-xs cursor-pointer">
+                                <input type="checkbox" checked={!!selElem.scroll} onChange={e => updateElem(curScreenIdx, selElIdx, { scroll: e.target.checked })} className="accent-[#0d99ff]" />
+                                Scroll (%s)
+                              </label>
+                            </div>
+                          </div>
+                          <div>
+                            <label className="text-[10px] text-[#888]">Format Line</label>
+                            <input value={selElem.text || ''} onChange={e => updateElem(curScreenIdx, selElIdx, { text: e.target.value })}
+                              className="w-full bg-[#1e1e1e] border border-[#3c3c3c] rounded px-2 py-1 text-xs font-mono" />
+                          </div>
+                          <div className="flex flex-wrap gap-1 pt-1">
+                            {ROCKBOX_TAGS.map(t => (
+                              <button key={t.tag} onClick={() => updateElem(curScreenIdx, selElIdx, { text: (selElem.text || '') + t.tag })}
+                                className="px-1.5 py-0.5 bg-[#1e1e1e] hover:bg-[#383838] border border-[#3c3c3c] rounded text-[10px] font-mono text-[#93c5fd]">
+                                {t.label}
+                              </button>
+                            ))}
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <button onClick={duplicateSelected} className="py-1.5 bg-[#383838] hover:bg-[#444] rounded text-xs font-medium">Duplicate</button>
+                    <button onClick={deleteSelected} className="py-1.5 bg-[#7f1d1d] hover:bg-[#991b1b] text-white rounded text-xs font-medium">Delete</button>
+                  </div>
+                </>
+              ) : (
+                <div className="text-xs text-[#777]">Select an element on the 480×360 artboard or Layers panel.</div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>

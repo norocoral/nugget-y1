@@ -9,6 +9,8 @@ import sys
 import zlib
 import struct
 import os
+import subprocess
+import tempfile
 
 _FONT_5X7 = {
     ' ': (0x00, 0x00, 0x00, 0x00, 0x00),
@@ -55,11 +57,91 @@ _FONT_5X7 = {
     'Z': (0x61, 0x51, 0x49, 0x45, 0x43),
 }
 
+def _ensure_ttf_renderer() -> tuple[str | None, str | None]:
+    tools_dir = os.path.dirname(os.path.abspath(__file__))
+    main_dir = os.path.dirname(tools_dir)
+    font_candidates = [
+        os.path.join(main_dir, "configapp", "assets", "fonts", "WantedSans-SemiBold.ttf"),
+        os.path.join(main_dir, "configapp", "assets", "fonts", "WantedSans-Regular.ttf"),
+    ]
+    font_path = next((p for p in font_candidates if os.path.isfile(p)), None)
+    if not font_path:
+        return None, None
+
+    src_c = os.path.join(tools_dir, "ttf_overlay.c")
+    inc_dir = os.path.join(main_dir, "configapp", "third_party")
+    bin_path = os.path.join(tempfile.gettempdir(), "y1_ttf_overlay")
+    if not os.path.isfile(bin_path) or os.path.getmtime(src_c) > os.path.getmtime(bin_path):
+        subprocess.check_call(["gcc", "-O2", f"-I{inc_dir}", src_c, "-o", bin_path, "-lm"])
+    return bin_path, font_path
+
+
 def _draw_text_xrgb(pixels: bytearray, w: int, h: int, lines: list[str], scale: int = 2) -> None:
-    line_h = 7 * scale
-    line_gap = 4
+    bin_path, font_path = _ensure_ttf_renderer()
+    px_size = 16 if scale >= 2 else 12
+    line_gap = 3
     margin_x = 12
     margin_y = 12
+
+    if bin_path and font_path:
+        rendered = []
+        for text in lines:
+            out = subprocess.check_output([bin_path, font_path, str(px_size), text])
+            rw, rh = struct.unpack("<II", out[:8])
+            alpha_buf = out[8:8 + rw * rh]
+            rendered.append((rw, rh, alpha_buf))
+
+        total_h = sum(rh for _, rh, _ in rendered) + max(0, len(rendered) - 1) * line_gap
+        y_cur = h - margin_y - total_h
+
+        for rw, rh, alpha_buf in rendered:
+            x0 = max(0, margin_x - 3)
+            y0 = max(0, y_cur - 2)
+            x1 = min(w, margin_x + rw + 3)
+            y1 = min(h, y_cur + rh + 2)
+
+            lum_sum = 0.0
+            cnt = 0
+            for py in range(y0, y1):
+                row_off = py * w * 4
+                for px in range(x0, x1):
+                    idx = row_off + px * 4
+                    b_v, g_v, r_v = pixels[idx], pixels[idx + 1], pixels[idx + 2]
+                    lum_sum += 0.2126 * r_v + 0.7152 * g_v + 0.0722 * b_v
+                    cnt += 1
+
+            avg_lum = (lum_sum / cnt) if cnt > 0 else 0.0
+            fg_r, fg_g, fg_b = (18, 20, 26) if avg_lum >= 140.0 else (245, 247, 250)
+
+            for r in range(rh):
+                dy = y_cur + r
+                if not (0 <= dy < h):
+                    continue
+                for c in range(rw):
+                    dx = margin_x + c
+                    if not (0 <= dx < w):
+                        continue
+                    a = alpha_buf[r * rw + c]
+                    if a == 0:
+                        continue
+                    idx = (dy * w + dx) * 4
+                    if a == 255:
+                        pixels[idx] = fg_b
+                        pixels[idx + 1] = fg_g
+                        pixels[idx + 2] = fg_r
+                        pixels[idx + 3] = 0xFF
+                    else:
+                        inv = 255 - a
+                        pixels[idx] = (fg_b * a + pixels[idx] * inv) // 255
+                        pixels[idx + 1] = (fg_g * a + pixels[idx + 1] * inv) // 255
+                        pixels[idx + 2] = (fg_r * a + pixels[idx + 2] * inv) // 255
+                        pixels[idx + 3] = 0xFF
+            y_cur += rh + line_gap
+        return
+
+    # Fallback 5x7 bitmap renderer (no drop shadow, adaptive contrast)
+    line_h = 7 * scale
+    line_gap = 4
     total_h = len(lines) * line_h + max(0, len(lines) - 1) * line_gap
     y0 = h - margin_y - total_h
 
@@ -73,6 +155,19 @@ def _draw_text_xrgb(pixels: bytearray, w: int, h: int, lines: list[str], scale: 
 
     for li, text in enumerate(lines):
         y_base = y0 + li * (line_h + line_gap)
+        tw = len(text) * 6 * scale
+        bx0, by0 = max(0, margin_x - 2), max(0, y_base - 2)
+        bx1, by1 = min(w, margin_x + tw + 2), min(h, y_base + line_h + 2)
+        lum_sum = 0.0
+        cnt = 0
+        for py in range(by0, by1):
+            for px in range(bx0, bx1):
+                idx = (py * w + px) * 4
+                lum_sum += 0.2126 * pixels[idx + 2] + 0.7152 * pixels[idx + 1] + 0.0722 * pixels[idx]
+                cnt += 1
+        avg_lum = (lum_sum / cnt) if cnt > 0 else 0.0
+        fg_r, fg_g, fg_b = (18, 20, 26) if avg_lum >= 140.0 else (245, 247, 250)
+
         x_cur = margin_x
         for ch in text.upper():
             glyph = _FONT_5X7.get(ch, _FONT_5X7[' '])
@@ -81,10 +176,7 @@ def _draw_text_xrgb(pixels: bytearray, w: int, h: int, lines: list[str], scale: 
                     if col_bits & (1 << row_idx):
                         for sy in range(scale):
                             for sx in range(scale):
-                                set_px(x_cur + col_idx * scale + sx + 1, y_base + row_idx * scale + sy + 1, 0, 0, 0)
-                        for sy in range(scale):
-                            for sx in range(scale):
-                                set_px(x_cur + col_idx * scale + sx, y_base + row_idx * scale + sy, 235, 235, 235)
+                                set_px(x_cur + col_idx * scale + sx, y_base + row_idx * scale + sy, fg_r, fg_g, fg_b)
             x_cur += 6 * scale
 
 def _png_chunk(tag: bytes, payload: bytes) -> bytes:

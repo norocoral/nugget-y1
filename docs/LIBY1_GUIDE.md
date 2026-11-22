@@ -414,15 +414,15 @@ const char *y1_ipod_native_playlist_track_path(int pl_idx, int tr_idx);
 
 ## 4. Packaging, Debugging & Watchdog
 
-### 4.1 Bootloader Picks
-- **Pick 2 (`/.meui/meui`):** Place the executable at `/mnt/sdcard/.meui/meui` and shared libraries in `/mnt/sdcard/.meui/lib/`.
-- **Pick 3 (`/.custom/launch`):** Place an ELF executable or `chmod +x` shell script at `/mnt/sdcard/.custom/launch` and shared libraries in `/mnt/sdcard/.custom/lib/`.
-- **Pick 8 (`debuginfo*.txt`):** Generates a compact system and diagnostic log (`/mnt/sdcard/debuginfoYYYYMMDD_HHMMSS.txt`) for GitHub issue reports.
+### 4.1 ConfigApp Launch & Debug Info
+- **Launch (Hidden-Folder Discovery):** Place an ELF executable or `chmod +x` shell script inside any hidden folder on `/mnt/sdcard/` (folder name containing `.`, e.g. `/.meui/meui` or `/.custom/launch`) to have ConfigApp's **Launch** page list and execute it.
+- **Debug Info:** Open **Debug Info** in ConfigApp to view live hardware telemetry or save `/mnt/sdcard/debuginfoYYYYMMDD_HHMMSS.txt`.
+- **Wi-Fi & Bluetooth (`y1_wifi.c`, `y1_bt.c`):** `y1_wifi_*` and `y1_bt_*` manage MT6572 CONNSYS (`/dev/stpwmt`, `/dev/stpbt`, `/dev/wmtWifi`, `wlan_mt6582.ko`).
 
-### 4.2 USB Serial Shell (Pick 7)
-1. Hold **MENU** while powering on to open the bootloader menu and select **Pick 7: Linux terminal (USB)**.
+### 4.2 USB Serial Shell (ConfigApp Serial Terminal)
+1. Hold **MENU** while powering on (or open **Main Menu -> System -> System Settings** in Rockbox) and open **Serial Terminal** -> **Serial Console** (or select **Serial Console** in the SD-missing Text GUI).
 2. Connect via USB-C and open a serial terminal at `115200 8N1` (`/dev/ttyACM0` on Linux/macOS, `COMx` on Windows).
-3. Root shells are bound to `/dev/ttyGS0` and `/dev/ttyGS1`. Exiting the shell returns to the bootloader menu.
+3. Root shells are bound to `/dev/ttyGS0` and `/dev/ttyGS1`. Exiting the shell or toggling **Serial Console** off stops the gadget.
 
 ### 4.3 Hardware Safety Watchdog
 PID 1 monitors the physical **Play/Pause** `evdev` key independently of user-space applications. Holding **Play/Pause** continuously for 10 seconds calls `sync()` and forces hardware power-off, allowing recovery from frozen or deadlocked user-space code without disconnecting the battery.

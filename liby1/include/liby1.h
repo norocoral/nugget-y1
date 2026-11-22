@@ -297,6 +297,8 @@ bool y1_usb_is_storage_attached(void);
 bool y1_usb_check_host_ejected(void);
 bool y1_usb_is_serial_active(void);
 void y1_usb_tune_performance(bool enable);
+bool y1_rtc_set_time(time_t t);
+bool y1_usb_sync_clock_from_sdcard(void);
 
 /* =========================================================================
  * 8. iPod USB Mode (iPod 5.5G Spoofing & Native iTunesDB Support)
@@ -344,6 +346,156 @@ const char *y1_ipod_native_playlist_name(int pl_idx);
 int y1_ipod_native_playlist_track_count(int pl_idx);
 const char *y1_ipod_native_playlist_track_path(int pl_idx, int tr_idx);
 bool y1_ipod_native_save_playlist(int pl_idx, const char **track_paths, int track_count);
+
+/* =========================================================================
+ * 9. Bluetooth (MT6572 CONNSYS /dev/stpwmt & /dev/stpbt)
+ * ========================================================================= */
+
+#define Y1_BT_MAX_DEVICES 16
+#define Y1_BT_RECEIVER_ART_PATH "/mnt/sdcard/.rockbox/albumart/bt-receiver.jpg"
+
+enum y1_bt_state {
+    Y1_BT_STATE_OFF = 0,
+    Y1_BT_STATE_INIT,
+    Y1_BT_STATE_IDLE,
+    Y1_BT_STATE_SCANNING,
+    Y1_BT_STATE_CONNECTING,
+    Y1_BT_STATE_CONNECTED,
+    Y1_BT_STATE_STREAMING,
+    Y1_BT_STATE_ERROR
+};
+
+enum y1_bt_codec {
+    Y1_BT_CODEC_SBC = 0,
+    Y1_BT_CODEC_SBC_XQ = 1,
+    Y1_BT_CODEC_AAC = 2
+};
+
+struct y1_bt_device {
+    uint8_t bdaddr[6]; /* Little-endian HCI order */
+    char    name[64];
+    int8_t  rssi;
+    bool    paired;
+    bool    connected;
+    uint8_t link_key[16];
+    uint8_t key_type;
+    char    pin[16];
+    int     volume;          /* Remembered source volume for this device (-1000 = unset) */
+    int     receiver_volume; /* Remembered receiver volume for this device (-1000 = unset) */
+    uint8_t codec;           /* Remembered codec (enum y1_bt_codec, default Y1_BT_CODEC_SBC) */
+};
+
+enum y1_bt_receiver_command {
+    Y1_BT_RECEIVER_PLAY_PAUSE,
+    Y1_BT_RECEIVER_NEXT,
+    Y1_BT_RECEIVER_PREVIOUS,
+    Y1_BT_RECEIVER_SEEK_FORWARD,
+    Y1_BT_RECEIVER_SEEK_BACKWARD
+};
+
+struct y1_bt_callbacks {
+    void   (*on_audio_connect)(void);
+    void   (*on_audio_disconnect)(void);
+    void   (*on_receiver_mode_changed)(bool enabled);
+    void   (*on_receiver_stream_state)(bool active, unsigned long sample_rate);
+    size_t (*on_receiver_pcm)(const int16_t *samples, size_t frames);
+    void   (*on_avrcp_passthrough)(uint8_t op_id);
+};
+
+void y1_bt_set_callbacks(const struct y1_bt_callbacks *cbs);
+void y1_bt_set_receiver_auto_connect(bool enable);
+
+void y1_bt_init(void);
+void y1_bt_set_enabled(bool enable);
+bool y1_bt_is_enabled(void);
+void y1_bt_set_receiver_mode(bool enable);
+bool y1_bt_is_receiver_mode(void);
+bool y1_bt_receiver_send_control(enum y1_bt_receiver_command command);
+enum y1_bt_state y1_bt_get_state(void);
+const char *y1_bt_get_status_str(void);
+const char *y1_bt_get_connected_name(void);
+
+int  y1_bt_start_scan(void);
+bool y1_bt_is_scanning(void);
+int  y1_bt_get_devices(struct y1_bt_device *out_devs, int max_devs);
+int  y1_bt_get_paired_devices(struct y1_bt_device *out_devs, int max_devs);
+int  y1_bt_get_new_devices(struct y1_bt_device *out_devs, int max_devs);
+
+int  y1_bt_connect_device(const uint8_t bdaddr[6]);
+int  y1_bt_connect_device_with_pin(const uint8_t bdaddr[6], const char *pin);
+void y1_bt_disconnect(void);
+void y1_bt_forget_device(const uint8_t bdaddr[6]);
+
+bool y1_bt_a2dp_is_streaming(void);
+uint8_t y1_bt_receiver_get_play_status(void);
+uint32_t y1_bt_receiver_art_generation(void);
+void y1_bt_a2dp_write_pcm(const void *buf, size_t bytes, unsigned long sampr);
+size_t y1_bt_a2dp_get_ring_free(void);
+
+void y1_bt_store_active_volume(int vol);
+int  y1_bt_get_active_device_volume(void);
+int  y1_bt_get_device_codec(const uint8_t bdaddr[6]);
+void y1_bt_set_device_codec(const uint8_t bdaddr[6], int codec);
+int  y1_bt_get_active_device_codec(void);
+void y1_bt_set_active_device_codec(int codec);
+void y1_bt_update_metadata(const char *title, const char *artist,
+                           const char *album, uint32_t duration_ms,
+                           uint32_t position_ms, uint8_t play_status);
+void y1_bt_get_receiver_metadata(char *title, size_t title_size,
+                                 char *artist, size_t artist_size,
+                                 char *album, size_t album_size);
+
+bool y1_bt_poll_connection_notify(bool *connected, char *name_buf, size_t name_sz);
+bool y1_bt_get_active_bdaddr(uint8_t out_bd[6]);
+
+bool y1_bt_is_connected(void);
+void y1_bt_start_mic(void);
+void y1_bt_stop_mic(void);
+ssize_t y1_bt_read_mic_pcm(void *out_buf, size_t max_bytes);
+
+/* =========================================================================
+ * 10. Wi-Fi (MT6572 CONNSYS /dev/wmtWifi & wlan0)
+ * ========================================================================= */
+
+#define Y1_WIFI_MAX_NETWORKS 24
+#define Y1_WIFI_DB_PATH      "/mnt/sdcard/.system/wifi_networks.dat"
+
+enum y1_wifi_state {
+    Y1_WIFI_STATE_OFF = 0,
+    Y1_WIFI_STATE_INIT,
+    Y1_WIFI_STATE_DISCONNECTED,
+    Y1_WIFI_STATE_SCANNING,
+    Y1_WIFI_STATE_CONNECTING,
+    Y1_WIFI_STATE_CONNECTED,
+    Y1_WIFI_STATE_ERROR
+};
+
+struct y1_wifi_network {
+    char    ssid[64];
+    uint8_t bssid[6];
+    int     rssi;       /* dBm, e.g. -55 */
+    bool    secured;
+    bool    saved;
+    bool    connected;
+    char    psk[128];
+};
+
+void y1_wifi_init(void);
+void y1_wifi_set_enabled(bool enable);
+bool y1_wifi_is_enabled(void);
+enum y1_wifi_state y1_wifi_get_state(void);
+const char *y1_wifi_get_status_str(void);
+void y1_wifi_get_connected_ssid(char *buf, size_t size);
+void y1_wifi_get_ip(char *buf, size_t size);
+int  y1_wifi_get_rssi(void);
+
+int  y1_wifi_start_scan(void);
+bool y1_wifi_is_scanning(void);
+int  y1_wifi_get_networks(struct y1_wifi_network *out_nets, int max_nets);
+
+int  y1_wifi_connect(const char *ssid, const char *psk);
+void y1_wifi_disconnect(void);
+void y1_wifi_forget(const char *ssid);
 
 #ifdef __cplusplus
 }

@@ -17,8 +17,9 @@ Y1 부트로더는 외장 MicroSD 카드에 저장된 소프트웨어를 동적�
 
 | 경로 | 용도 |
 | :--- | :--- |
-| `/mnt/sdcard/.meui/meui` | **부트로더 캐러셀 선택지 2:** MeUI 프런트엔드 (자동 감지) |
-| `/mnt/sdcard/.custom/launch` | **부트로더 캐러셀 선택지 3:** 사용자 정의 소프트웨어 (자동 감지) |
+| `/mnt/sdcard/.system/configapp/configapp` | **ConfigApp:** 부팅 메뉴 및 `메인 메뉴 -> 시스템 -> 시스템 설정` UI (실행, BT/Wi-Fi, USB, 시리얼, 디버그) |
+| `/mnt/sdcard/.meui/meui` | **ConfigApp 실행(Launch):** MeUI 프런트엔드 (숨김 폴더 자동 감지) |
+| `/mnt/sdcard/.custom/launch` | **ConfigApp 실행(Launch):** 사용자 정의 소프트웨어 (실행 파일이 포함된 숨김 `.폴더`) |
 | `/mnt/sdcard/.system/app` | 단일 독립형 자동 실행 프로그램 (메뉴 없이 부팅 시 바로 실행) |
 | `/mnt/sdcard/.system/lib/liby1.a` | 오프라인 정적 링크용 하드웨어 라이브러리 |
 | `/mnt/sdcard/.system/lib/liby1.so` | 공유 동적 라이브러리 |
@@ -56,6 +57,11 @@ Y1 부트로더는 외장 MicroSD 카드에 저장된 소프트웨어를 동적�
    - `y1_ipod_native_playlist_count()`, `y1_ipod_native_playlist_name()`, `y1_ipod_native_playlist_track_count()`, `y1_ipod_native_playlist_track_path()` (`iTunesDB` 재생목록 및 `SLst` 스마트 재생목록 메모리 직접 조회)
    - `y1_ipod_native_record_play()`, `y1_ipod_native_record_rating()`, `y1_ipod_native_record_favorite()` (실시간 `/iPod_Control/iTunes/Play Counts` `mhdp` 및 `OTGPlaylistInfo` `mhpo` 기록)
    - 독립 CLI 도구: `/bin/ipod_sync init`
+9. **블루투스 A2DP 및 수신기 모드 (`y1_bt.c`)**
+   - `y1_bt_init()`, `y1_bt_set_enabled()`, `y1_bt_start_scan()`, `y1_bt_connect_device()`, `y1_bt_disconnect()`, `y1_bt_forget_device()`
+   - `y1_bt_set_active_device_codec()` (`SBC`, `SBC XQ`, `AAC`), `y1_bt_set_receiver_mode()`
+10. **Wi-Fi (`y1_wifi.c`)**
+   - `y1_wifi_init()`, `y1_wifi_set_enabled()`, `y1_wifi_start_scan()`, `y1_wifi_get_networks()`, `y1_wifi_connect()`, `y1_wifi_disconnect()`, `y1_wifi_forget()` (ConfigApp에서 사용; `wlan_mt6582.ko` / `mtk_wmt_wifi.ko` 및 `WIFI_RAM_CODE_MT6582` 로드)
 
 ---
 
@@ -71,8 +77,8 @@ arm-linux-gnueabihf-gcc -O2 -Ihosted_linux_port/liby1/include \
     my_app.c hosted_linux_port/liby1/build/liby1.a -o launch -lpthread -lm -lrt
 ```
 
-### 2. USB 대화형 시리얼 터미널 디버깅 (선택지 7)
-부팅 시 **MENU**를 눌러 **선택지 7: Linux terminal (USB)**을 선택하고 PC에서 터미널(`115200 8N1`, `COMx` 또는 `/dev/ttyACM0`)을 열면 `top`, `ps`, `dmesg` 등 실시간 디버깅 셸을 바로 사용할 수 있습니다.
+### 2. USB 대화형 시리얼 터미널 디버깅 (ConfigApp 시리얼 터미널)
+부팅 시 **MENU**를 누르거나 Rockbox **시스템 설정**에서 **시리얼 터미널** -> **시리얼 콘솔**을 활성화(또는 SD 카드 미인식 시 텍스트 GUI에서 **Serial Console** 선택)하고 PC에서 터미널(`115200 8N1`, `COMx` 또는 `/dev/ttyACM0`)을 열면 `top`, `ps`, `dmesg` 등 실시간 디버깅 셸을 바로 사용할 수 있습니다.
 
 ### 3. 안전 워치독
 개발 중 프로그램이 데드락이나 무한 루프에 빠지더라도 **Play/Pause 버튼을 10초간 길게 누르면** 하드웨어 강제 전원 차단이 이루어집니다.

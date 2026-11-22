@@ -193,12 +193,13 @@ def main():
     p6_path = os.path.join(assets_dir, 'pick6.png')
     p7_path = os.path.join(assets_dir, 'pick7.png')
     p8_path = os.path.join(assets_dir, 'pick8.png')
+    p9_path = os.path.join(assets_dir, 'pick9.png')
     arr_path = os.path.join(assets_dir, 'arrow.png')
     usb_path = os.path.join(assets_dir, 'usb.png')
     term_path = os.path.join(assets_dir, 'terminal.png')
 
     required_assets = [bg_path, p1_path, p2_path, p3_path, p4_path,
-                       p5_path, p6_path, p7_path, p8_path,
+                       p5_path, p6_path, p7_path, p8_path, p9_path,
                        arr_path, usb_path]
     if os.path.exists(term_path):
         required_assets.append(term_path)
@@ -217,6 +218,7 @@ def main():
     p6_w, p6_h, p6_px = decode_png(p6_path)
     p7_w, p7_h, p7_px = decode_png(p7_path)
     p8_w, p8_h, p8_px = decode_png(p8_path)
+    p9_w, p9_h, p9_px = decode_png(p9_path)
     arr_w, arr_h, arr_px = decode_png(arr_path)
     usb_w, usb_h, usb_px = decode_png(usb_path)
 
@@ -237,7 +239,8 @@ def main():
         ("bootl_pick5.raw", [(p4_px, p4_w, p4_h), (p5_px, p5_w, p5_h), (p6_px, p6_w, p6_h)], 208, 229),
         ("bootl_pick6.raw", [(p5_px, p5_w, p5_h), (p6_px, p6_w, p6_h), (p7_px, p7_w, p7_h)], 208, 229),
         ("bootl_pick7.raw", [(p6_px, p6_w, p6_h), (p7_px, p7_w, p7_h), (p8_px, p8_w, p8_h)], 208, 229),
-        ("bootl_pick8.raw", [(p6_px, p6_w, p6_h), (p7_px, p7_w, p7_h), (p8_px, p8_w, p8_h)], 366, 229),
+        ("bootl_pick8.raw", [(p7_px, p7_w, p7_h), (p8_px, p8_w, p8_h), (p9_px, p9_w, p9_h)], 208, 229),
+        ("bootl_pick9.raw", [(p7_px, p7_w, p7_h), (p8_px, p8_w, p8_h), (p9_px, p9_w, p9_h)], 366, 229),
     ]
 
     slot_x = [6, 164, 322]

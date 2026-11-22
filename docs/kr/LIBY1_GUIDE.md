@@ -414,15 +414,15 @@ const char *y1_ipod_native_playlist_track_path(int pl_idx, int tr_idx);
 
 ## 4. 패키징, 디버깅 및 워치독
 
-### 4.1 부트로더 항목
-- **Pick 2 (`/.meui/meui`):** 실행 파일을 `/mnt/sdcard/.meui/meui`에, 공유 라이브러리를 `/mnt/sdcard/.meui/lib/`에 배치합니다.
-- **Pick 3 (`/.custom/launch`):** ELF 실행 파일 또는 `chmod +x` 셸 스크립트를 `/mnt/sdcard/.custom/launch`에, 공유 라이브러리를 `/mnt/sdcard/.custom/lib/`에 배치합니다.
-- **Pick 8 (`debuginfo*.txt`):** GitHub 이슈 제보용으로 사용할 수 있는 간략한 시스템/진단 로그(`/mnt/sdcard/debuginfoYYYYMMDD_HHMMSS.txt`)를 생성합니다.
+### 4.1 ConfigApp 실행(Launch) 및 디버그 정보
+- **실행(Launch - 숨김 폴더 자동 탐색):** `/mnt/sdcard/`의 숨김 폴더(폴더명에 `.` 포함, 예: `/.meui/meui`, `/.custom/launch`) 내부에 ELF 실행 파일 또는 `chmod +x` 스크립트를 두면 ConfigApp **실행** 페이지에서 자동으로 감지하여 실행합니다.
+- **디버그 정보:** ConfigApp의 **디버그 정보** 페이지에서 실시간 하드웨어 상태를 확인하거나 `/mnt/sdcard/debuginfoYYYYMMDD_HHMMSS.txt`를 저장할 수 있습니다.
+- **Wi-Fi 및 블루투스 (`y1_wifi.c`, `y1_bt.c`):** `y1_wifi_*` 및 `y1_bt_*`는 MT6572 CONNSYS(`/dev/stpwmt`, `/dev/stpbt`, `/dev/wmtWifi`, `wlan_mt6582.ko`)를 직접 제어합니다.
 
-### 4.2 USB 시리얼 셸 (Pick 7)
-1. 전원 켤 때 **MENU** 버튼을 누르고 있어 부트로더 메뉴를 연 뒤 **Pick 7: Linux terminal (USB)**를 선택합니다.
+### 4.2 USB 시리얼 셸 (ConfigApp 시리얼 터미널)
+1. 전원 켤 때 **MENU** 버튼을 누르거나 Rockbox **메인 메뉴 -> 시스템 -> 시스템 설정**에서 **시리얼 터미널** -> **시리얼 콘솔**을 켭니다(SD 카드 미인식 시 텍스트 GUI에서 **Serial Console** 선택).
 2. USB-C 케이블로 연결하고 `115200 8N1` 시리얼 터미널(Linux/macOS: `/dev/ttyACM0`, Windows: `COMx`)을 엽니다.
-3. 루트 셸은 `/dev/ttyGS0` 및 `/dev/ttyGS1`에 바인딩됩니다. 셸을 종료하면 부트로더 메뉴로 복귀합니다.
+3. 루트 셸은 `/dev/ttyGS0` 및 `/dev/ttyGS1`에 바인딩됩니다.
 
 ### 4.3 하드웨어 안전 워치독
 PID 1은 유저스페이스 애플리케이션과 독립적으로 물리 **재생/일시정지(Play/Pause)** `evdev` 키를 감시합니다. **재생/일시정지** 버튼을 10초 동안 연속으로 누르고 있으면 `sync()`를 호출한 뒤 강제 전원 종료를 수행하므로, 유저스페이스 코드가 멈추거나 교착 상태에 빠져도 배터리를 분리하지 않고 복구할 수 있습니다.
