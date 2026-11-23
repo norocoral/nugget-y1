@@ -42,7 +42,7 @@ Subsystem specifications, architecture notes, and reverse-engineering documentat
 ## Installation
 
 ### Recommended: Innioasis Updater CE
-https://innioasis.app/firmware_ko.html?brand=Innioasis&model=Y1&software=nugget-rock8ox-240p-360p-y1&type=A
+https://innioasis.app/firmware.html?brand=Innioasis&model=Y1&software=nugget-rock8ox-240p-360p-y1&type=A
 
 ### Manual Installation
 1. Obtain `boot_rockbox.img` and `rockbox_sdcard.zip`.
