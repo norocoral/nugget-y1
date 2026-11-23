@@ -893,25 +893,52 @@ void gfx_draw_battery_icon(int x, int y, int pct, bool charging, uint32_t color)
 {
     if (pct < 0) pct = 0;
     if (pct > 100) pct = 100;
-    int bx = x, by = y + 4, bw = 18, bh = 12;
-    gfx_stroke_round_rect(bx, by, bw, bh, 3, 2, color);
-    gfx_fill_rect(bx + bw, by + 3, 2, 6, color);
 
-    int max_fw = bw - 6;
-    int fw = (pct * max_fw + 50) / 100;
-    if (pct > 0 && fw < 1) fw = 1;
-    if (fw > max_fw) fw = max_fw;
-    uint32_t fill_col = charging ? COL_SUCCESS : (pct <= 20 ? COL_DANGER : color);
-    if (fw > 0)
-        gfx_fill_rect(bx + 3, by + 3, fw, bh - 6, fill_col);
+    /* Figma pill proportions (95x64 -> 48x32) + 2px gap + 8x14 SVG D-nub */
+    const int bw = 48, bh = 32, r = 16;
+    uint32_t bg = charging ? 0xFF69E484U
+                : (pct <= 20 ? 0xFFE46969U
+                             : (color ? color : (g_dark_enabled ? 0xFFFFFFFFU : 0xFF000000U)));
+    uint32_t fg = (charging || pct <= 20) ? 0xFFFFFFFFU
+                                          : (g_dark_enabled ? 0xFF000000U : 0xFFFFFFFFU);
 
-    if (charging) {
-        uint32_t bolt_col = g_dark_enabled ? 0xFF000000U : 0xFFFFFFFFU;
-        int cx = bx + bw / 2;
-        int cy = by + bh / 2;
-        gfx_fill_rect(cx,     cy - 4, 2, 3, bolt_col);
-        gfx_fill_rect(cx - 2, cy - 1, 5, 2, bolt_col);
-        gfx_fill_rect(cx - 1, cy + 1, 2, 3, bolt_col);
+    gfx_fill_round_rect(x, y, bw, bh, r, bg);
+
+    /* Exact Figma Ellipse 5 crescent nub (16x28 -> 8x14) */
+    gfx_draw_icon("battery-nub", x + bw + 2, y + (bh - 14) / 2, 14, bg);
+
+    char num[8];
+    snprintf(num, sizeof(num), "%d", pct);
+
+    if (charging || pct <= 20) {
+        float fsz = (pct >= 100) ? 18.0f : 22.0f;
+        int nw = gfx_text_width(num, fsz, UI_FONT_SEMIBOLD);
+        int iw = charging ? 9 : 4;
+        int gap = 2;
+        int tx = x + (bw - (nw + gap + iw)) / 2;
+        int ty = y + (bh - (int)fsz) / 2;
+        gfx_draw_text(tx, ty, num, fsz, UI_FONT_SEMIBOLD, fg);
+
+        int ix = tx + nw + gap;
+        int iy = y + (bh - 13) / 2;
+        if (charging) {
+            /* Crisp lightning bolt */
+            gfx_fill_rect(ix + 4, iy,     3, 4, fg);
+            gfx_fill_rect(ix + 3, iy + 3, 3, 3, fg);
+            gfx_fill_rect(ix + 1, iy + 5, 7, 2, fg);
+            gfx_fill_rect(ix + 3, iy + 7, 3, 3, fg);
+            gfx_fill_rect(ix + 2, iy + 9, 3, 4, fg);
+        } else {
+            /* Exclamation mark (priority_high) */
+            gfx_fill_round_rect(ix, iy,      4, 8, 2, fg);
+            gfx_fill_round_rect(ix, iy + 10, 4, 4, 2, fg);
+        }
+    } else {
+        float fsz = (pct >= 100) ? 20.5f : 25.0f;
+        int nw = gfx_text_width(num, fsz, UI_FONT_SEMIBOLD);
+        int tx = x + (bw - nw) / 2;
+        int ty = y + (bh - (int)fsz) / 2;
+        gfx_draw_text(tx, ty, num, fsz, UI_FONT_SEMIBOLD, fg);
     }
 }
 

@@ -927,6 +927,10 @@ static const char *get_sdcard_app_binary(void)
         fclose(dp_fp);
     }
 
+    if (access("/mnt/sdcard/.system/configapp/configapp", F_OK) == 0) {
+        chmod("/mnt/sdcard/.system/configapp/configapp", 0755);
+        return "/mnt/sdcard/.system/configapp/configapp";
+    }
     if (access("/mnt/sdcard/.rockbox/rockbox", X_OK) == 0 ||
         access("/mnt/sdcard/.rockbox/rockbox", F_OK) == 0) {
         chmod("/mnt/sdcard/.rockbox/rockbox", 0755);

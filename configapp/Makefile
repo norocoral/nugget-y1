@@ -21,7 +21,7 @@ build:
 $(LIBY1_DIR)/build/liby1.a:
 	$(MAKE) -C $(LIBY1_DIR) CROSS_COMPILE=$(CROSS_COMPILE)
 
-build/%.o: src/%.c src/ui_gfx.h src/cfg_registry.h src/hangul_ime.h $(LIBY1_DIR)/include/liby1.h | build
+build/%.o: src/%.c src/ui_gfx.h src/cfg_registry.h src/hangul_ime.h src/lang.h $(LIBY1_DIR)/include/liby1.h | build
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(TARGET): $(OBJS) $(LIBY1_DIR)/build/liby1.a

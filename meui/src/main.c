@@ -4,6 +4,7 @@
 #include "album_art.h"
 #include "photos.h"
 #include "hangul_ime.h"
+#include "lang.h"
 #include "liby1.h"
 
 #include <stdio.h>
@@ -22,7 +23,6 @@
 #define MEUI_CONF_PATH   "/mnt/sdcard/.meui/meui.conf"
 #define RESUME_CONF_PATH "/mnt/sdcard/.meui/resume.conf"
 #define SAFE_VOL_LIMIT   60  /* 60 dB real in-ear safe threshold */
-#define TR(en, ko) (g_lang == 1 ? (ko) : (en))
 
 enum screen_id {
     SCR_HOME = 0,
@@ -93,6 +93,21 @@ static int      g_vol_warn_pending_delta = 0;
 static bool     g_safe_vol_acked = false;
 static uint64_t g_vol_up_last_ms = 0;
 static int      g_vol_up_rapid_count = 0;
+
+/* Slider & Dropdown Modals for Settings */
+enum meui_dd_kind {
+    DD_REPEAT = 0,
+    DD_LANG,
+    DD_SOURCE,
+    DD_TIMEOUT,
+    DD_VOL_STEP,
+    DD_SEEK_STEP
+};
+static bool              g_slider_open = false;
+static int               g_slider_orig = 65;
+static bool              g_dd_open = false;
+static enum meui_dd_kind g_dd_kind = DD_REPEAT;
+static int               g_dd_sel = 0;
 
 static struct ipod_db g_db;
 
@@ -835,7 +850,7 @@ static void scan_picker_dir(const char *dir, bool is_font)
     g_wp_count = 0;
     if (!is_font && (gfx_has_wallpaper() || g_wp_album_art) && g_wp_count < WP_MAX_ENTRIES) {
         snprintf(g_wp_items[g_wp_count].name, sizeof(g_wp_items[0].name), "%s",
-                 TR("Clear Wallpaper", "배경화면 지우기"));
+                 TR_ID(STR_CLEAR_WALLPAPER));
         g_wp_items[g_wp_count].path[0] = '\0';
         g_wp_items[g_wp_count].is_dir = false;
         g_wp_items[g_wp_count].is_clear = true;
@@ -843,7 +858,7 @@ static void scan_picker_dir(const char *dir, bool is_font)
         g_wp_count++;
     } else if (is_font && gfx_has_custom_font() && g_wp_count < WP_MAX_ENTRIES) {
         snprintf(g_wp_items[g_wp_count].name, sizeof(g_wp_items[0].name), "%s",
-                 TR("Reset Default Font", "기본 글꼴로 복원"));
+                 TR_ID(STR_RESET_DEFAULT_FONT));
         g_wp_items[g_wp_count].path[0] = '\0';
         g_wp_items[g_wp_count].is_dir = false;
         g_wp_items[g_wp_count].is_clear = true;
@@ -852,7 +867,7 @@ static void scan_picker_dir(const char *dir, bool is_font)
     }
     if (!is_font && strcmp(g_wp_dir, "/mnt/sdcard") == 0 && g_wp_count < WP_MAX_ENTRIES) {
         snprintf(g_wp_items[g_wp_count].name, sizeof(g_wp_items[0].name), "%s",
-                 TR("Use Album Art", "앨범 아트를 배경으로 사용"));
+                 TR_ID(STR_USE_ALBUM_ART));
         g_wp_items[g_wp_count].path[0] = '\0';
         g_wp_items[g_wp_count].is_dir = false;
         g_wp_items[g_wp_count].is_clear = false;
@@ -988,7 +1003,7 @@ static bool db_scan_progress_cb(int tracks_found, int dirs_scanned, const char *
     g_scan_last_draw_ms = tnow;
 
     gfx_clear(COL_BG);
-    draw_header(TR("Scanning Files", "파일 검색 중"), "hard-drive", NULL);
+    draw_header(TR_ID(STR_SCANNING_FILES), "hard-drive", NULL);
 
     int cw = UI_W - 40, ch = 220;
     int cx = 20, cy = 84;
@@ -997,7 +1012,7 @@ static bool db_scan_progress_cb(int tracks_found, int dirs_scanned, const char *
 
     char msg[96];
     snprintf(msg, sizeof(msg),
-             g_lang == 1 ? "%d곡 발견 (%d개 폴더)" : "Found %d songs (%d folders)",
+             TR_ID(STR_FOUND_SONGS_FOLDERS),
              tracks_found, dirs_scanned);
     int mw = gfx_text_width(msg, 23.0f, UI_FONT_SEMIBOLD);
     gfx_draw_text(cx + (cw - mw) / 2, cy + 28, msg, 23.0f, UI_FONT_SEMIBOLD, COL_TEXT);
@@ -1019,7 +1034,7 @@ static bool db_scan_progress_cb(int tracks_found, int dirs_scanned, const char *
     if (fx1 > fx0)
         gfx_fill_round_rect(bx + fx0, by, fx1 - fx0, bh, 9, COL_ACCENT);
 
-    const char *cancel_lbl = TR("Press MENU to Cancel", "취소하려면 MENU를 누르세요");
+    const char *cancel_lbl = TR_ID(STR_PRESS_MENU_TO_CANCEL);
     int clw = gfx_text_width(cancel_lbl, 19.0f, UI_FONT_SEMIBOLD);
     int pw = clw + 36;
     if (pw > cw - 40) pw = cw - 40;
@@ -1051,7 +1066,7 @@ static void load_library_with_ui(bool initial_boot)
     g_fav_cap = g_db.track_count > 0 ? g_db.track_count : 1;
     g_fav_flags = calloc((size_t)g_fav_cap, sizeof(bool));
     if (cancelled)
-        show_toast(TR("Scan cancelled", "검색 취소됨"), 1200);
+        show_toast(TR_ID(STR_SCAN_CANCELLED), 1200);
     if (!initial_boot)
         load_resume_state();
 }
@@ -1133,9 +1148,9 @@ static void exit_usb_mode(bool to_charge_only)
     apply_base_low_power();
     g_last_activity_ms = now_ms();
     if (to_charge_only)
-        show_toast(TR("Charge Only Mode", "충전 전용 모드"), 1400);
+        show_toast(TR_ID(STR_CHARGE_ONLY_MODE), 1400);
     else
-        show_toast(TR("USB Disconnected", "USB 연결 해제됨"), 1200);
+        show_toast(TR_ID(STR_USB_DISCONNECTED), 1200);
 }
 
 static void format_clock(char *buf, size_t len)
@@ -1147,9 +1162,9 @@ static void format_clock(char *buf, size_t len)
     if (h12 == 0) h12 = 12;
     bool pm = tm->tm_hour >= 12;
     if (g_lang == 1)
-        snprintf(buf, len, "%s %02d:%02d", pm ? "오후" : "오전", h12, tm->tm_min);
+        snprintf(buf, len, "%s %d:%02d", meui_ampm_ko(pm), h12, tm->tm_min);
     else
-        snprintf(buf, len, "%02d:%02d %s", h12, tm->tm_min, pm ? "PM" : "AM");
+        snprintf(buf, len, "%d:%02d %s", h12, tm->tm_min, pm ? "PM" : "AM");
 }
 
 static void format_mmss(uint32_t ms, char *buf, size_t len)
@@ -1185,7 +1200,7 @@ static void launch_system_settings(void)
         if (access(paths[i], X_OK) == 0) { exe = paths[i]; break; }
     }
     if (!exe) {
-        show_toast(TR("ConfigApp not found", "시스템 설정 앱을 찾을 수 없음"), 1400);
+        show_toast(TR_ID(STR_CONFIGAPP_NOT_FOUND), 1400);
         return;
     }
 
@@ -1261,19 +1276,12 @@ static void draw_header(const char *title, const char *icon_name, const struct p
 
     char time_str[24];
     format_clock(time_str, sizeof(time_str));
-    int time_w = gfx_text_width(time_str, 19.5f, UI_FONT_SEMIBOLD);
-    int rx = UI_W - 18 - time_w;
-    gfx_draw_text(rx, 19, time_str, 19.5f, UI_FONT_SEMIBOLD, COL_TEXT);
+    int time_w = gfx_text_width(time_str, 22.5f, UI_FONT_SEMIBOLD);
+    int rx = UI_W - 22 - time_w;
+    gfx_draw_text(rx, 17, time_str, 22.5f, UI_FONT_SEMIBOLD, COL_TEXT);
 
-    char bat_str[16];
-    snprintf(bat_str, sizeof(bat_str), "%d%%", g_cached_bat_pct);
-    int bat_w = gfx_text_width(bat_str, 19.0f, UI_FONT_SEMIBOLD);
-    int bat_pill_w = 28 + bat_w + 12;
-    rx -= bat_pill_w + 6;
-    gfx_fill_round_rect(rx, 13, bat_pill_w, 34, 17, COL_SURFACE_HI);
-    gfx_draw_battery_icon(rx + 7, 20, g_cached_bat_pct, g_cached_bat_chg,
-                          (g_cached_bat_pct <= 20 && !g_cached_bat_chg) ? COL_DANGER : COL_TEXT);
-    gfx_draw_text(rx + 31, 19, bat_str, 19.0f, UI_FONT_SEMIBOLD, COL_TEXT);
+    rx -= 58 + 10;
+    gfx_draw_battery_icon(rx, 14, g_cached_bat_pct, g_cached_bat_chg, 0);
 
     if (g_cached_bt_conn) {
         rx -= 38;
@@ -1285,6 +1293,19 @@ static void draw_header(const char *title, const char *icon_name, const struct p
         rx -= 38;
         gfx_fill_round_rect(rx, 13, 34, 34, 17, st->playing ? COL_SUCCESS : COL_WARN);
         gfx_draw_icon(active_status_icon(st), rx + 7, 20, 20, COL_SWITCH_ICON);
+    }
+
+    if (st && st->repeat != REPEAT_OFF) {
+        rx -= 38;
+        gfx_fill_round_rect(rx, 13, 34, 34, 17, COL_SURFACE_HI);
+        gfx_draw_icon(st->repeat == REPEAT_ONE ? "repeat-1" : "repeat",
+                      rx + 7, 20, 20, COL_TEXT);
+    }
+
+    if (st && st->shuffle) {
+        rx -= 38;
+        gfx_fill_round_rect(rx, 13, 34, 34, 17, COL_SURFACE_HI);
+        gfx_draw_icon("shuffle", rx + 7, 20, 20, COL_TEXT);
     }
 
     uint32_t pill_bg = COL_ACCENT;
@@ -1338,8 +1359,8 @@ static void render_abc_badge(void)
  * ========================================================================= */
 static void render_usb_screen(void)
 {
-    draw_header(g_use_ipod_db ? TR("iPod USB Mode", "iPod USB 모드")
-                              : TR("USB Storage", "USB 저장소"),
+    draw_header(g_use_ipod_db ? TR_ID(STR_IPOD_USB_MODE)
+                              : TR_ID(STR_USB_STORAGE),
                 "usb", NULL);
 
     gfx_fill_round_rect(18, 66, UI_W - 36, UI_H - 80, 36, COL_SURFACE);
@@ -1351,16 +1372,16 @@ static void render_usb_screen(void)
     gfx_fill_round_rect(bx, by, badge, badge, 30, COL_ACCENT);
     gfx_draw_icon("usb", bx + (badge - 50) / 2, by + (badge - 50) / 2, 50, COL_ACCENT_TEXT);
 
-    const char *title = g_use_ipod_db ? TR("iPod Mode Connected", "iPod 모드 연결됨")
-                                      : TR("USB Mass Storage", "USB 대용량 저장소");
+    const char *title = g_use_ipod_db ? TR_ID(STR_IPOD_MODE_CONNECTED)
+                                      : TR_ID(STR_USB_MASS_STORAGE);
     int tw = gfx_text_width(title, 26.0f, UI_FONT_SEMIBOLD);
     gfx_draw_text((UI_W - tw) / 2, by + badge + 18, title, 26.0f, UI_FONT_SEMIBOLD, COL_TEXT);
 
-    const char *sub = TR("Do not disconnect while syncing", "동기화 중 케이블을 분리하지 마세요");
+    const char *sub = TR_ID(STR_DO_NOT_DISCONNECT_WHILE_SYNCING);
     int sw = gfx_text_width(sub, 19.0f, UI_FONT_REGULAR);
     gfx_draw_text((UI_W - sw) / 2, by + badge + 54, sub, 19.0f, UI_FONT_REGULAR, COL_TEXT_DIM);
 
-    const char *hint = TR("Press any button for Charge Only", "아무 버튼이나 누르면 충전 전용 모드");
+    const char *hint = TR_ID(STR_PRESS_ANY_BUTTON_FOR_CHARGE_ONLY);
     int hw = gfx_text_width(hint, 19.5f, UI_FONT_SEMIBOLD);
     int pw = hw + 36;
     if (pw > UI_W - 60) pw = UI_W - 60;
@@ -1373,25 +1394,7 @@ static void render_usb_screen(void)
 /* =========================================================================
  * Home Screen (iPod 6G Split-Screen)
  * ========================================================================= */
-struct home_entry {
-    const char *en;
-    const char *ko;
-    const char *icon;
-};
-
-static const struct home_entry k_home_items[] = {
-    { "Now Playing", "지금 재생 중",   "play" },
-    { "Cover Flow",  "커버 플로우",    "layout-grid" },
-    { "Songs",       "모든 노래",      "music" },
-    { "Artists",     "가수별",         "user" },
-    { "Albums",      "앨범별",         "disc-3" },
-    { "Playlists",   "재생목록",       "list-music" },
-    { "Photos",      "사진",           "images" },
-    { "Search",      "검색",           "search" },
-    { "Shuffle All", "전체 랜덤 재생", "shuffle" },
-    { "Settings",    "설정",           "settings" },
-};
-#define NUM_HOME_ITEMS ((int)(sizeof(k_home_items) / sizeof(k_home_items[0])))
+/* Home menu entries are defined in lang.h */
 
 static void render_home(const struct player_status *st, int ox)
 {
@@ -1449,11 +1452,11 @@ static void render_home(const struct player_status *st, int ox)
  * ========================================================================= */
 static void render_coverflow(const struct player_status *st, int ox)
 {
-    draw_header(TR("Cover Flow", "커버 플로우"), "layout-grid", st);
+    draw_header(TR_ID(STR_COVER_FLOW), "layout-grid", st);
 
     if (g_db.album_count == 0) {
         gfx_fill_round_rect(24 + ox, 110, UI_W - 48, 120, 34, COL_SURFACE);
-        const char *msg = TR("No albums found", "앨범이 없습니다");
+        const char *msg = TR_ID(STR_NO_ALBUMS_FOUND);
         int mw = gfx_text_width(msg, 24.0f, UI_FONT_SEMIBOLD);
         gfx_draw_text((UI_W - mw) / 2 + ox, 154, msg, 24.0f, UI_FONT_SEMIBOLD, COL_TEXT_DIM);
         return;
@@ -1545,21 +1548,21 @@ static void render_list_screen(const struct player_status *st, int ox)
     if (g_screen == SCR_BT_PAIRED || g_screen == SCR_BT_NEW || g_screen == SCR_BT_FORGET)
         refresh_bt_sublist();
 
-    const char *hdr = TR("Songs", "모든 노래");
+    const char *hdr = TR_ID(STR_SONGS);
     const char *ico = "music";
-    if (g_screen == SCR_ARTISTS) { hdr = TR("Artists", "가수별"); ico = "user"; }
-    else if (g_screen == SCR_ALBUMS) { hdr = TR("Albums", "앨범별"); ico = "disc-3"; }
-    else if (g_screen == SCR_PLAYLISTS) { hdr = TR("Playlists", "재생목록"); ico = "list-music"; }
+    if (g_screen == SCR_ARTISTS) { hdr = TR_ID(STR_ARTISTS); ico = "user"; }
+    else if (g_screen == SCR_ALBUMS) { hdr = TR_ID(STR_ALBUMS); ico = "disc-3"; }
+    else if (g_screen == SCR_PLAYLISTS) { hdr = TR_ID(STR_PLAYLISTS); ico = "list-music"; }
     else if (g_screen == SCR_FILTERED_SONGS) { hdr = g_filter_title; ico = "music"; }
-    else if (g_screen == SCR_QUEUE) { hdr = TR("Queue", "재생 대기열"); ico = "list-ordered"; }
-    else if (g_screen == SCR_SETTINGS) { hdr = TR("Settings", "설정"); ico = "settings"; }
-    else if (g_screen == SCR_ADVANCED_SETTINGS) { hdr = TR("Advanced", "고급 설정"); ico = "sliders"; }
-    else if (g_screen == SCR_WALLPAPER) { hdr = TR("Wallpaper", "배경화면"); ico = "image"; }
-    else if (g_screen == SCR_FONT_PICKER) { hdr = TR("Font", "글꼴"); ico = "type"; }
-    else if (g_screen == SCR_BT_MENU) { hdr = TR("Bluetooth", "블루투스"); ico = "bluetooth"; }
-    else if (g_screen == SCR_BT_PAIRED) { hdr = TR("Paired Devices", "등록된 기기"); ico = "bluetooth"; }
-    else if (g_screen == SCR_BT_NEW) { hdr = TR("New Devices", "새 기기 검색"); ico = "bluetooth"; }
-    else if (g_screen == SCR_BT_FORGET) { hdr = TR("Forget Devices", "기기 삭제"); ico = "trash-2"; }
+    else if (g_screen == SCR_QUEUE) { hdr = TR_ID(STR_QUEUE); ico = "list-ordered"; }
+    else if (g_screen == SCR_SETTINGS) { hdr = TR_ID(STR_SETTINGS); ico = "settings"; }
+    else if (g_screen == SCR_ADVANCED_SETTINGS) { hdr = TR_ID(STR_ADVANCED); ico = "sliders"; }
+    else if (g_screen == SCR_WALLPAPER) { hdr = TR_ID(STR_WALLPAPER); ico = "image"; }
+    else if (g_screen == SCR_FONT_PICKER) { hdr = TR_ID(STR_FONT); ico = "type"; }
+    else if (g_screen == SCR_BT_MENU) { hdr = TR_ID(STR_BLUETOOTH); ico = "bluetooth"; }
+    else if (g_screen == SCR_BT_PAIRED) { hdr = TR_ID(STR_PAIRED_DEVICES); ico = "bluetooth"; }
+    else if (g_screen == SCR_BT_NEW) { hdr = TR_ID(STR_NEW_DEVICES); ico = "bluetooth"; }
+    else if (g_screen == SCR_BT_FORGET) { hdr = TR_ID(STR_FORGET_DEVICES); ico = "trash-2"; }
 
     draw_header(hdr, ico, st);
 
@@ -1567,8 +1570,8 @@ static void render_list_screen(const struct player_status *st, int ox)
     if (total == 0) {
         gfx_fill_round_rect(24 + ox, 110, UI_W - 48, 120, 34, COL_SURFACE);
         const char *msg = (g_screen == SCR_BT_NEW && y1_bt_is_scanning())
-                          ? TR("Scanning for Bluetooth devices...", "블루투스 기기 검색 중...")
-                          : TR("Nothing here yet", "항목이 없습니다");
+                          ? TR_ID(STR_SCANNING_FOR_BLUETOOTH_DEVICES)
+                          : TR_ID(STR_NOTHING_HERE_YET);
         int mw = gfx_text_width(msg, 23.0f, UI_FONT_SEMIBOLD);
         gfx_draw_text((UI_W - mw) / 2 + ox, 154, msg, 23.0f, UI_FONT_SEMIBOLD, COL_TEXT_DIM);
         return;
@@ -1666,7 +1669,7 @@ static void render_list_screen(const struct player_status *st, int ox)
             int text_w = w - (text_x - x) - 46;
             gfx_draw_text_ellipsize(text_x, y + 7, text_w, g->name, 24.5f, UI_FONT_SEMIBOLD, COL_TEXT);
             if (!sub[0])
-                snprintf(sub, sizeof(sub), g_lang == 1 ? "%d곡" : "%d songs", g->track_count);
+                snprintf(sub, sizeof(sub), TR_ID(STR_N_SONGS), g->track_count);
             gfx_draw_text_ellipsize(text_x, y + 39, text_w, sub, 19.0f, UI_FONT_REGULAR, COL_TEXT_DIM);
             gfx_draw_icon("chevron-right", x + w - 36, y + 22, 24, COL_TEXT);
         } else if (g_screen == SCR_PLAYLISTS) {
@@ -1674,12 +1677,12 @@ static void render_list_screen(const struct player_status *st, int ox)
             gfx_draw_icon("list-music", x + 14, y + 20, 28, COL_TEXT);
             gfx_draw_text_ellipsize(x + 52, y + 7, w - 98, pl->name, 24.5f, UI_FONT_SEMIBOLD, COL_TEXT);
             char sub[32];
-            snprintf(sub, sizeof(sub), g_lang == 1 ? "%d곡" : "%d songs", pl->track_count);
+            snprintf(sub, sizeof(sub), TR_ID(STR_N_SONGS), pl->track_count);
             gfx_draw_text(x + 52, y + 39, sub, 19.0f, UI_FONT_REGULAR, COL_TEXT_DIM);
             gfx_draw_icon("chevron-right", x + w - 36, y + 22, 24, COL_TEXT);
         } else if (g_screen == SCR_BT_PAIRED || g_screen == SCR_BT_NEW || g_screen == SCR_BT_FORGET) {
             const struct y1_bt_device *dev = &g_bt_devs[idx];
-            const char *name = dev->name[0] ? dev->name : TR("Unknown Device", "알 수 없는 기기");
+            const char *name = dev->name[0] ? dev->name : TR_ID(STR_UNKNOWN_DEVICE);
             gfx_draw_icon(g_screen == SCR_BT_FORGET ? "trash-2" : "bluetooth",
                           x + 14, y + 20, 28, g_screen == SCR_BT_FORGET ? COL_DANGER : COL_TEXT);
             gfx_draw_text_ellipsize(x + 52, y + 7, w - 170, name, 24.0f, UI_FONT_SEMIBOLD, COL_TEXT);
@@ -1689,8 +1692,8 @@ static void render_list_screen(const struct player_status *st, int ox)
                      dev->bdaddr[2], dev->bdaddr[1], dev->bdaddr[0]);
             gfx_draw_text(x + 52, y + 39, sub, 18.5f, UI_FONT_REGULAR, COL_TEXT_DIM);
 
-            const char *badge = (g_screen == SCR_BT_FORGET) ? TR("Forget", "삭제")
-                              : (dev->connected ? TR("Disconnect", "연결 해제") : TR("Connect", "연결"));
+            const char *badge = (g_screen == SCR_BT_FORGET) ? TR_ID(STR_FORGET)
+                              : (dev->connected ? TR_ID(STR_DISCONNECT) : TR_ID(STR_CONNECT));
             uint32_t bcol = (g_screen == SCR_BT_FORGET) ? COL_DANGER
                           : (dev->connected ? COL_WARN : COL_ACCENT);
             uint32_t bfg  = (g_screen == SCR_BT_FORGET) ? 0xFFFFFFFFU
@@ -1721,46 +1724,46 @@ static void render_list_screen(const struct player_status *st, int ox)
             if (g_screen == SCR_SETTINGS) {
                 switch (idx) {
                     case 0:
-                        lbl = TR("Brightness", "화면 밝기");
+                        lbl = TR_ID(STR_BRIGHTNESS);
                         snprintf(val, sizeof(val), "%d%%", g_brightness);
                         sico = "sun";
                         break;
                     case 1:
-                        lbl = TR("Bluetooth", "블루투스");
+                        lbl = TR_ID(STR_BLUETOOTH);
                         sico = "bluetooth";
                         break;
                     case 2:
-                        lbl = TR("Wallpaper", "배경화면");
+                        lbl = TR_ID(STR_WALLPAPER);
                         sico = "image";
                         break;
                     case 3:
-                        lbl = TR("Dark Mode", "다크 모드");
+                        lbl = TR_ID(STR_DARK_MODE);
                         is_toggle = true; toggle_val = (g_dark_mode != 0);
                         sico = "moon";
                         break;
                     case 4:
-                        lbl = TR("Shuffle", "랜덤 재생");
+                        lbl = TR_ID(STR_SHUFFLE);
                         is_toggle = true; toggle_val = st->shuffle;
                         sico = "shuffle";
                         break;
                     case 5:
-                        lbl = TR("Repeat", "반복 재생");
+                        lbl = TR_ID(STR_REPEAT);
                         snprintf(val, sizeof(val), "%s",
-                                 st->repeat == REPEAT_ONE ? TR("One", "한 곡")
-                                 : (st->repeat == REPEAT_ALL ? TR("All", "전체") : TR("Off", "꺼짐")));
+                                 st->repeat == REPEAT_ONE ? TR_ID(STR_ONE)
+                                 : (st->repeat == REPEAT_ALL ? TR_ID(STR_ALL) : TR_ID(STR_OFF)));
                         sico = st->repeat == REPEAT_ONE ? "repeat-1" : "repeat";
                         break;
                     case 6:
-                        lbl = TR("Language", "언어");
-                        snprintf(val, sizeof(val), "%s", g_lang == 1 ? "한국어" : "English");
+                        lbl = TR_ID(STR_LANGUAGE);
+                        snprintf(val, sizeof(val), "%s", TR_ID(STR_LANG_VALUE));
                         sico = "globe";
                         break;
                     case 7:
-                        lbl = TR("Advanced", "고급 설정");
+                        lbl = TR_ID(STR_ADVANCED);
                         sico = "sliders";
                         break;
                     case 8:
-                        lbl = TR("Power Off", "전원 끄기");
+                        lbl = TR_ID(STR_POWER_OFF);
                         sico = "power";
                         is_danger = true;
                         break;
@@ -1768,25 +1771,25 @@ static void render_list_screen(const struct player_status *st, int ox)
             } else if (g_screen == SCR_BT_MENU) {
                 switch (idx) {
                     case 0:
-                        lbl = TR("Bluetooth", "블루투스 전원");
+                        lbl = TR_ID(STR_BLUETOOTH_2);
                         is_toggle = true; toggle_val = y1_bt_is_enabled();
                         sico = "bluetooth";
                         break;
                     case 1:
-                        lbl = TR("Receiver Mode", "블루투스 수신 모드");
+                        lbl = TR_ID(STR_RECEIVER_MODE);
                         is_toggle = true; toggle_val = y1_bt_is_receiver_mode();
                         sico = "radio";
                         break;
                     case 2:
-                        lbl = TR("Paired Devices", "등록된 기기");
+                        lbl = TR_ID(STR_PAIRED_DEVICES);
                         sico = "bluetooth-connected";
                         break;
                     case 3:
-                        lbl = TR("New Devices", "새 기기 검색");
+                        lbl = TR_ID(STR_NEW_DEVICES);
                         sico = "refresh-cw";
                         break;
                     case 4:
-                        lbl = TR("Forget Devices", "기기 삭제");
+                        lbl = TR_ID(STR_FORGET_DEVICES);
                         sico = "trash-2";
                         is_danger = true;
                         break;
@@ -1794,41 +1797,41 @@ static void render_list_screen(const struct player_status *st, int ox)
             } else {
                 switch (idx) {
                     case 0:
-                        lbl = TR("Safe Volume", "안전 볼륨 (60dB)");
+                        lbl = TR_ID(STR_SAFE_VOLUME);
                         is_toggle = true; toggle_val = (g_safe_vol_enabled != 0);
                         sico = "volume-2";
                         break;
                     case 1:
-                        lbl = TR("Music Source", "음악 소스");
-                        snprintf(val, sizeof(val), "%s", g_use_ipod_db ? "iPod DB" : TR("Files", "일반 파일"));
+                        lbl = TR_ID(STR_MUSIC_SOURCE);
+                        snprintf(val, sizeof(val), "%s", g_use_ipod_db ? "iPod DB" : TR_ID(STR_FILES));
                         sico = "hard-drive";
                         break;
                     case 2:
-                        lbl = TR("Screen Timeout", "화면 꺼짐 시간");
-                        if (g_screen_timeout_sec == 0) snprintf(val, sizeof(val), "%s", TR("Never", "안 함"));
+                        lbl = TR_ID(STR_SCREEN_TIMEOUT);
+                        if (g_screen_timeout_sec == 0) snprintf(val, sizeof(val), "%s", TR_ID(STR_NEVER));
                         else snprintf(val, sizeof(val), "%ds", g_screen_timeout_sec);
                         sico = "clock";
                         break;
                     case 3:
-                        lbl = TR("Volume Step", "볼륨 단위");
+                        lbl = TR_ID(STR_VOLUME_STEP);
                         snprintf(val, sizeof(val), "%d%%", g_vol_step);
                         sico = "volume-2";
                         break;
                     case 4:
-                        lbl = TR("Seek Step", "탐색 단위");
+                        lbl = TR_ID(STR_SEEK_STEP);
                         snprintf(val, sizeof(val), "%ds", g_seek_sec);
                         sico = "skip-forward";
                         break;
                     case 5:
-                        lbl = TR("Font", "글꼴");
+                        lbl = TR_ID(STR_FONT);
                         sico = "type";
                         break;
                     case 6:
-                        lbl = TR("Rescan Library", "음악 다시 불러오기");
+                        lbl = TR_ID(STR_RESCAN_LIBRARY);
                         sico = "refresh-cw";
                         break;
                     case 7:
-                        lbl = TR("System Settings", "시스템 설정");
+                        lbl = TR_ID(STR_SYSTEM_SETTINGS);
                         sico = "sliders";
                         break;
                 }
@@ -1860,17 +1863,17 @@ static void render_list_screen(const struct player_status *st, int ox)
 static void render_now_playing(const struct player_status *st, int ox)
 {
     gfx_set_text_shadow(false);
-    const char *hdr_title = TR("Now Playing", "지금 재생 중");
+    const char *hdr_title = TR_ID(STR_NOW_PLAYING);
     const char *hdr_ico = active_status_icon(st);
     if (st && st->has_track) {
         if (g_media_seek_fired && (g_media_held_btn == Y1_BTN_LEFT || g_media_held_btn == Y1_BTN_RIGHT)) {
-            hdr_title = TR("Seeking", "탐색 중");
+            hdr_title = TR_ID(STR_SEEKING);
             hdr_ico = (g_media_held_btn == Y1_BTN_RIGHT) ? "chevron-right" : "chevron-left";
         } else if (st->playing) {
-            hdr_title = TR("Playing", "재생 중");
+            hdr_title = TR_ID(STR_PLAYING);
             hdr_ico = "play";
         } else {
-            hdr_title = TR("Paused", "일시정지");
+            hdr_title = TR_ID(STR_PAUSED);
             hdr_ico = "pause";
         }
     }
@@ -1878,7 +1881,7 @@ static void render_now_playing(const struct player_status *st, int ox)
 
     if (!st->has_track || st->track_idx < 0 || st->track_idx >= g_db.track_count) {
         gfx_set_text_shadow(gfx_has_wallpaper() && g_bg_blur_anim < 0.5f);
-        const char *msg = TR("Pick a song to start listening", "노래를 선택해 재생하세요");
+        const char *msg = TR_ID(STR_PICK_A_SONG_TO_START_LISTENING);
         int mw = gfx_text_width(msg, 24.0f, UI_FONT_SEMIBOLD);
         gfx_draw_text((UI_W - mw) / 2 + ox, 158, msg, 24.0f, UI_FONT_SEMIBOLD, COL_TEXT_DIM);
         gfx_set_text_shadow(false);
@@ -1925,7 +1928,7 @@ static void render_now_playing(const struct player_status *st, int ox)
         uint32_t vcol = (st->volume_pct > SAFE_VOL_LIMIT) ? COL_DANGER : COL_SUCCESS;
         if (vw > 0) gfx_fill_round_rect(bx, by, vw < 18 ? 18 : vw, bh, 9, vcol);
         char vstr[32];
-        snprintf(vstr, sizeof(vstr), "%s %d%%", TR("Volume", "볼륨"), st->volume_pct);
+        snprintf(vstr, sizeof(vstr), "%s %d%%", TR_ID(STR_VOLUME), st->volume_pct);
         gfx_draw_icon("volume-2", bx, by + 24, 24, vcol);
         gfx_draw_text(bx + 30, by + 23, vstr, 22.5f, UI_FONT_SEMIBOLD, COL_TEXT);
     } else {
@@ -1965,17 +1968,17 @@ static void render_vol_warn_modal(void)
     gfx_draw_icon("volume-2", mx + 32, my + 30, 28, 0xFFFFFFFFU);
 
     gfx_draw_text_ellipsize(mx + 84, my + 20, mw - 104,
-                            TR("High Volume Warning", "높은 볼륨 주의"),
+                            TR_ID(STR_HIGH_VOLUME_WARNING),
                             26.0f, UI_FONT_SEMIBOLD, COL_DANGER);
     gfx_draw_text_ellipsize(mx + 84, my + 52, mw - 104,
-                            TR("Above 60 dB safe limit", "안전 기준(60dB) 초과"),
+                            TR_ID(STR_ABOVE_60_DB_SAFE_LIMIT),
                             21.0f, UI_FONT_REGULAR, COL_TEXT_DIM);
 
     gfx_draw_text_ellipsize(mx + 22, my + 92, mw - 44,
-                            TR("Listening at high volume may harm your", "큰 볼륨으로 오래 들으면 청력이 손상될 수"),
+                            TR_ID(STR_LISTENING_AT_HIGH_VOLUME_MAY_HARM_YOUR),
                             22.0f, UI_FONT_REGULAR, COL_TEXT);
     gfx_draw_text_ellipsize(mx + 22, my + 122, mw - 44,
-                            TR("hearing. Raise volume anyway?", "있습니다. 볼륨을 더 높이시겠습니까?"),
+                            TR_ID(STR_HEARING_RAISE_VOLUME_ANYWAY),
                             22.0f, UI_FONT_REGULAR, COL_TEXT);
 
     int bw = (mw - 56) / 2, bh = 56;
@@ -1984,17 +1987,214 @@ static void render_vol_warn_modal(void)
 
     gfx_fill_round_rect(bx0, by, bw, bh, bh / 2, g_vol_warn_sel == 0 ? COL_SEL_BG : COL_MODAL_HI);
     if (g_vol_warn_sel == 0) gfx_stroke_round_rect(bx0, by, bw, bh, bh / 2, 2, COL_BORDER_HI);
-    const char *no_lbl = TR("No", "아니요");
+    const char *no_lbl = TR_ID(STR_NO);
     int nw = gfx_text_width(no_lbl, 24.0f, UI_FONT_SEMIBOLD);
     gfx_draw_text(bx0 + (bw - nw) / 2, by + 14, no_lbl, 24.0f, UI_FONT_SEMIBOLD,
                   g_vol_warn_sel == 0 ? COL_SEL_TEXT : COL_TEXT);
 
     gfx_fill_round_rect(bx1, by, bw, bh, bh / 2, g_vol_warn_sel == 1 ? COL_DANGER : COL_MODAL_HI);
     if (g_vol_warn_sel == 1) gfx_stroke_round_rect(bx1, by, bw, bh, bh / 2, 2, COL_BORDER_HI);
-    const char *yes_lbl = TR("Yes", "예");
+    const char *yes_lbl = TR_ID(STR_YES);
     int yw = gfx_text_width(yes_lbl, 24.0f, UI_FONT_SEMIBOLD);
     gfx_draw_text(bx1 + (bw - yw) / 2, by + 14, yes_lbl, 24.0f, UI_FONT_SEMIBOLD,
                   g_vol_warn_sel == 1 ? 0xFFFFFFFFU : COL_TEXT);
+}
+
+static int dd_option_count(enum meui_dd_kind kind)
+{
+    switch (kind) {
+        case DD_REPEAT:    return 3;
+        case DD_LANG:      return 2;
+        case DD_SOURCE:    return 2;
+        case DD_TIMEOUT:   return 5;
+        case DD_VOL_STEP:  return 4;
+        case DD_SEEK_STEP: return 4;
+    }
+    return 0;
+}
+
+static int dd_current_index(enum meui_dd_kind kind, const struct player_status *st)
+{
+    switch (kind) {
+        case DD_REPEAT:
+            if (!st) return 0;
+            return (st->repeat == REPEAT_ONE) ? 1 : (st->repeat == REPEAT_ALL ? 2 : 0);
+        case DD_LANG:
+            return g_lang ? 1 : 0;
+        case DD_SOURCE:
+            return g_use_ipod_db ? 0 : 1;
+        case DD_TIMEOUT: {
+            static const int ts[5] = { 15, 30, 60, 120, 0 };
+            for (int i = 0; i < 5; i++) if (ts[i] == g_screen_timeout_sec) return i;
+            return 1;
+        }
+        case DD_VOL_STEP: {
+            static const int vs[4] = { 1, 2, 5, 10 };
+            for (int i = 0; i < 4; i++) if (vs[i] == g_vol_step) return i;
+            return 2;
+        }
+        case DD_SEEK_STEP: {
+            static const int ss[4] = { 5, 10, 15, 30 };
+            for (int i = 0; i < 4; i++) if (ss[i] == g_seek_sec) return i;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static void dd_format_option(enum meui_dd_kind kind, int idx, char *buf, size_t len)
+{
+    switch (kind) {
+        case DD_REPEAT:
+            snprintf(buf, len, "%s",
+                     idx == 1 ? TR_ID(STR_ONE) : (idx == 2 ? TR_ID(STR_ALL) : TR_ID(STR_OFF)));
+            break;
+        case DD_LANG:
+            snprintf(buf, len, "%s", idx == 1 ? "한국어" : "English");
+            break;
+        case DD_SOURCE:
+            snprintf(buf, len, "%s", idx == 0 ? "iPod DB" : TR_ID(STR_FILES));
+            break;
+        case DD_TIMEOUT: {
+            static const int ts[5] = { 15, 30, 60, 120, 0 };
+            if (ts[idx] == 0) snprintf(buf, len, "%s", TR_ID(STR_NEVER));
+            else snprintf(buf, len, "%ds", ts[idx]);
+            break;
+        }
+        case DD_VOL_STEP: {
+            static const int vs[4] = { 1, 2, 5, 10 };
+            snprintf(buf, len, "%d%%", vs[idx]);
+            break;
+        }
+        case DD_SEEK_STEP: {
+            static const int ss[4] = { 5, 10, 15, 30 };
+            snprintf(buf, len, "%ds", ss[idx]);
+            break;
+        }
+    }
+}
+
+static void open_dropdown(enum meui_dd_kind kind, const struct player_status *st)
+{
+    g_dd_kind = kind;
+    g_dd_sel = dd_current_index(kind, st);
+    g_dd_open = true;
+}
+
+static void apply_dropdown_selection(void)
+{
+    int idx = g_dd_sel;
+    g_dd_open = false;
+    switch (g_dd_kind) {
+        case DD_REPEAT: {
+            enum repeat_mode rm = (idx == 1) ? REPEAT_ONE : (idx == 2 ? REPEAT_ALL : REPEAT_OFF);
+            player_set_repeat(rm);
+            break;
+        }
+        case DD_LANG:
+            g_lang = (idx == 1) ? 1 : 0;
+            save_meui_prefs();
+            break;
+        case DD_SOURCE: {
+            int next_db = (idx == 0) ? 1 : 0;
+            if (next_db != g_use_ipod_db) {
+                g_use_ipod_db = next_db;
+                y1_usb_set_ipod_mode(g_use_ipod_db != 0);
+                save_meui_prefs();
+                reload_library();
+                show_toast(g_use_ipod_db ? TR_ID(STR_SWITCHED_TO_IPOD_DB)
+                                         : TR_ID(STR_SWITCHED_TO_FILES), 1200);
+            }
+            break;
+        }
+        case DD_TIMEOUT: {
+            static const int ts[5] = { 15, 30, 60, 120, 0 };
+            if (idx >= 0 && idx < 5) { g_screen_timeout_sec = ts[idx]; save_meui_prefs(); }
+            break;
+        }
+        case DD_VOL_STEP: {
+            static const int vs[4] = { 1, 2, 5, 10 };
+            if (idx >= 0 && idx < 4) { g_vol_step = vs[idx]; save_meui_prefs(); }
+            break;
+        }
+        case DD_SEEK_STEP: {
+            static const int ss[4] = { 5, 10, 15, 30 };
+            if (idx >= 0 && idx < 4) { g_seek_sec = ss[idx]; save_meui_prefs(); }
+            break;
+        }
+    }
+}
+
+static void render_settings_modals(const struct player_status *st)
+{
+    if (g_slider_open) {
+        gfx_set_text_shadow(false);
+        int mw = 420, mh = 160;
+        int mx = (UI_W - mw) / 2, my = (UI_H - mh) / 2;
+        gfx_fill_round_rect(mx, my, mw, mh, 34, COL_MODAL_BG);
+        gfx_stroke_round_rect(mx, my, mw, mh, 34, 2, COL_BORDER_HI);
+        gfx_draw_text(mx + 24, my + 20, TR_ID(STR_BRIGHTNESS), 24.0f, UI_FONT_SEMIBOLD, COL_TEXT);
+
+        char vbuf[24];
+        snprintf(vbuf, sizeof(vbuf), "%d%%", g_brightness);
+        int vw = gfx_text_width(vbuf, 24.0f, UI_FONT_SEMIBOLD);
+        gfx_draw_text(mx + mw - 24 - vw, my + 20, vbuf, 24.0f, UI_FONT_SEMIBOLD, COL_ACCENT);
+
+        int tx = mx + 24, ty = my + 90, tw = mw - 48, th = 14;
+        gfx_fill_round_rect(tx, ty, tw, th, 7, COL_SURFACE_HI);
+        int fill_w = ((g_brightness - 5) * tw) / 95;
+        if (fill_w < 10 && g_brightness > 5) fill_w = 10;
+        if (fill_w > tw) fill_w = tw;
+        if (fill_w > 0) gfx_fill_round_rect(tx, ty, fill_w, th, 7, COL_ACCENT);
+        int kx = tx + fill_w - 10;
+        if (kx < tx) kx = tx;
+        if (kx > tx + tw - 24) kx = tx + tw - 24;
+        gfx_fill_round_rect(kx, ty - 5, 24, 24, 12, COL_SUCCESS);
+        gfx_stroke_round_rect(kx, ty - 5, 24, 24, 12, 1, COL_BORDER_HI);
+    }
+
+    if (g_dd_open) {
+        gfx_set_text_shadow(false);
+        int n = dd_option_count(g_dd_kind);
+        int vis = (n > 4) ? 4 : n;
+        int row_h = 46, gap = 6;
+        int mw = 360, mh = 72 + vis * (row_h + gap) + 12;
+        int mx = (UI_W - mw) / 2, my = (UI_H - mh) / 2;
+
+        gfx_fill_round_rect(mx, my, mw, mh, 30, COL_MODAL_BG);
+        gfx_stroke_round_rect(mx, my, mw, mh, 30, 2, COL_BORDER_HI);
+
+        const char *title = TR_ID(STR_REPEAT);
+        if (g_dd_kind == DD_LANG) title = TR_ID(STR_LANGUAGE);
+        else if (g_dd_kind == DD_SOURCE) title = TR_ID(STR_MUSIC_SOURCE);
+        else if (g_dd_kind == DD_TIMEOUT) title = TR_ID(STR_SCREEN_TIMEOUT);
+        else if (g_dd_kind == DD_VOL_STEP) title = TR_ID(STR_VOLUME_STEP);
+        else if (g_dd_kind == DD_SEEK_STEP) title = TR_ID(STR_SEEK_STEP);
+        gfx_draw_text_ellipsize(mx + 22, my + 18, mw - 44, title, 23.0f, UI_FONT_SEMIBOLD, COL_TEXT);
+
+        int cur = dd_current_index(g_dd_kind, st);
+        int scroll = 0;
+        if (g_dd_sel >= vis) scroll = g_dd_sel - vis + 1;
+        if (scroll > n - vis) scroll = n - vis;
+        if (scroll < 0) scroll = 0;
+
+        for (int i = 0; i < vis; i++) {
+            int oi = scroll + i;
+            int ry = my + 58 + i * (row_h + gap);
+            bool sel = (oi == g_dd_sel);
+            gfx_fill_round_rect(mx + 16, ry, mw - 32, row_h, row_h / 2,
+                                sel ? COL_SEL_BG : COL_MODAL_HI);
+            if (sel) gfx_stroke_round_rect(mx + 16, ry, mw - 32, row_h, row_h / 2, 2, COL_BORDER_HI);
+            char lbl[48];
+            dd_format_option(g_dd_kind, oi, lbl, sizeof(lbl));
+            gfx_draw_text_ellipsize(mx + 34, ry + 11, mw - 92, lbl,
+                                    21.5f, UI_FONT_SEMIBOLD, sel ? COL_SEL_TEXT : COL_TEXT);
+            if (oi == cur) {
+                gfx_draw_icon("check", mx + mw - 50, ry + 13, 20,
+                              sel ? COL_SEL_TEXT : COL_ACCENT);
+            }
+        }
+    }
 }
 
 static void render_context_menu(const struct player_status *st)
@@ -2026,11 +2226,11 @@ static void render_context_menu(const struct player_status *st)
     bool shuf = st ? st->shuffle : false;
     enum repeat_mode rep = st ? st->repeat : REPEAT_ALL;
     snprintf(shuf_en, sizeof(shuf_en), "Shuffle: %s", shuf ? "ON" : "OFF");
-    snprintf(shuf_ko, sizeof(shuf_ko), "셔플: %s", shuf ? "켜짐" : "꺼짐");
+    snprintf(shuf_ko, sizeof(shuf_ko), "%s: %s", STR_CTX_SHUFFLE_KO, shuf ? STR_CTX_ON_KO : STR_CTX_OFF_KO);
     const char *rn_en = (rep == REPEAT_OFF) ? "Off" : (rep == REPEAT_ONE) ? "One" : "All";
-    const char *rn_ko = (rep == REPEAT_OFF) ? "끄기" : (rep == REPEAT_ONE) ? "한 곡" : "전체";
+    const char *rn_ko = (rep == REPEAT_OFF) ? STR_CTX_REPEAT_OFF_KO : (rep == REPEAT_ONE) ? STR_CTX_REPEAT_ONE_KO : STR_CTX_REPEAT_ALL_KO;
     snprintf(rep_en, sizeof(rep_en), "Repeat: %s", rn_en);
-    snprintf(rep_ko, sizeof(rep_ko), "반복: %s", rn_ko);
+    snprintf(rep_ko, sizeof(rep_ko), "%s: %s", STR_CTX_REPEAT_KO, rn_ko);
 
     const char *labels_en[8] = {
         "Play Next", "Add to Queue", "View Queue", "Add to Playlist...",
@@ -2038,8 +2238,8 @@ static void render_context_menu(const struct player_status *st)
         shuf_en, rep_en
     };
     const char *labels_ko[8] = {
-        "다음에 재생", "대기열에 추가", "재생 대기열 보기", "재생목록에 추가...",
-        is_fav ? "즐겨찾기 해제" : "즐겨찾기", "앨범으로 이동",
+        STR_CTX_PLAY_NEXT_KO, STR_CTX_ADD_QUEUE_KO, STR_CTX_VIEW_QUEUE_KO, STR_CTX_ADD_PL_KO,
+        is_fav ? STR_CTX_UNFAV_KO : STR_CTX_FAV_KO, STR_CTX_GOTO_ALBUM_KO,
         shuf_ko, rep_ko
     };
     const char *icons[8] = {
@@ -2051,8 +2251,8 @@ static void render_context_menu(const struct player_status *st)
         is_fav ? "Unfavorite Song" : "Favorite Song", "Clear Queue"
     };
     const char *q_ko[6] = {
-        "대기열에서 제거", "위로 이동", "아래로 이동", "지금 재생",
-        is_fav ? "즐겨찾기 해제" : "즐겨찾기", "대기열 비우기"
+        STR_CTX_REM_QUEUE_KO, STR_CTX_MOVE_UP_KO, STR_CTX_MOVE_DOWN_KO, STR_CTX_PLAY_NOW_KO,
+        is_fav ? STR_CTX_UNFAV_KO : STR_CTX_FAV_KO, STR_CTX_CLEAR_QUEUE_KO
     };
     const char *q_icons[6] = {
         "trash-2", "arrow-up", "arrow-down", "play", "heart", "x"
@@ -2153,10 +2353,10 @@ static void execute_search_query(void)
     hime_commit(&g_search_ime, g_search_buf);
     g_search_len = (int)strlen(g_search_buf);
     if (g_search_len == 0) {
-        show_toast(TR("Type a search term", "검색어를 입력하세요"), 1100);
+        show_toast(TR_ID(STR_TYPE_A_SEARCH_TERM), 1100);
         return;
     }
-    snprintf(g_filter_title, sizeof(g_filter_title), "%s: %s", TR("Search", "검색"), g_search_buf);
+    snprintf(g_filter_title, sizeof(g_filter_title), "%s: %s", TR_ID(STR_SEARCH), g_search_buf);
     reset_filter_list();
     for (int i = 0; i < g_db.track_count; i++) {
         if (ci_contains(g_db.tracks[i].title, g_search_buf) ||
@@ -2166,7 +2366,7 @@ static void execute_search_query(void)
         }
     }
     if (g_filter_count == 0) {
-        show_toast(TR("No matches found", "검색 결과 없음"), 1200);
+        show_toast(TR_ID(STR_NO_MATCHES_FOUND), 1200);
         return;
     }
     push_screen(SCR_FILTERED_SONGS);
@@ -2174,7 +2374,7 @@ static void execute_search_query(void)
 
 static void render_search_screen(const struct player_status *st, int ox)
 {
-    draw_header(TR("Search", "검색"), "search", st);
+    draw_header(TR_ID(STR_SEARCH), "search", st);
 
     gfx_fill_round_rect(12 + ox, 62, UI_W - 24, 288, 32, COL_MODAL_BG);
     gfx_stroke_round_rect(12 + ox, 62, UI_W - 24, 288, 32, 2, COL_MODAL_BORDER);
@@ -2184,7 +2384,7 @@ static void render_search_screen(const struct player_status *st, int ox)
         gfx_draw_text_ellipsize(38 + ox, 86, UI_W - 76, g_search_buf, 24.0f, UI_FONT_SEMIBOLD, COL_TEXT);
     } else {
         gfx_draw_text_ellipsize(38 + ox, 88, UI_W - 76,
-                                TR("Scroll/Arrows + Select, GO to search", "글자를 선택하고 GO를 누르세요"),
+                                TR_ID(STR_SCROLL_ARROWS_SELECT_GO_TO_SEARCH),
                                 20.0f, UI_FONT_REGULAR, COL_TEXT_MUTED);
     }
 
@@ -2260,7 +2460,7 @@ static void render_playlist_picker(void)
     gfx_fill_round_rect(mx, my, mw, mh, 34, COL_MODAL_BG);
     gfx_stroke_round_rect(mx, my, mw, mh, 34, 2, COL_BORDER_HI);
     gfx_draw_text_ellipsize(mx + 22, my + 12, mw - 44,
-                            TR("Add to Playlist", "재생목록에 추가"), 25.0f, UI_FONT_SEMIBOLD, COL_TEXT);
+                            TR_ID(STR_ADD_TO_PLAYLIST), 25.0f, UI_FONT_SEMIBOLD, COL_TEXT);
 
     int visible = 5, rh = 44, gap = 4;
     int step = rh + gap;
@@ -2298,20 +2498,20 @@ static void execute_playlist_pick(void)
         fprintf(f, "%s\n", g_db.tracks[ti].fs_path);
         fclose(f);
         char msg[128];
-        snprintf(msg, sizeof(msg), "%s %s", TR("Added to", "추가됨:"), g_pl_pick_names[sel]);
+        snprintf(msg, sizeof(msg), "%s %s", TR_ID(STR_ADDED_TO), g_pl_pick_names[sel]);
         show_toast(msg, 1300);
     } else {
-        show_toast(TR("Failed to save playlist", "재생목록 저장 실패"), 1300);
+        show_toast(TR_ID(STR_FAILED_TO_SAVE_PLAYLIST), 1300);
     }
 }
 
 static void render_photos_grid(const struct player_status *st, int ox)
 {
-    draw_header(TR("Photos", "사진"), "images", st);
+    draw_header(TR_ID(STR_PHOTOS), "images", st);
     int total = photos_count();
     if (total == 0) {
         gfx_fill_round_rect(24 + ox, 110, UI_W - 48, 120, 34, COL_SURFACE);
-        const char *msg = TR("No photos in /Photos", "/Photos 폴더에 사진이 없습니다");
+        const char *msg = TR_ID(STR_NO_PHOTOS_IN_PHOTOS);
         int mw = gfx_text_width(msg, 23.0f, UI_FONT_SEMIBOLD);
         gfx_draw_text((UI_W - mw) / 2 + ox, 154, msg, 23.0f, UI_FONT_SEMIBOLD, COL_TEXT_DIM);
         return;
@@ -2371,7 +2571,7 @@ static void render_photo_view(void)
         gfx_blit_rgb565_fit_zoom(fbmp->rgb565, fbmp->w, fbmp->h, g_photo_zoom);
     } else {
         gfx_clear(0xFF000000U);
-        const char *msg = TR("Cannot load photo", "사진을 불러올 수 없음");
+        const char *msg = TR_ID(STR_CANNOT_LOAD_PHOTO);
         int mw = gfx_text_width(msg, 24.0f, UI_FONT_SEMIBOLD);
         gfx_draw_text((UI_W - mw) / 2, 164, msg, 24.0f, UI_FONT_SEMIBOLD, 0xFFFFFFFFU);
     }
@@ -2413,6 +2613,7 @@ static void render_current_frame(const struct player_status *st)
         render_context_menu(st);
         render_playlist_picker();
         render_vol_warn_modal();
+        render_settings_modals(st);
     }
     render_toast();
     gfx_present();
@@ -2432,7 +2633,7 @@ static void execute_context_action(const struct player_status *st)
             player_remove_queue_pos(qpos);
             int total = current_list_count();
             if (g_list_sel >= total) g_list_sel = total > 0 ? total - 1 : 0;
-            show_toast(TR("Removed from Queue", "대기열에서 제거됨"), 1200);
+            show_toast(TR_ID(STR_REMOVED_FROM_QUEUE), 1200);
         } else if (g_ctx_sel == 1) {
             if (qpos > 0) {
                 player_move_queue_pos(qpos, qpos - 1);
@@ -2449,23 +2650,23 @@ static void execute_context_action(const struct player_status *st)
             bool nf = !is_track_fav(ti);
             set_track_fav(ti, nf);
             y1_ipod_native_record_favorite(tr->rb_path, nf);
-            show_toast(nf ? TR("Favorited", "즐겨찾기에 추가됨") : TR("Removed Favorite", "즐겨찾기 해제됨"), 1200);
+            show_toast(nf ? TR_ID(STR_FAVORITED) : TR_ID(STR_REMOVED_FAVORITE), 1200);
         } else if (g_ctx_sel == 5) {
             player_stop();
             g_list_sel = 0;
             g_list_scroll = 0;
             g_list_scroll_anim = 0.0f;
-            show_toast(TR("Queue cleared", "대기열 비움"), 1200);
+            show_toast(TR_ID(STR_QUEUE_CLEARED), 1200);
         }
         return;
     }
 
     if (g_ctx_sel == 0) {
         player_play_next(ti);
-        show_toast(TR("Added to Play Next", "다음 곡으로 추가됨"), 1200);
+        show_toast(TR_ID(STR_ADDED_TO_PLAY_NEXT), 1200);
     } else if (g_ctx_sel == 1) {
         player_add_to_queue(ti);
-        show_toast(TR("Added to Queue", "재생 대기열에 추가됨"), 1200);
+        show_toast(TR_ID(STR_ADDED_TO_QUEUE), 1200);
     } else if (g_ctx_sel == 2) {
         push_screen(SCR_QUEUE);
     } else if (g_ctx_sel == 3) {
@@ -2474,20 +2675,20 @@ static void execute_context_action(const struct player_status *st)
         bool nf = !is_track_fav(ti);
         set_track_fav(ti, nf);
         y1_ipod_native_record_favorite(tr->rb_path, nf);
-        show_toast(nf ? TR("Favorited", "즐겨찾기에 추가됨") : TR("Removed Favorite", "즐겨찾기 해제됨"), 1200);
+        show_toast(nf ? TR_ID(STR_FAVORITED) : TR_ID(STR_REMOVED_FAVORITE), 1200);
     } else if (g_ctx_sel == 5) {
         const char *alb = tr->album[0] ? tr->album : "Unknown Album";
         open_album_tracks(alb);
     } else if (g_ctx_sel == 6) {
         bool ns = st ? !st->shuffle : true;
         player_set_shuffle(ns);
-        show_toast(ns ? TR("Shuffle ON", "셔플 켜짐") : TR("Shuffle OFF", "셔플 꺼짐"), 1200);
+        show_toast(ns ? TR_ID(STR_SHUFFLE_ON) : TR_ID(STR_SHUFFLE_OFF), 1200);
     } else if (g_ctx_sel == 7) {
         enum repeat_mode nr = (enum repeat_mode)(((st ? st->repeat : REPEAT_ALL) + 1) % 3);
         player_set_repeat(nr);
-        show_toast(nr == REPEAT_OFF ? TR("Repeat: Off", "반복: 끄기")
-                 : (nr == REPEAT_ONE ? TR("Repeat: One", "반복: 한 곡")
-                                     : TR("Repeat: All", "반복: 전체")), 1200);
+        show_toast(nr == REPEAT_OFF ? TR_ID(STR_REPEAT_OFF)
+                 : (nr == REPEAT_ONE ? TR_ID(STR_REPEAT_ONE)
+                                     : TR_ID(STR_REPEAT_ALL)), 1200);
     }
 }
 
@@ -2516,6 +2717,8 @@ static void handle_short_select(const struct player_status *st)
         return;
     }
 
+    if (g_slider_open) { g_slider_open = false; save_meui_prefs(); return; }
+    if (g_dd_open) { apply_dropdown_selection(); return; }
     if (g_pl_pick_open) { execute_playlist_pick(); return; }
     if (g_ctx_open) { execute_context_action(st); return; }
 
@@ -2623,13 +2826,13 @@ static void handle_short_select(const struct player_status *st)
             if (we->is_clear) {
                 if (g_screen == SCR_FONT_PICKER) {
                     gfx_reset_default_font();
-                    show_toast(TR("Default font restored", "기본 글꼴로 복원됨"), 1200);
+                    show_toast(TR_ID(STR_DEFAULT_FONT_RESTORED), 1200);
                 } else {
                     g_wp_album_art = 0;
                     g_last_wp_art_track = -2;
                     save_meui_prefs();
                     gfx_clear_wallpaper();
-                    show_toast(TR("Wallpaper cleared", "배경화면 삭제됨"), 1200);
+                    show_toast(TR_ID(STR_WALLPAPER_CLEARED), 1200);
                 }
                 pop_screen();
             } else if (we->is_album_art) {
@@ -2638,11 +2841,11 @@ static void handle_short_select(const struct player_status *st)
                 if (g_wp_album_art) {
                     g_last_wp_art_track = -2;
                     sync_album_art_wallpaper(st, true);
-                    show_toast(TR("Album art wallpaper ON", "앨범 아트 배경화면 켜짐"), 1400);
+                    show_toast(TR_ID(STR_ALBUM_ART_WALLPAPER_ON), 1400);
                     pop_screen();
                 } else {
                     gfx_clear_wallpaper();
-                    show_toast(TR("Album art wallpaper OFF", "앨범 아트 배경화면 꺼짐"), 1200);
+                    show_toast(TR_ID(STR_ALBUM_ART_WALLPAPER_OFF), 1200);
                 }
             } else if (we->is_dir) {
                 scan_picker_dir(we->path, g_screen == SCR_FONT_PICKER);
@@ -2650,33 +2853,33 @@ static void handle_short_select(const struct player_status *st)
                 item_pill_clear_scope((int)g_screen);
             } else if (g_screen == SCR_FONT_PICKER) {
                 if (gfx_set_custom_font(we->path)) {
-                    show_toast(TR("Font applied", "글꼴 적용됨"), 1400);
+                    show_toast(TR_ID(STR_FONT_APPLIED), 1400);
                     pop_screen();
                 } else {
-                    show_toast(TR("Failed to load font", "글꼴 로드 실패"), 1400);
+                    show_toast(TR_ID(STR_FAILED_TO_LOAD_FONT), 1400);
                 }
             } else {
-                show_toast(TR("Applying wallpaper...", "배경화면 적용 중..."), 1000);
+                show_toast(TR_ID(STR_APPLYING_WALLPAPER), 1000);
                 render_current_frame(st);
                 if (gfx_set_wallpaper_from_image(we->path)) {
                     g_wp_album_art = 0;
                     save_meui_prefs();
-                    show_toast(TR("Wallpaper applied", "배경화면 적용됨"), 1400);
+                    show_toast(TR_ID(STR_WALLPAPER_APPLIED), 1400);
                     pop_screen();
                 } else {
-                    show_toast(TR("Failed to load image", "이미지 로드 실패"), 1400);
+                    show_toast(TR_ID(STR_FAILED_TO_LOAD_IMAGE), 1400);
                 }
             }
         }
     } else if (g_screen == SCR_SETTINGS) {
         switch (g_list_sel) {
-            case 0: g_brightness = (g_brightness >= 100) ? 10 : g_brightness + 15; y1_backlight_set_percent(g_brightness); break;
+            case 0: g_slider_orig = g_brightness; g_slider_open = true; break;
             case 1: push_screen(SCR_BT_MENU); break;
             case 2: scan_picker_dir("/mnt/sdcard", false); push_screen(SCR_WALLPAPER); break;
             case 3: g_dark_mode = !g_dark_mode; gfx_set_dark_mode(g_dark_mode != 0); break;
             case 4: player_set_shuffle(!st->shuffle); break;
-            case 5: player_set_repeat((enum repeat_mode)((st->repeat + 1) % 3)); break;
-            case 6: g_lang = g_lang ? 0 : 1; break;
+            case 5: open_dropdown(DD_REPEAT, st); break;
+            case 6: open_dropdown(DD_LANG, st); break;
             case 7: push_screen(SCR_ADVANCED_SETTINGS); break;
             case 8: save_resume_state(); y1_sys_poweroff(); break;
         }
@@ -2684,15 +2887,15 @@ static void handle_short_select(const struct player_status *st)
         switch (g_list_sel) {
             case 0:
                 y1_bt_set_enabled(!y1_bt_is_enabled());
-                show_toast(y1_bt_is_enabled() ? TR("Bluetooth ON", "블루투스 켜짐")
-                                              : TR("Bluetooth OFF", "블루투스 꺼짐"), 1200);
+                show_toast(y1_bt_is_enabled() ? TR_ID(STR_BLUETOOTH_ON)
+                                              : TR_ID(STR_BLUETOOTH_OFF), 1200);
                 break;
             case 1: {
                 bool next_rx = !y1_bt_is_receiver_mode();
                 if (next_rx && st->playing) player_pause();
                 y1_bt_set_receiver_mode(next_rx);
-                show_toast(next_rx ? TR("BT Receiver Mode ON", "블루투스 수신 모드 켜짐")
-                                   : TR("BT Receiver Mode OFF", "블루투스 수신 모드 꺼짐"), 1200);
+                show_toast(next_rx ? TR_ID(STR_BT_RECEIVER_MODE_ON)
+                                   : TR_ID(STR_BT_RECEIVER_MODE_OFF), 1200);
                 break;
             }
             case 2: push_screen(SCR_BT_PAIRED); break;
@@ -2704,17 +2907,17 @@ static void handle_short_select(const struct player_status *st)
             const struct y1_bt_device *dev = &g_bt_devs[g_list_sel];
             if (dev->connected) {
                 y1_bt_disconnect();
-                show_toast(TR("Disconnecting...", "연결 해제 중..."), 1200);
+                show_toast(TR_ID(STR_DISCONNECTING), 1200);
             } else {
                 bt_connect_best_codec(dev->bdaddr);
-                show_toast(TR("Connecting...", "연결 중..."), 1500);
+                show_toast(TR_ID(STR_CONNECTING), 1500);
             }
         }
     } else if (g_screen == SCR_BT_FORGET) {
         if (g_list_sel >= 0 && g_list_sel < g_bt_dev_count) {
             y1_bt_forget_device(g_bt_devs[g_list_sel].bdaddr);
             refresh_bt_sublist();
-            show_toast(TR("Device forgotten", "기기 삭제됨"), 1200);
+            show_toast(TR_ID(STR_DEVICE_FORGOTTEN), 1200);
         }
     } else if (g_screen == SCR_ADVANCED_SETTINGS) {
         switch (g_list_sel) {
@@ -2723,34 +2926,12 @@ static void handle_short_select(const struct player_status *st)
                 g_safe_vol_acked = false;
                 save_meui_prefs();
                 break;
-            case 1:
-                g_use_ipod_db = g_use_ipod_db ? 0 : 1;
-                y1_usb_set_ipod_mode(g_use_ipod_db != 0);
-                save_meui_prefs();
-                reload_library();
-                show_toast(g_use_ipod_db ? TR("Switched to iPod DB", "iPod DB로 전환됨")
-                                         : TR("Switched to Files", "일반 파일로 전환됨"), 1200);
-                break;
-            case 2: {
-                static const int ts[] = { 15, 30, 60, 120, 0 };
-                int ni = 1;
-                for (int k = 0; k < 5; k++) if (ts[k] == g_screen_timeout_sec) ni = (k + 1) % 5;
-                g_screen_timeout_sec = ts[ni];
-                save_meui_prefs();
-                break;
-            }
-            case 3: {
-                static const int vs[] = { 1, 2, 5, 10 };
-                int ni = 0; for (int k = 0; k < 4; k++) if (vs[k] == g_vol_step) ni = (k + 1) % 4;
-                g_vol_step = vs[ni]; save_meui_prefs(); break;
-            }
-            case 4: {
-                static const int ss[] = { 5, 10, 15, 30 };
-                int ni = 0; for (int k = 0; k < 4; k++) if (ss[k] == g_seek_sec) ni = (k + 1) % 4;
-                g_seek_sec = ss[ni]; save_meui_prefs(); break;
-            }
+            case 1: open_dropdown(DD_SOURCE, st); break;
+            case 2: open_dropdown(DD_TIMEOUT, st); break;
+            case 3: open_dropdown(DD_VOL_STEP, st); break;
+            case 4: open_dropdown(DD_SEEK_STEP, st); break;
             case 5: scan_picker_dir("/mnt/sdcard", true); push_screen(SCR_FONT_PICKER); break;
-            case 6: reload_library(); show_toast(TR("Library refreshed", "음악 목록 새로고침됨"), 1200); break;
+            case 6: reload_library(); show_toast(TR_ID(STR_LIBRARY_REFRESHED), 1200); break;
             case 7: launch_system_settings(); break;
         }
     }
@@ -2784,8 +2965,8 @@ static void handle_non_select_button(uint32_t btn, int ev_value)
         } else if (btn == Y1_BTN_PLAY && pcnt > 0) {
             g_photo_slideshow = !g_photo_slideshow;
             g_photo_slide_ms = now_ms();
-            show_toast(g_photo_slideshow ? TR("Slideshow ON (60s)", "슬라이드쇼 켜짐 (60초)")
-                                         : TR("Slideshow OFF", "슬라이드쇼 꺼짐"), 1200);
+            show_toast(g_photo_slideshow ? TR_ID(STR_SLIDESHOW_ON_60S)
+                                         : TR_ID(STR_SLIDESHOW_OFF), 1200);
         }
         return;
     }
@@ -2856,6 +3037,31 @@ static void handle_non_select_button(uint32_t btn, int ev_value)
         if (btn == Y1_BTN_MENU) g_vol_warn_open = false;
         else if (btn == Y1_BTN_SCROLL_BACK) g_vol_warn_sel = 0;
         else if (btn == Y1_BTN_SCROLL_FWD) g_vol_warn_sel = 1;
+        return;
+    }
+
+    if (g_slider_open) {
+        if (btn == Y1_BTN_MENU) {
+            g_brightness = g_slider_orig;
+            y1_backlight_set_percent(g_brightness);
+            g_slider_open = false;
+        } else if (btn == Y1_BTN_SCROLL_FWD || btn == Y1_BTN_RIGHT) {
+            g_brightness += 5;
+            if (g_brightness > 100) g_brightness = 100;
+            y1_backlight_set_percent(g_brightness);
+        } else if (btn == Y1_BTN_SCROLL_BACK || btn == Y1_BTN_LEFT) {
+            g_brightness -= 5;
+            if (g_brightness < 5) g_brightness = 5;
+            y1_backlight_set_percent(g_brightness);
+        }
+        return;
+    }
+
+    if (g_dd_open) {
+        int n = dd_option_count(g_dd_kind);
+        if (btn == Y1_BTN_MENU) g_dd_open = false;
+        else if (btn == Y1_BTN_SCROLL_FWD && n > 0) g_dd_sel = (g_dd_sel + 1) % n;
+        else if (btn == Y1_BTN_SCROLL_BACK && n > 0) g_dd_sel = (g_dd_sel + n - 1) % n;
         return;
     }
 
@@ -3018,7 +3224,7 @@ int main(void)
                 if (pst.playing) {
                     player_pause();
                     save_resume_state();
-                    show_toast(TR("Headphones unplugged", "이어폰 연결 해제됨"), 1600);
+                    show_toast(TR_ID(STR_HEADPHONES_UNPLUGGED), 1600);
                     dirty = true;
                 }
                 g_safe_vol_acked = false;
@@ -3031,14 +3237,14 @@ int main(void)
                 char msg[96];
                 if (bt_conn) {
                     if (bt_name[0])
-                        snprintf(msg, sizeof(msg), "%s: %s", TR("BT Connected", "블루투스 연결됨"), bt_name);
+                        snprintf(msg, sizeof(msg), "%s: %s", TR_ID(STR_BT_CONNECTED), bt_name);
                     else
-                        snprintf(msg, sizeof(msg), "%s", TR("Bluetooth Connected", "블루투스 연결됨"));
+                        snprintf(msg, sizeof(msg), "%s", TR_ID(STR_BLUETOOTH_CONNECTED));
                     show_toast(msg, 2000);
                 } else {
                     player_pause();
                     save_resume_state();
-                    show_toast(TR("Bluetooth Disconnected", "블루투스 연결 해제됨"), 2000);
+                    show_toast(TR_ID(STR_BLUETOOTH_DISCONNECTED), 2000);
                 }
                 g_bt_ev_connected = 0;
                 g_bt_ev_disconnected = 0;
@@ -3048,16 +3254,16 @@ int main(void)
                 const char *bn = y1_bt_get_connected_name();
                 char msg[96];
                 if (bn && bn[0])
-                    snprintf(msg, sizeof(msg), "%s: %s", TR("BT Connected", "블루투스 연결됨"), bn);
+                    snprintf(msg, sizeof(msg), "%s: %s", TR_ID(STR_BT_CONNECTED), bn);
                 else
-                    snprintf(msg, sizeof(msg), "%s", TR("Bluetooth Connected", "블루투스 연결됨"));
+                    snprintf(msg, sizeof(msg), "%s", TR_ID(STR_BLUETOOTH_CONNECTED));
                 show_toast(msg, 2000);
                 dirty = true;
             } else if (g_bt_ev_disconnected) {
                 g_bt_ev_disconnected = 0;
                 player_pause();
                 save_resume_state();
-                show_toast(TR("Bluetooth Disconnected", "블루투스 연결 해제됨"), 2000);
+                show_toast(TR_ID(STR_BLUETOOTH_DISCONNECTED), 2000);
                 dirty = true;
             }
 
@@ -3191,8 +3397,8 @@ int main(void)
                         player_get_status(&pst);
                         bool next_shuf = !pst.shuffle;
                         player_set_shuffle(next_shuf);
-                        show_toast(next_shuf ? TR("Shuffle ON", "셔플 켜짐")
-                                             : TR("Shuffle OFF", "셔플 꺼짐"), 1200);
+                        show_toast(next_shuf ? TR_ID(STR_SHUFFLE_ON)
+                                             : TR_ID(STR_SHUFFLE_OFF), 1200);
                         save_resume_state();
                         dirty = true;
                     }

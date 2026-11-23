@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 #include <pthread.h>
 #include <unistd.h>
 #include <time.h>
@@ -227,11 +228,45 @@ static uint32_t ff_track_cur_ms(const struct ff_track *t)
     return (uint32_t)((t->frames_out * 1000ULL) / t->sample_rate);
 }
 
+static int volume_pct_to_cb(int vol_pct)
+{
+    if (vol_pct <= 0) return -740;
+    if (vol_pct >= 100) return 60;
+    /* Map 0..100% across Rockbox's full 80 dB span (-74.0 dB .. +6.0 dB) */
+    return -740 + (vol_pct * 800) / 100;
+}
+
+static int volume_pct_to_hp_idx(int vol_pct)
+{
+    if (vol_pct <= 0) return 0;
+    int vol_cb = volume_pct_to_cb(vol_pct);
+    if (vol_cb >= 40) return 7; /* +6 dB analog */
+    if (vol_cb > 0)   return 6; /* +4 dB analog */
+    int idx = ((vol_cb + 740) * 5) / 740;
+    if (idx < 0) idx = 0;
+    if (idx > 5) idx = 5;
+    return idx;
+}
+
+static int volume_pct_to_sw_q12(int vol_pct)
+{
+    if (vol_pct <= 0) return 0;
+    if (vol_pct >= 100) return 4096;
+    int vol_cb = volume_pct_to_cb(vol_pct);
+    /* Above 0 dB (93..100%), keep software PCM at full 0 dBFS so analog PGA handles +4/+6 dB */
+    if (vol_cb >= 0) return 4096;
+    double sw_db = ((double)vol_cb * 64.0) / 740.0;
+    int q12 = (int)(pow(10.0, sw_db / 20.0) * 4096.0 + 0.5);
+    if (q12 < 0) q12 = 0;
+    if (q12 > 4096) q12 = 4096;
+    return q12;
+}
+
 static void apply_hw_volume(int vol_pct)
 {
     if (vol_pct < 0) vol_pct = 0;
     if (vol_pct > 100) vol_pct = 100;
-    int gain = (vol_pct * 7) / 100;
+    int gain = volume_pct_to_hp_idx(vol_pct);
     y1_audio_set_hp_analog_gain(gain, gain);
 }
 
@@ -602,7 +637,7 @@ static void *audio_worker(void *arg)
             }
         }
 
-        int scale_q12 = (vol_pct * vol_pct * 4096) / 10000;
+        int scale_q12 = volume_pct_to_sw_q12(vol_pct);
         size_t frames = ff_track_read_frames(&cur_tr, out_buf, 2304);
         if (frames > 0)
             scale_stereo_pcm(out_buf, frames, scale_q12);

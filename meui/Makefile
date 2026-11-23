@@ -22,7 +22,7 @@ build:
 $(LIBY1_DIR)/build/liby1.a:
 	$(MAKE) -C $(LIBY1_DIR) CROSS_COMPILE=$(CROSS_COMPILE)
 
-build/%.o: src/%.c src/ui_gfx.h src/ipod_db.h src/audio_player.h src/album_art.h src/photos.h $(LIBY1_DIR)/include/liby1.h | build
+build/%.o: src/%.c src/ui_gfx.h src/ipod_db.h src/audio_player.h src/album_art.h src/photos.h src/lang.h $(LIBY1_DIR)/include/liby1.h | build
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(TARGET): $(OBJS) $(LIBY1_DIR)/build/liby1.a Makefile

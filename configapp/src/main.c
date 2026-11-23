@@ -1,6 +1,7 @@
 #include "ui_gfx.h"
 #include "cfg_registry.h"
 #include "hangul_ime.h"
+#include "lang.h"
 #include "liby1.h"
 
 #include <stdio.h>
@@ -26,8 +27,6 @@
 
 #define SETTINGS_CONF_PATH "/mnt/sdcard/.system/configapp/settings.conf"
 #define SETTINGS_CONF_FALLBACK "/.system/configapp/settings.conf"
-
-#define TR(en, ko) (g_cfg.lang == 1 ? (ko) : (en))
 
 /* =========================================================================
  * Persistent Settings State
@@ -226,7 +225,7 @@ static void apply_datetime_to_rtc(void)
     time_t epoch = mktime(&t);
     if (epoch != (time_t)-1)
         y1_rtc_set_time(epoch);
-    show_toast(TR("Date & time saved to RTC", "날짜 및 시간이 RTC에 저장됨"), 1400);
+    show_toast(TR_ID(STR_DATE_TIME_SAVED_TO_RTC), 1400);
 }
 
 /* =========================================================================
@@ -236,21 +235,21 @@ static void info_battery(char *buf, size_t len)
 {
     snprintf(buf, len, "%d%% (%d mV, %s)",
              y1_battery_percent(), y1_battery_voltage_mv(),
-             y1_battery_is_charging() ? TR("Charging", "충전 중") : TR("Discharging", "방전 중"));
+             y1_battery_is_charging() ? TR_ID(STR_CHARGING) : TR_ID(STR_DISCHARGING));
 }
 
 static void info_current(char *buf, size_t len)
 {
     snprintf(buf, len, "%d mA (USB: %s)",
              y1_battery_current_ma(),
-             y1_power_usb_online() ? TR("Online", "연결됨") : TR("Offline", "연결 안 됨"));
+             y1_power_usb_online() ? TR_ID(STR_ONLINE) : TR_ID(STR_OFFLINE));
 }
 
 static void info_cpu(char *buf, size_t len)
 {
     snprintf(buf, len, "%d MHz (%s)",
              y1_cpu_get_freq_mhz(),
-             y1_cpu_is_dual_core() ? TR("Dual-Core", "듀얼 코어") : TR("Single-Core", "싱글 코어"));
+             y1_cpu_is_dual_core() ? TR_ID(STR_DUAL_CORE) : TR_ID(STR_SINGLE_CORE));
 }
 
 static void info_memory(char *buf, size_t len)
@@ -281,7 +280,7 @@ static void info_storage(char *buf, size_t len)
                  free_mb >> 10, ((free_mb % 1024) * 10) >> 10,
                  total_mb >> 10, ((total_mb % 1024) * 10) >> 10);
     } else {
-        snprintf(buf, len, "%s", TR("Not mounted", "마운트 안 됨"));
+        snprintf(buf, len, "%s", TR_ID(STR_NOT_MOUNTED));
     }
 }
 
@@ -350,7 +349,7 @@ static void set_vibrate_ms(int v)
 static void act_vibrate_test(void)
 {
     y1_vibrate(g_cfg.vibrate_ms);
-    show_toast(TR("Haptic pulse sent", "진동 테스트 실행"), 1000);
+    show_toast(TR_ID(STR_HAPTIC_PULSE_SENT), 1000);
 }
 
 #define CFG_WP_MAX 256
@@ -576,14 +575,14 @@ static void cfg_scan_wp_dir(const char *dir)
     g_wp_count = 0;
     if (!g_picker_is_font && gfx_has_wallpaper() && g_wp_count < CFG_WP_MAX) {
         snprintf(g_wp_items[g_wp_count].name, sizeof(g_wp_items[0].name), "%s",
-                 TR("Clear Wallpaper", "배경화면 지우기"));
+                 TR_ID(STR_CLEAR_WALLPAPER));
         g_wp_items[g_wp_count].path[0] = '\0';
         g_wp_items[g_wp_count].is_dir = false;
         g_wp_items[g_wp_count].is_clear = true;
         g_wp_count++;
     } else if (g_picker_is_font && gfx_has_custom_font() && g_wp_count < CFG_WP_MAX) {
         snprintf(g_wp_items[g_wp_count].name, sizeof(g_wp_items[0].name), "%s",
-                 TR("Reset Default Font", "기본 글꼴로 복원"));
+                 TR_ID(STR_RESET_DEFAULT_FONT));
         g_wp_items[g_wp_count].path[0] = '\0';
         g_wp_items[g_wp_count].is_dir = false;
         g_wp_items[g_wp_count].is_clear = true;
@@ -685,11 +684,11 @@ static void info_dt_preview(char *buf, size_t len)
 {
     if (!dt_loaded) load_datetime_from_sys();
     if (g_cfg.lang == 1) {
-        snprintf(buf, len, "%04d-%02d-%02d %s %02d:%02d",
+        snprintf(buf, len, "%04d-%02d-%02d %s %d:%02d",
                  dt_year, dt_month, dt_day,
-                 dt_ampm ? "오후" : "오전", dt_hour12, dt_minute);
+                 ampm_choices_ko[dt_ampm ? 1 : 0], dt_hour12, dt_minute);
     } else {
-        snprintf(buf, len, "%04d-%02d-%02d %02d:%02d %s",
+        snprintf(buf, len, "%04d-%02d-%02d %d:%02d %s",
                  dt_year, dt_month, dt_day,
                  dt_hour12, dt_minute, dt_ampm ? "PM" : "AM");
     }
@@ -716,26 +715,26 @@ static void set_usb_ums(int v)
 {
     if (v) {
         if (y1_usb_attach_mass_storage())
-            show_toast(TR("USB storage attached", "USB 저장장치 연결됨"), 1400);
+            show_toast(TR_ID(STR_USB_STORAGE_ATTACHED), 1400);
         else
-            show_toast(TR("USB attach failed", "USB 연결 실패"), 1400);
+            show_toast(TR_ID(STR_USB_ATTACH_FAILED), 1400);
     } else {
         y1_usb_detach_mass_storage();
-        show_toast(TR("USB storage detached", "USB 저장장치 해제됨"), 1400);
+        show_toast(TR_ID(STR_USB_STORAGE_DETACHED), 1400);
     }
 }
 
 static void act_sync_disks(void)
 {
     sync();
-    show_toast(TR("Filesystems synced", "파일시스템 동기화 완료"), 1200);
+    show_toast(TR_ID(STR_FILESYSTEMS_SYNCED), 1200);
 }
 
 static void act_drop_caches(void)
 {
     sync();
     y1_sysfs_write("/proc/sys/vm/drop_caches", "3\n");
-    show_toast(TR("Page cache cleared", "페이지 캐시 정리 완료"), 1200);
+    show_toast(TR_ID(STR_PAGE_CACHE_CLEARED), 1200);
 }
 
 static int get_lang(void) { return g_cfg.lang; }
@@ -743,7 +742,7 @@ static void set_lang(int v)
 {
     g_cfg.lang = (v == 1) ? 1 : 0;
     save_settings_conf();
-    show_toast(g_cfg.lang == 1 ? "언어: 한국어" : "Language: English", 1000);
+    show_toast(TR_ID(STR_LANG_CHANGED), 1000);
 }
 
 static int get_debug_log(void) { return g_cfg.debug_log; }
@@ -759,29 +758,29 @@ static void set_screenshot(int v)
 {
     g_cfg.screenshot = v ? 1 : 0;
     save_settings_conf();
-    show_toast(g_cfg.screenshot ? TR("Screenshot ON (MENU + Play)", "스크린샷 켜짐 (MENU + 재생)")
-                                : TR("Screenshot OFF", "스크린샷 꺼짐"), 1400);
+    show_toast(g_cfg.screenshot ? TR_ID(STR_SCREENSHOT_ON_MENU_PLAY)
+                                : TR_ID(STR_SCREENSHOT_OFF), 1400);
 }
 
 static void act_clear_log(void)
 {
     unlink(Y1_DEBUG_LOG_PATH);
-    show_toast(TR("Debug log cleared", "디버그 로그 삭제됨"), 1200);
+    show_toast(TR_ID(STR_DEBUG_LOG_CLEARED), 1200);
 }
 
 static int get_bt_enabled(void) { return y1_bt_is_enabled() ? 1 : 0; }
 static void set_bt_enabled(int v)
 {
     y1_bt_set_enabled(v != 0);
-    show_toast(v ? TR("Bluetooth enabled", "블루투스 켜짐") : TR("Bluetooth disabled", "블루투스 꺼짐"), 1200);
+    show_toast(v ? TR_ID(STR_BLUETOOTH_ENABLED) : TR_ID(STR_BLUETOOTH_DISABLED), 1200);
 }
 
 static int get_bt_receiver(void) { return y1_bt_is_receiver_mode() ? 1 : 0; }
 static void set_bt_receiver(int v)
 {
     y1_bt_set_receiver_mode(v != 0);
-    show_toast(v ? TR("BT Receiver Mode ON", "블루투스 수신 모드 켜짐")
-                 : TR("BT Receiver Mode OFF", "블루투스 수신 모드 꺼짐"), 1200);
+    show_toast(v ? TR_ID(STR_BT_RECEIVER_MODE_ON)
+                 : TR_ID(STR_BT_RECEIVER_MODE_OFF), 1200);
 }
 
 static int get_bt_codec(void) { return g_cfg.bt_codec; }
@@ -795,13 +794,13 @@ static void set_bt_codec(int v)
 static void act_bt_scan(void)
 {
     y1_bt_start_scan();
-    show_toast(TR("Scanning for Bluetooth devices...", "블루투스 기기 검색 중..."), 1500);
+    show_toast(TR_ID(STR_SCANNING_FOR_BLUETOOTH_DEVICES), 1500);
 }
 
 static void act_bt_disconnect(void)
 {
     y1_bt_disconnect();
-    show_toast(TR("Disconnected", "연결 해제됨"), 1200);
+    show_toast(TR_ID(STR_DISCONNECTED), 1200);
 }
 
 static void info_bt_status(char *buf, size_t len)
@@ -816,7 +815,7 @@ static void act_poweroff(void) { save_settings_conf(); y1_sys_poweroff(); }
 static int get_default_player(void)
 {
     FILE *f = fopen("/mnt/sdcard/.system/default_player", "r");
-    if (!f) return 0;
+    if (!f) return 2; /* Default to ConfigApp */
     char buf[64] = "";
     if (fgets(buf, sizeof(buf), f)) {
         for (char *p = buf; *p; p++) {
@@ -824,9 +823,10 @@ static int get_default_player(void)
         }
     }
     fclose(f);
+    if (strcasecmp(buf, "rockbox") == 0) return 0;
     if (strcasecmp(buf, "meui") == 0) return 1;
     if (strcasecmp(buf, "configapp") == 0) return 2;
-    return 0;
+    return 2;
 }
 
 static void set_default_player(int v)
@@ -839,57 +839,9 @@ static void set_default_player(int v)
         fclose(f);
         sync();
     }
-    show_toast(v == 1 ? TR("Default: MeUI", "기본 앱: MeUI")
-                      : (v == 2 ? TR("Default: ConfigApp", "기본 앱: ConfigApp")
-                                : TR("Default: Rockbox", "기본 앱: Rockbox")), 1200);
-}
-
-static int get_boot_configapp(void)
-{
-    const char *paths[] = { "/mnt/sdcard/.system/system.cfg", "/mnt/sdcard/.rockbox/config.cfg", NULL };
-    for (int i = 0; paths[i]; i++) {
-        FILE *f = fopen(paths[i], "r");
-        if (!f) continue;
-        char line[128], val[16];
-        while (fgets(line, sizeof(line), f)) {
-            if (sscanf(line, "bootloader menu: %15s", val) == 1) {
-                fclose(f);
-                return (strcmp(val, "on") == 0) ? 1 : 0;
-            }
-        }
-        fclose(f);
-    }
-    return 0;
-}
-
-static void set_boot_configapp(int v)
-{
-    mkdir("/mnt/sdcard/.system", 0777);
-    const char *path = "/mnt/sdcard/.system/system.cfg";
-    char lines[64][128];
-    int n = 0;
-    bool replaced = false;
-    FILE *f = fopen(path, "r");
-    if (f) {
-        while (n < 63 && fgets(lines[n], sizeof(lines[n]), f)) {
-            if (strncmp(lines[n], "bootloader menu:", 16) == 0) {
-                snprintf(lines[n], sizeof(lines[n]), "bootloader menu: %s\n", v ? "on" : "off");
-                replaced = true;
-            }
-            n++;
-        }
-        fclose(f);
-    }
-    if (!replaced && n < 64)
-        snprintf(lines[n++], sizeof(lines[n]), "bootloader menu: %s\n", v ? "on" : "off");
-    f = fopen(path, "w");
-    if (f) {
-        for (int i = 0; i < n; i++) fputs(lines[i], f);
-        fclose(f);
-        sync();
-    }
-    show_toast(v ? TR("Always boot to ConfigApp: ON", "부팅 시 설정 앱 자동 실행: 켜짐")
-                 : TR("Always boot to ConfigApp: OFF", "부팅 시 설정 앱 자동 실행: 꺼짐"), 1400);
+    show_toast(v == 1 ? TR_ID(STR_DEFAULT_MEUI)
+                      : (v == 2 ? TR_ID(STR_DEFAULT_CONFIGAPP)
+                                : TR_ID(STR_DEFAULT_ROCKBOX)), 1200);
 }
 
 static void act_reset_settings(void)
@@ -912,7 +864,7 @@ static void act_reset_settings(void)
     g_cfg.screenshot = 0;
     apply_all_settings();
     save_settings_conf();
-    show_toast(TR("Settings reset to defaults", "설정이 기본값으로 초기화됨"), 1400);
+    show_toast(TR_ID(STR_SETTINGS_RESET_TO_DEFAULTS), 1400);
 }
 
 /* =========================================================================
@@ -1129,18 +1081,18 @@ static void set_serial_active(int v)
         g_serial_pid1 = fork();
         if (g_serial_pid1 == 0) { setpgid(0, 0); serial_shell_worker("ttyGS0", 1); _exit(0); }
         g_serial_active = true;
-        show_toast(TR("Serial Console started (ttyGS0/1)", "시리얼 콘솔 시작됨 (ttyGS0/1)"), 1400);
+        show_toast(TR_ID(STR_SERIAL_CONSOLE_STARTED_TTYGS0_1), 1400);
     } else if (!v && g_serial_active) {
         stop_serial_terminal();
-        show_toast(TR("Serial Console stopped", "시리얼 콘솔 중지됨"), 1200);
+        show_toast(TR_ID(STR_SERIAL_CONSOLE_STOPPED), 1200);
     }
 }
 
 static void info_serial_ports(char *buf, size_t len)
 {
     snprintf(buf, len, "%s",
-             g_serial_active ? TR("Active (/dev/ttyGS0, ttyGS1)", "활성 (/dev/ttyGS0, ttyGS1)")
-                             : TR("Idle", "대기 중"));
+             g_serial_active ? TR_ID(STR_ACTIVE_DEV_TTYGS0_TTYGS1)
+                             : TR_ID(STR_IDLE));
 }
 
 /* =========================================================================
@@ -1208,86 +1160,40 @@ static void act_save_debug_info(void)
     snprintf(path, sizeof(path), "/mnt/sdcard/debuginfo%s.txt", tag);
     FILE *f = fopen(path, "w");
     if (!f) {
-        show_toast(TR("SD not writable", "SD 카드에 쓸 수 없음"), 1400);
+        show_toast(TR_ID(STR_SD_NOT_WRITABLE), 1400);
         return;
     }
     fprintf(f, "=== Nugget Y1 Debug Info ===\n");
     for (int i = 0; i < g_dbg_count; i++)
         fprintf(f, "%s\n", g_dbg_lines[i]);
     fclose(f);
-    show_toast(TR("Saved debuginfo to SD", "디버그 정보를 SD에 저장함"), 1500);
+    show_toast(TR_ID(STR_SAVED_DEBUGINFO_TO_SD), 1500);
 }
 
 /* =========================================================================
  * Declarative Extendible Settings Tables
  * ========================================================================= */
-static const char *cpu_mode_choices[] = {
-    "Dynamic", "Powersave 390M", "Balanced 1.0G", "Perf 1.2G", "Turbo 1.3G"
-};
-static const char *cpu_mode_choices_ko[] = {
-    "자동 (Dynamic)", "절전 390M", "균형 1.0G", "고성능 1.2G", "터보 1.3G"
-};
-
-static const char *bt_codec_choices[] = { "SBC", "SBC XQ", "AAC" };
-static const char *default_player_choices[] = { "Rockbox", "MeUI", "ConfigApp" };
-static const char *lang_choices[] = { "English", "한국어" };
-static const char *ampm_choices[] = { "AM", "PM" };
-static const char *ampm_choices_ko[] = { "오전", "오후" };
-
 static struct cfg_item status_items[] = {
-    { NULL, "Battery",    "배터리",    "Charge level & voltage", "충전 상태 및 전압",     "battery-charging", CFG_TYPE_INFO, 0, 0, 0, NULL, NULL, NULL, 0, NULL, NULL, info_battery, NULL },
-    { NULL, "Power Draw", "전류 / USB","Current & USB power",    "소비 전류 및 USB 전원", "activity",         CFG_TYPE_INFO, 0, 0, 0, NULL, NULL, NULL, 0, NULL, NULL, info_current, NULL },
-    { NULL, "Processor",  "프로세서",  "Live clock & core count","실시간 클럭 및 코어",   "cpu",              CFG_TYPE_INFO, 0, 0, 0, NULL, NULL, NULL, 0, NULL, NULL, info_cpu,     NULL },
-    { NULL, "Memory",     "메모리",    "System RAM usage",       "시스템 RAM 여유 공간",  "sliders",          CFG_TYPE_INFO, 0, 0, 0, NULL, NULL, NULL, 0, NULL, NULL, info_memory,  NULL },
-    { NULL, "SD Storage", "SD 저장소", "MicroSD free space",     "SD 카드 여유 공간",     "hard-drive",       CFG_TYPE_INFO, 0, 0, 0, NULL, NULL, NULL, 0, NULL, NULL, info_storage, NULL },
-    { NULL, "Kernel",     "커널",      "Linux kernel version",   "리눅스 커널 버전",      "info",             CFG_TYPE_INFO, 0, 0, 0, NULL, NULL, NULL, 0, NULL, NULL, info_kernel,  NULL },
-    { NULL, "Uptime",     "가동 시간", "Time since boot",        "부팅 후 경과 시간",     "refresh-cw",       CFG_TYPE_INFO, 0, 0, 0, NULL, NULL, NULL, 0, NULL, NULL, info_uptime,  NULL },
-};
+    { NULL, STR_BATTERY_EN,    STR_BATTERY_KO,    STR_CHARGE_LEVEL_VOLTAGE_EN, STR_CHARGE_LEVEL_VOLTAGE_KO,     "battery-charging", CFG_TYPE_INFO, 0, 0, 0, NULL, NULL, NULL, 0, NULL, NULL, info_battery, NULL },    { NULL, STR_POWER_DRAW_EN, STR_POWER_DRAW_KO,STR_CURRENT_USB_POWER_EN,    STR_CURRENT_USB_POWER_KO, "activity",         CFG_TYPE_INFO, 0, 0, 0, NULL, NULL, NULL, 0, NULL, NULL, info_current, NULL },    { NULL, STR_PROCESSOR_EN,  STR_PROCESSOR_KO,  STR_LIVE_CLOCK_CORE_COUNT_EN,STR_LIVE_CLOCK_CORE_COUNT_KO,   "cpu",              CFG_TYPE_INFO, 0, 0, 0, NULL, NULL, NULL, 0, NULL, NULL, info_cpu,     NULL },    { NULL, STR_MEMORY_EN,     STR_MEMORY_KO,    STR_SYSTEM_RAM_USAGE_EN,       STR_SYSTEM_RAM_USAGE_KO,  "sliders",          CFG_TYPE_INFO, 0, 0, 0, NULL, NULL, NULL, 0, NULL, NULL, info_memory,  NULL },    { NULL, STR_SD_STORAGE_EN, STR_SD_STORAGE_KO, STR_MICROSD_FREE_SPACE_EN,     STR_MICROSD_FREE_SPACE_KO,     "hard-drive",       CFG_TYPE_INFO, 0, 0, 0, NULL, NULL, NULL, 0, NULL, NULL, info_storage, NULL },    { NULL, STR_KERNEL_EN,     STR_KERNEL_KO,      STR_LINUX_KERNEL_VERSION_EN,   STR_LINUX_KERNEL_VERSION_KO,      "info",             CFG_TYPE_INFO, 0, 0, 0, NULL, NULL, NULL, 0, NULL, NULL, info_kernel,  NULL },    { NULL, STR_UPTIME_EN,     STR_UPTIME_KO, STR_TIME_SINCE_BOOT_EN,        STR_TIME_SINCE_BOOT_KO,     "refresh-cw",       CFG_TYPE_INFO, 0, 0, 0, NULL, NULL, NULL, 0, NULL, NULL, info_uptime,  NULL },};
 
 static struct cfg_item display_items[] = {
-    { "dark_mode",      "Dark Mode",        "다크 모드",       "Dark MeUI color theme",     "어두운 MeUI 색상 테마",  "sliders", CFG_TYPE_TOGGLE, 0, 1,   1, NULL, NULL, NULL, 0, get_dark_mode,  set_dark_mode,  NULL, NULL },
-    { NULL,             "Wallpaper",        "배경화면",        "PNG / JPG background image","PNG / JPG 배경 이미지",  "image",   CFG_TYPE_ACTION, 0, 0,   0, NULL, NULL, NULL, 0, NULL,           NULL,           NULL, act_open_wallpaper },
-    { NULL,             "Font",             "글꼴",            "Custom TTF / OTF UI font",  "사용자 TTF / OTF 글꼴",  "sliders", CFG_TYPE_ACTION, 0, 0,   0, NULL, NULL, NULL, 0, NULL,           NULL,           NULL, act_open_font },
-    { "brightness_pct", "Brightness",       "화면 밝기",       "Backlight intensity",       "백라이트 밝기 조절",     "sun",     CFG_TYPE_INT,    5, 100, 5, "%",  NULL, NULL, 0, get_brightness, set_brightness, NULL, NULL },
-    { "eco_mode",       "Display Eco Mode", "디스플레이 에코", "Panel low-power mode",      "패널 저전력 모드",       "sliders", CFG_TYPE_TOGGLE, 0, 1,   1, NULL, NULL, NULL, 0, get_eco_mode,   set_eco_mode,   NULL, NULL },
-    { "touch_scan",     "Touch Wheel",      "터치 휠",         "Capacitive wheel scanning", "정전식 휠 스캔 활성화",  "activity",CFG_TYPE_TOGGLE, 0, 1,   1, NULL, NULL, NULL, 0, get_touch_scan, set_touch_scan, NULL, NULL },
-    { "vibrate_ms",     "Haptic Duration",  "진동 길이",       "Motor pulse length",        "진동 모터 작동 시간",    "vibrate", CFG_TYPE_INT,    5, 100, 5, "ms", NULL, NULL, 0, get_vibrate_ms, set_vibrate_ms, NULL, NULL },
-    { NULL,             "Test Haptics",     "진동 테스트",     "Trigger vibration pulse",   "설정한 길이로 진동 실행","vibrate", CFG_TYPE_ACTION, 0, 0,   0, NULL, NULL, NULL, 0, NULL,           NULL,           NULL, act_vibrate_test },
-};
+    { "dark_mode",      STR_DARK_MODE_EN,        STR_DARK_MODE_KO,       STR_DARK_MEUI_COLOR_THEME_EN,     STR_DARK_MEUI_COLOR_THEME_KO,  "sliders", CFG_TYPE_TOGGLE, 0, 1,   1, NULL, NULL, NULL, 0, get_dark_mode,  set_dark_mode,  NULL, NULL },    { NULL,             STR_WALLPAPER_EN,        STR_WALLPAPER_KO,        STR_PNG_JPG_BACKGROUND_IMAGE_EN,STR_PNG_JPG_BACKGROUND_IMAGE_KO,  "image",   CFG_TYPE_ACTION, 0, 0,   0, NULL, NULL, NULL, 0, NULL,           NULL,           NULL, act_open_wallpaper },    { NULL,             STR_FONT_EN,             STR_FONT_KO,            STR_CUSTOM_TTF_OTF_UI_FONT_EN,  STR_CUSTOM_TTF_OTF_UI_FONT_KO,  "sliders", CFG_TYPE_ACTION, 0, 0,   0, NULL, NULL, NULL, 0, NULL,           NULL,           NULL, act_open_font },    { "brightness_pct", STR_BRIGHTNESS_EN,       STR_BRIGHTNESS_KO,       STR_BACKLIGHT_INTENSITY_EN,       STR_BACKLIGHT_INTENSITY_KO,     "sun",     CFG_TYPE_INT,    5, 100, 5, "%",  NULL, NULL, 0, get_brightness, set_brightness, NULL, NULL },    { "eco_mode",       STR_DISPLAY_ECO_MODE_EN, STR_DISPLAY_ECO_MODE_KO, STR_PANEL_LOW_POWER_MODE_EN,      STR_PANEL_LOW_POWER_MODE_KO,       "sliders", CFG_TYPE_TOGGLE, 0, 1,   1, NULL, NULL, NULL, 0, get_eco_mode,   set_eco_mode,   NULL, NULL },    { "touch_scan",     STR_TOUCH_WHEEL_EN,      STR_TOUCH_WHEEL_KO,         STR_CAPACITIVE_WHEEL_SCANNING_EN, STR_CAPACITIVE_WHEEL_SCANNING_KO,  "activity",CFG_TYPE_TOGGLE, 0, 1,   1, NULL, NULL, NULL, 0, get_touch_scan, set_touch_scan, NULL, NULL },    { "vibrate_ms",     STR_HAPTIC_DURATION_EN,  STR_HAPTIC_DURATION_KO,       STR_MOTOR_PULSE_LENGTH_EN,        STR_MOTOR_PULSE_LENGTH_KO,    "vibrate", CFG_TYPE_INT,    5, 100, 5, "ms", NULL, NULL, 0, get_vibrate_ms, set_vibrate_ms, NULL, NULL },    { NULL,             STR_TEST_HAPTICS_EN,     STR_TEST_HAPTICS_KO,     STR_TRIGGER_VIBRATION_PULSE_EN,   STR_TRIGGER_VIBRATION_PULSE_KO,"vibrate", CFG_TYPE_ACTION, 0, 0,   0, NULL, NULL, NULL, 0, NULL,           NULL,           NULL, act_vibrate_test },};
 
 static struct cfg_item cpu_items[] = {
-    { "cpu_mode",         "CPU Governor",     "CPU 거버너",      "Frequency scaling policy", "주파수 스케일링 정책",   "cpu",     CFG_TYPE_CHOICE, 0, 4, 1, NULL, cpu_mode_choices, cpu_mode_choices_ko, 5, get_cpu_mode,     set_cpu_mode,     NULL, NULL },
-    { "dual_core",        "Dual-Core",        "듀얼 코어",       "Enable second Cortex-A7",  "보조 코어(CPU1) 활성화", "cpu",     CFG_TYPE_TOGGLE, 0, 1, 1, NULL, NULL,             NULL,                0, get_dual_core,    set_dual_core,    NULL, NULL },
-    { "screen_off_clamp", "Screen-Off Clamp", "화면 꺼짐 절전",  "Clamp to 390MHz off-screen","화면 꺼짐 시 390MHz 고정","sliders",CFG_TYPE_TOGGLE, 0, 1, 1, NULL, NULL,             NULL,                0, get_screen_clamp, set_screen_clamp, NULL, NULL },
-    { NULL,               "Live Clock",       "현재 클럭",       "Current CPU frequency",    "실시간 CPU 주파수",      "activity",CFG_TYPE_INFO,   0, 0, 0, NULL, NULL,             NULL,                0, NULL,             NULL,             info_cpu, NULL },
-};
+    { "cpu_mode",         STR_CPU_GOVERNOR_EN,     STR_CPU_GOVERNOR_KO,      STR_FREQUENCY_SCALING_POLICY_EN, STR_FREQUENCY_SCALING_POLICY_KO,   "cpu",     CFG_TYPE_CHOICE, 0, 4, 1, NULL, cpu_mode_choices, cpu_mode_choices_ko, 5, get_cpu_mode,     set_cpu_mode,     NULL, NULL },    { "dual_core",        STR_DUAL_CORE_EN,        STR_DUAL_CORE_KO,       STR_ENABLE_SECOND_CORTEX_A7_EN,  STR_ENABLE_SECOND_CORTEX_A7_KO, "cpu",     CFG_TYPE_TOGGLE, 0, 1, 1, NULL, NULL,             NULL,                0, get_dual_core,    set_dual_core,    NULL, NULL },    { "screen_off_clamp", STR_SCREEN_OFF_CLAMP_EN, STR_SCREEN_OFF_CLAMP_KO,  STR_CLAMP_TO_390MHZ_OFF_SCREEN_EN,STR_CLAMP_TO_390MHZ_OFF_SCREEN_KO,"sliders",CFG_TYPE_TOGGLE, 0, 1, 1, NULL, NULL,             NULL,                0, get_screen_clamp, set_screen_clamp, NULL, NULL },    { NULL,               STR_LIVE_CLOCK_EN,       STR_LIVE_CLOCK_KO,       STR_CURRENT_CPU_FREQUENCY_EN,    STR_CURRENT_CPU_FREQUENCY_KO,      "activity",CFG_TYPE_INFO,   0, 0, 0, NULL, NULL,             NULL,                0, NULL,             NULL,             info_cpu, NULL },};
 
 static struct cfg_item datetime_items[] = {
-    { NULL, "Preview",      "현재 설정", "Pending date & time",   "적용할 날짜 및 시간", "clock", CFG_TYPE_INFO,   0,    0,    0, NULL, NULL,         NULL,            0, NULL,           NULL,           info_dt_preview, NULL },
-    { NULL, "Year",         "연도",      "Calendar year",         "연도 설정",           "clock", CFG_TYPE_INT,    2020, 2040, 1, NULL, NULL,         NULL,            0, get_dt_year,    set_dt_year,    NULL, NULL },
-    { NULL, "Month",        "월",        "Month (1 - 12)",        "월 (1 - 12)",         "clock", CFG_TYPE_INT,    1,    12,   1, NULL, NULL,         NULL,            0, get_dt_month,   set_dt_month,   NULL, NULL },
-    { NULL, "Day",          "일",        "Day of month",          "일 설정",             "clock", CFG_TYPE_INT,    1,    31,   1, NULL, NULL,         NULL,            0, get_dt_day,     set_dt_day,     NULL, NULL },
-    { NULL, "AM / PM",      "오전 / 오후","12-hour period",       "오전 / 오후 선택",    "clock", CFG_TYPE_CHOICE, 0,    1,    1, NULL, ampm_choices, ampm_choices_ko, 2, get_dt_ampm,    set_dt_ampm,    NULL, NULL },
-    { NULL, "Hour",         "시",        "Hour (1 - 12)",         "시 (1 - 12)",         "clock", CFG_TYPE_INT,    1,    12,   1, NULL, NULL,         NULL,            0, get_dt_hour12,  set_dt_hour12,  NULL, NULL },
-    { NULL, "Minute",       "분",        "Minute (0 - 59)",       "분 (0 - 59)",         "clock", CFG_TYPE_INT,    0,    59,   1, NULL, NULL,         NULL,            0, get_dt_minute,  set_dt_minute,  NULL, NULL },
-    { NULL, "Apply to RTC", "RTC에 저장","Save to hardware clock","하드웨어 시계에 저장","check", CFG_TYPE_ACTION, 0,    0,    0, NULL, NULL,         NULL,            0, NULL,           NULL,           NULL, apply_datetime_to_rtc },
-};
+    { NULL, STR_PREVIEW_EN,      STR_PREVIEW_KO, STR_PENDING_DATE_TIME_EN,   STR_PENDING_DATE_TIME_KO, "clock", CFG_TYPE_INFO,   0,    0,    0, NULL, NULL,         NULL,            0, NULL,           NULL,           info_dt_preview, NULL },    { NULL, STR_YEAR_EN,         STR_YEAR_KO,      STR_CALENDAR_YEAR_EN,         STR_CALENDAR_YEAR_KO,           "clock", CFG_TYPE_INT,    2020, 2040, 1, NULL, NULL,         NULL,            0, get_dt_year,    set_dt_year,    NULL, NULL },    { NULL, STR_MONTH_EN,        STR_MONTH_KO,        STR_MONTH_1_12_EN,        STR_MONTH_1_12_KO,         "clock", CFG_TYPE_INT,    1,    12,   1, NULL, NULL,         NULL,            0, get_dt_month,   set_dt_month,   NULL, NULL },    { NULL, STR_DAY_EN,          STR_DAY_KO,        STR_DAY_OF_MONTH_EN,          STR_DAY_OF_MONTH_KO,             "clock", CFG_TYPE_INT,    1,    31,   1, NULL, NULL,         NULL,            0, get_dt_day,     set_dt_day,     NULL, NULL },    { NULL, STR_AM_PM_EN,      STR_AM_PM_KO,STR_S_12_HOUR_PERIOD_EN,       STR_S_12_HOUR_PERIOD_KO,    "clock", CFG_TYPE_CHOICE, 0,    1,    1, NULL, ampm_choices, ampm_choices_ko, 2, get_dt_ampm,    set_dt_ampm,    NULL, NULL },    { NULL, STR_HOUR_EN,         STR_HOUR_KO,        STR_HOUR_1_12_EN,         STR_HOUR_1_12_KO,         "clock", CFG_TYPE_INT,    1,    12,   1, NULL, NULL,         NULL,            0, get_dt_hour12,  set_dt_hour12,  NULL, NULL },    { NULL, STR_MINUTE_EN,       STR_MINUTE_KO,        STR_MINUTE_0_59_EN,       STR_MINUTE_0_59_KO,         "clock", CFG_TYPE_INT,    0,    59,   1, NULL, NULL,         NULL,            0, get_dt_minute,  set_dt_minute,  NULL, NULL },    { NULL, STR_APPLY_TO_RTC_EN, STR_APPLY_TO_RTC_KO,STR_SAVE_TO_HARDWARE_CLOCK_EN,STR_SAVE_TO_HARDWARE_CLOCK_KO,"check", CFG_TYPE_ACTION, 0,    0,    0, NULL, NULL,         NULL,            0, NULL,           NULL,           NULL, apply_datetime_to_rtc },};
 
 static struct cfg_item bt_items[] = {
-    { NULL,       "Bluetooth Radio", "블루투스 전원",  "Power MT6572 CONNSYS radio", "MT6572 무선 칩셋 전원",   "bluetooth",  CFG_TYPE_TOGGLE, 0, 1, 1, NULL, NULL,             NULL,             0, get_bt_enabled,  set_bt_enabled,  NULL, NULL },
-    { NULL,       "Status",          "연결 상태",      "Current connection state",   "현재 블루투스 상태",      "info",       CFG_TYPE_INFO,   0, 0, 0, NULL, NULL,             NULL,             0, NULL,            NULL,            info_bt_status, NULL },
-    { NULL,       "Receiver Mode",   "수신기 모드",    "Act as BT audio sink",       "블루투스 스피커/DAC 모드","radio",      CFG_TYPE_TOGGLE, 0, 1, 1, NULL, NULL,             NULL,             0, get_bt_receiver, set_bt_receiver, NULL, NULL },
-    { "bt_codec", "A2DP Codec",      "A2DP 코덱",      "Preferred audio codec",      "선호 오디오 코덱",        "sliders",    CFG_TYPE_CHOICE, 0, 2, 1, NULL, bt_codec_choices, bt_codec_choices, 3, get_bt_codec,    set_bt_codec,    NULL, NULL },
-    { NULL,       "Scan Devices",    "기기 검색",      "Discover nearby audio sinks","주변 블루투스 기기 찾기", "refresh-cw", CFG_TYPE_ACTION, 0, 0, 0, NULL, NULL,             NULL,             0, NULL,            NULL,            NULL, act_bt_scan },
-    { NULL,       "Disconnect",      "연결 해제",      "Close active BT link",       "현재 기기 연결 끊기",     "power",      CFG_TYPE_ACTION, 0, 0, 0, NULL, NULL,             NULL,             0, NULL,            NULL,            NULL, act_bt_disconnect },
-};
+    { NULL,       STR_BLUETOOTH_RADIO_EN, STR_BLUETOOTH_RADIO_KO,  STR_POWER_MT6572_CONNSYS_RADIO_EN, STR_POWER_MT6572_CONNSYS_RADIO_KO,   "bluetooth",  CFG_TYPE_TOGGLE, 0, 1, 1, NULL, NULL,             NULL,             0, get_bt_enabled,  set_bt_enabled,  NULL, NULL },    { NULL,       STR_STATUS_EN,          STR_STATUS_KO,      STR_CURRENT_CONNECTION_STATE_EN,   STR_CURRENT_CONNECTION_STATE_KO,      "info",       CFG_TYPE_INFO,   0, 0, 0, NULL, NULL,             NULL,             0, NULL,            NULL,            info_bt_status, NULL },    { NULL,       STR_RECEIVER_MODE_EN,   STR_RECEIVER_MODE_KO,    STR_ACT_AS_BT_AUDIO_SINK_EN,       STR_ACT_AS_BT_AUDIO_SINK_KO,"radio",      CFG_TYPE_TOGGLE, 0, 1, 1, NULL, NULL,             NULL,             0, get_bt_receiver, set_bt_receiver, NULL, NULL },    { "bt_codec", STR_A2DP_CODEC_EN,      STR_A2DP_CODEC_KO,      STR_PREFERRED_AUDIO_CODEC_EN,      STR_PREFERRED_AUDIO_CODEC_KO,        "sliders",    CFG_TYPE_CHOICE, 0, 2, 1, NULL, bt_codec_choices, bt_codec_choices, 3, get_bt_codec,    set_bt_codec,    NULL, NULL },    { NULL,       STR_SCAN_DEVICES_EN,    STR_SCAN_DEVICES_KO,      STR_DISCOVER_NEARBY_AUDIO_SINKS_EN,STR_DISCOVER_NEARBY_AUDIO_SINKS_KO, "refresh-cw", CFG_TYPE_ACTION, 0, 0, 0, NULL, NULL,             NULL,             0, NULL,            NULL,            NULL, act_bt_scan },    { NULL,       STR_DISCONNECT_EN,      STR_DISCONNECT_KO,      STR_CLOSE_ACTIVE_BT_LINK_EN,       STR_CLOSE_ACTIVE_BT_LINK_KO,     "power",      CFG_TYPE_ACTION, 0, 0, 0, NULL, NULL,             NULL,             0, NULL,            NULL,            NULL, act_bt_disconnect },};
 
 static int get_wifi_enable(void) { return y1_wifi_is_enabled() ? 1 : 0; }
 static void set_wifi_enable(int v)
 {
     y1_wifi_init();
     y1_wifi_set_enabled(v != 0);
-    show_toast(v ? TR("Wi-Fi enabled", "Wi-Fi 켜짐") : TR("Wi-Fi disabled", "Wi-Fi 꺼짐"), 1200);
+    show_toast(v ? TR_ID(STR_WI_FI_ENABLED) : TR_ID(STR_WI_FI_DISABLED), 1200);
 }
 static void info_wifi_status(char *buf, size_t len)
 {
@@ -1297,7 +1203,7 @@ static void info_wifi_ip(char *buf, size_t len)
 {
     char ip[32] = "";
     y1_wifi_get_ip(ip, sizeof(ip));
-    snprintf(buf, len, "%s", ip[0] ? ip : TR("None", "없음"));
+    snprintf(buf, len, "%s", ip[0] ? ip : TR_ID(STR_NONE));
 }
 static void act_wifi_scan(void)
 {
@@ -1305,76 +1211,39 @@ static void act_wifi_scan(void)
     if (!y1_wifi_is_enabled())
         y1_wifi_set_enabled(true);
     y1_wifi_start_scan();
-    show_toast(TR("Scanning Wi-Fi...", "Wi-Fi 검색 중..."), 1500);
+    show_toast(TR_ID(STR_SCANNING_WI_FI), 1500);
 }
 static void act_wifi_disconnect(void)
 {
     y1_wifi_disconnect();
-    show_toast(TR("Wi-Fi disconnected", "Wi-Fi 연결 해제됨"), 1200);
+    show_toast(TR_ID(STR_WI_FI_DISCONNECTED), 1200);
 }
 
 static struct cfg_item wifi_items[] = {
-    { NULL, "Wi-Fi Power",  "Wi-Fi 전원",  "Enable MT6572 Wi-Fi radio", "MT6572 Wi-Fi 켜기/끄기",   "wifi",       CFG_TYPE_TOGGLE, 0, 1, 1, NULL, NULL, NULL, 0, get_wifi_enable, set_wifi_enable, NULL, NULL },
-    { NULL, "Status",       "연결 상태",   "Current Wi-Fi state",       "현재 Wi-Fi 상태",          "info",       CFG_TYPE_INFO,   0, 0, 0, NULL, NULL, NULL, 0, NULL,            NULL,            info_wifi_status, NULL },
-    { NULL, "IP Address",   "IP 주소",     "Assigned DHCP IPv4",        "할당된 IPv4 주소",         "globe",      CFG_TYPE_INFO,   0, 0, 0, NULL, NULL, NULL, 0, NULL,            NULL,            info_wifi_ip, NULL },
-    { NULL, "Scan Networks","네트워크 검색","Find nearby access points","주변 Wi-Fi 공유기 찾기",   "refresh-cw", CFG_TYPE_ACTION, 0, 0, 0, NULL, NULL, NULL, 0, NULL,            NULL,            NULL, act_wifi_scan },
-    { NULL, "Disconnect",   "연결 해제",   "Leave current network",     "현재 네트워크 연결 끊기",  "power",      CFG_TYPE_ACTION, 0, 0, 0, NULL, NULL, NULL, 0, NULL,            NULL,            NULL, act_wifi_disconnect },
-};
+    { NULL, STR_WI_FI_POWER_EN,  STR_WI_FI_POWER_KO,  STR_ENABLE_MT6572_WI_FI_RADIO_EN, STR_ENABLE_MT6572_WI_FI_RADIO_KO,   "wifi",       CFG_TYPE_TOGGLE, 0, 1, 1, NULL, NULL, NULL, 0, get_wifi_enable, set_wifi_enable, NULL, NULL },    { NULL, STR_STATUS_EN,       STR_STATUS_KO,   STR_CURRENT_WI_FI_STATE_EN,       STR_CURRENT_WI_FI_STATE_KO,          "info",       CFG_TYPE_INFO,   0, 0, 0, NULL, NULL, NULL, 0, NULL,            NULL,            info_wifi_status, NULL },    { NULL, STR_IP_ADDRESS_EN,   STR_IP_ADDRESS_KO,     STR_ASSIGNED_DHCP_IPV4_EN,        STR_ASSIGNED_DHCP_IPV4_KO,         "globe",      CFG_TYPE_INFO,   0, 0, 0, NULL, NULL, NULL, 0, NULL,            NULL,            info_wifi_ip, NULL },    { NULL, STR_SCAN_NETWORKS_EN,STR_SCAN_NETWORKS_KO,STR_FIND_NEARBY_ACCESS_POINTS_EN,STR_FIND_NEARBY_ACCESS_POINTS_KO,   "refresh-cw", CFG_TYPE_ACTION, 0, 0, 0, NULL, NULL, NULL, 0, NULL,            NULL,            NULL, act_wifi_scan },    { NULL, STR_DISCONNECT_EN,   STR_DISCONNECT_KO,   STR_LEAVE_CURRENT_NETWORK_EN,     STR_LEAVE_CURRENT_NETWORK_KO,  "power",      CFG_TYPE_ACTION, 0, 0, 0, NULL, NULL, NULL, 0, NULL,            NULL,            NULL, act_wifi_disconnect },};
 
 static struct cfg_item usb_items[] = {
-    { "usb_ipod_mode", "iPod USB Mode",    "iPod USB 모드",  "Spoof iPod 5.5G over USB",  "USB 연결 시 iPod 인식",   "usb",        CFG_TYPE_TOGGLE, 0, 1, 1, NULL, NULL, NULL, 0, get_usb_ipod, set_usb_ipod, NULL, NULL },
-    { "usb_perf_tune", "USB Performance",  "USB 성능 향상",  "Boost USB gadget throughput","USB 전송 속도 최적화",    "sliders",    CFG_TYPE_TOGGLE, 0, 1, 1, NULL, NULL, NULL, 0, get_usb_perf, set_usb_perf, NULL, NULL },
-    { NULL,            "USB Mass Storage", "USB 대용량 저장","Mount SD card to PC",       "PC에 SD 카드 마운트",     "hard-drive", CFG_TYPE_TOGGLE, 0, 1, 1, NULL, NULL, NULL, 0, get_usb_ums,  set_usb_ums,  NULL, NULL },
-    { NULL,            "Sync Storage",     "저장소 동기화",  "Flush SD card write cache", "쓰기 캐시 즉시 저장",     "refresh-cw", CFG_TYPE_ACTION, 0, 0, 0, NULL, NULL, NULL, 0, NULL,         NULL,         NULL, act_sync_disks },
-    { NULL,            "Drop Caches",      "캐시 비우기",    "Free Linux page cache",     "리눅스 페이지 캐시 해제", "trash-2",    CFG_TYPE_ACTION, 0, 0, 0, NULL, NULL, NULL, 0, NULL,         NULL,         NULL, act_drop_caches },
-};
+    { "usb_ipod_mode", STR_IPOD_USB_MODE_EN,    STR_IPOD_USB_MODE_KO,  STR_SPOOF_IPOD_5_5G_OVER_USB_EN,  STR_SPOOF_IPOD_5_5G_OVER_USB_KO,   "usb",        CFG_TYPE_TOGGLE, 0, 1, 1, NULL, NULL, NULL, 0, get_usb_ipod, set_usb_ipod, NULL, NULL },    { "usb_perf_tune", STR_USB_PERFORMANCE_EN,  STR_USB_PERFORMANCE_KO,  STR_BOOST_USB_GADGET_THROUGHPUT_EN,STR_BOOST_USB_GADGET_THROUGHPUT_KO,    "sliders",    CFG_TYPE_TOGGLE, 0, 1, 1, NULL, NULL, NULL, 0, get_usb_perf, set_usb_perf, NULL, NULL },    { NULL,            STR_USB_MASS_STORAGE_EN, STR_USB_MASS_STORAGE_KO,STR_MOUNT_SD_CARD_TO_PC_EN,       STR_MOUNT_SD_CARD_TO_PC_KO,     "hard-drive", CFG_TYPE_TOGGLE, 0, 1, 1, NULL, NULL, NULL, 0, get_usb_ums,  set_usb_ums,  NULL, NULL },    { NULL,            STR_SYNC_STORAGE_EN,     STR_SYNC_STORAGE_KO,  STR_FLUSH_SD_CARD_WRITE_CACHE_EN, STR_FLUSH_SD_CARD_WRITE_CACHE_KO,     "refresh-cw", CFG_TYPE_ACTION, 0, 0, 0, NULL, NULL, NULL, 0, NULL,         NULL,         NULL, act_sync_disks },    { NULL,            STR_DROP_CACHES_EN,      STR_DROP_CACHES_KO,    STR_FREE_LINUX_PAGE_CACHE_EN,     STR_FREE_LINUX_PAGE_CACHE_KO, "trash-2",    CFG_TYPE_ACTION, 0, 0, 0, NULL, NULL, NULL, 0, NULL,         NULL,         NULL, act_drop_caches },};
 
 static struct cfg_item power_items[] = {
-    { "lang",       "Language",      "언어 (Language)",  "Switch English / 한국어",        "영어 / 한국어 전환",           "globe",      CFG_TYPE_CHOICE, 0, 1, 1, NULL, lang_choices, lang_choices, 2, get_lang,       set_lang,       NULL, NULL },
-    { "screenshot", "Screenshot",    "스크린샷",         "MENU + Play saves to /Screenshots", "MENU + 재생으로 /Screenshots 저장", "camera",     CFG_TYPE_TOGGLE, 0, 1, 1, NULL, NULL,         NULL,         0, get_screenshot, set_screenshot, NULL, NULL },
-    { "debug_log",  "Y1 Debug Log",  "Y1 디버그 로그",   "Write .system/y1_debug.txt",     ".system/y1_debug.txt 기록",    "info",       CFG_TYPE_TOGGLE, 0, 1, 1, NULL, NULL,         NULL,         0, get_debug_log,  set_debug_log,  NULL, NULL },
-    { NULL,        "Clear Log",     "로그 삭제",        "Delete y1_debug.txt",        "디버그 로그 파일 삭제",  "trash-2",    CFG_TYPE_ACTION, 0, 0, 0, NULL, NULL,         NULL,         0, NULL,          NULL,          NULL, act_clear_log },
-    { NULL,        "Reset Settings","설정 초기화",      "Restore default settings",   "모든 설정 기본값 복원",  "rotate-ccw", CFG_TYPE_ACTION, 0, 0, 0, NULL, NULL,         NULL,         0, NULL,          NULL,          NULL, act_reset_settings },
-    { NULL,        "Exit ConfigApp","설정 앱 종료",     "Return to caller",           "이전 화면으로 돌아가기", "arrow-left", CFG_TYPE_ACTION, 0, 0, 0, NULL, NULL,         NULL,         0, NULL,          NULL,          NULL, act_return_bootmenu },
-    { NULL,        "Reboot Device", "기기 재부팅",      "Restart the Y1",             "Y1 다시 시작",           "rotate-ccw", CFG_TYPE_ACTION, 0, 0, 0, NULL, NULL,         NULL,         0, NULL,          NULL,          NULL, act_reboot },
-    { NULL,        "Power Off",     "전원 끄기",        "Shut down safely",           "안전하게 전원 끄기",     "power",      CFG_TYPE_ACTION, 0, 0, 0, NULL, NULL,         NULL,         0, NULL,          NULL,          NULL, act_poweroff },
-};
+    { "lang",       STR_LANGUAGE_EN,      STR_LANGUAGE_KO,  STR_SWITCH_ENGLISH_EN,        STR_SWITCH_ENGLISH_KO,           "globe",      CFG_TYPE_CHOICE, 0, 1, 1, NULL, lang_choices, lang_choices, 2, get_lang,       set_lang,       NULL, NULL },    { "screenshot", STR_SCREENSHOT_EN,    STR_SCREENSHOT_KO,         STR_MENU_PLAY_SAVES_TO_SCREENSHOTS_EN, STR_MENU_PLAY_SAVES_TO_SCREENSHOTS_KO, "camera",     CFG_TYPE_TOGGLE, 0, 1, 1, NULL, NULL,         NULL,         0, get_screenshot, set_screenshot, NULL, NULL },    { "debug_log",  STR_Y1_DEBUG_LOG_EN,  STR_Y1_DEBUG_LOG_KO,   STR_WRITE_SYSTEM_Y1_DEBUG_TXT_EN,     STR_WRITE_SYSTEM_Y1_DEBUG_TXT_KO,    "info",       CFG_TYPE_TOGGLE, 0, 1, 1, NULL, NULL,         NULL,         0, get_debug_log,  set_debug_log,  NULL, NULL },    { NULL,        STR_CLEAR_LOG_EN,     STR_CLEAR_LOG_KO,        STR_DELETE_Y1_DEBUG_TXT_EN,        STR_DELETE_Y1_DEBUG_TXT_KO,  "trash-2",    CFG_TYPE_ACTION, 0, 0, 0, NULL, NULL,         NULL,         0, NULL,          NULL,          NULL, act_clear_log },    { NULL,        STR_RESET_SETTINGS_EN,STR_RESET_SETTINGS_KO,      STR_RESTORE_DEFAULT_SETTINGS_EN,   STR_RESTORE_DEFAULT_SETTINGS_KO,  "rotate-ccw", CFG_TYPE_ACTION, 0, 0, 0, NULL, NULL,         NULL,         0, NULL,          NULL,          NULL, act_reset_settings },    { NULL,        STR_EXIT_CONFIGAPP_EN,STR_EXIT_CONFIGAPP_KO,     STR_RETURN_TO_CALLER_EN,           STR_RETURN_TO_CALLER_KO, "arrow-left", CFG_TYPE_ACTION, 0, 0, 0, NULL, NULL,         NULL,         0, NULL,          NULL,          NULL, act_return_bootmenu },    { NULL,        STR_REBOOT_DEVICE_EN, STR_REBOOT_DEVICE_KO,      STR_RESTART_THE_Y1_EN,             STR_RESTART_THE_Y1_KO,           "rotate-ccw", CFG_TYPE_ACTION, 0, 0, 0, NULL, NULL,         NULL,         0, NULL,          NULL,          NULL, act_reboot },    { NULL,        STR_POWER_OFF_EN,     STR_POWER_OFF_KO,        STR_SHUT_DOWN_SAFELY_EN,           STR_SHUT_DOWN_SAFELY_KO,     "power",      CFG_TYPE_ACTION, 0, 0, 0, NULL, NULL,         NULL,         0, NULL,          NULL,          NULL, act_poweroff },};
 
 static struct cfg_item launch_items[] = {
-    { NULL, "Default Launch App",     "기본 실행 앱",          "App started on boot",           "부팅 시 자동 실행할 앱",       "play",       CFG_TYPE_CHOICE, 0, 2, 1, NULL, default_player_choices, default_player_choices, 3, get_default_player, set_default_player, NULL, NULL },
-    { NULL, "Always Boot ConfigApp",  "부팅 시 설정 앱 실행",  "Open ConfigApp on every boot",  "매 부팅마다 설정 앱 먼저 실행","settings",   CFG_TYPE_TOGGLE, 0, 1, 1, NULL, NULL,                   NULL,                   0, get_boot_configapp, set_boot_configapp, NULL, NULL },
-    { NULL, "Rescan Software",        "목록 새로고침",         "Scan hidden folders on SD",     "SD 숨겨진 앱 폴더 다시 검색",  "refresh-cw", CFG_TYPE_ACTION, 0, 0, 0, NULL, NULL,                   NULL,                   0, NULL,               NULL,               NULL, scan_launch_apps },
+    { NULL, STR_DEFAULT_LAUNCH_APP_EN,     STR_DEFAULT_LAUNCH_APP_KO,          STR_APP_STARTED_ON_BOOT_EN,           STR_APP_STARTED_ON_BOOT_KO,       "play",       CFG_TYPE_CHOICE, 0, 2, 1, NULL, default_player_choices, default_player_choices, 3, get_default_player, set_default_player, NULL, NULL },
+    { NULL, STR_RESCAN_SOFTWARE_EN,        STR_RESCAN_SOFTWARE_KO,         STR_SCAN_HIDDEN_FOLDERS_ON_SD_EN,     STR_SCAN_HIDDEN_FOLDERS_ON_SD_KO,  "refresh-cw", CFG_TYPE_ACTION, 0, 0, 0, NULL, NULL,                   NULL,                   0, NULL,               NULL,               NULL, scan_launch_apps },
 };
 
 static struct cfg_item serial_items[] = {
-    { NULL, "Serial Console", "시리얼 콘솔",   "Enable dual USB ACM shell", "듀얼 USB ACM 셸 활성화", "terminal", CFG_TYPE_TOGGLE, 0, 1, 1, NULL, NULL, NULL, 0, get_serial_active, set_serial_active, NULL, NULL },
-    { NULL, "USB ACM Ports",  "USB ACM 포트",  "ttyGS0 & ttyGS1 status",    "ttyGS0 / ttyGS1 상태",   "info",     CFG_TYPE_INFO,   0, 0, 0, NULL, NULL, NULL, 0, NULL,              NULL,              info_serial_ports, NULL },
-};
+    { NULL, STR_SERIAL_CONSOLE_EN, STR_SERIAL_CONSOLE_KO,   STR_ENABLE_DUAL_USB_ACM_SHELL_EN, STR_ENABLE_DUAL_USB_ACM_SHELL_KO, "terminal", CFG_TYPE_TOGGLE, 0, 1, 1, NULL, NULL, NULL, 0, get_serial_active, set_serial_active, NULL, NULL },    { NULL, STR_USB_ACM_PORTS_EN,  STR_USB_ACM_PORTS_KO,  STR_TTYGS0_TTYGS1_STATUS_EN,    STR_TTYGS0_TTYGS1_STATUS_KO,   "info",     CFG_TYPE_INFO,   0, 0, 0, NULL, NULL, NULL, 0, NULL,              NULL,              info_serial_ports, NULL },};
 
 static struct cfg_item debug_items[] = {
-    { NULL, "Save Debug Info", "디버그 정보 저장", "Write debuginfo_*.txt to SD", "SD에 debuginfo_*.txt 저장", "hard-drive", CFG_TYPE_ACTION, 0, 0, 0, NULL, NULL, NULL, 0, NULL, NULL, NULL, act_save_debug_info },
-};
+    { NULL, STR_SAVE_DEBUG_INFO_EN, STR_SAVE_DEBUG_INFO_KO, STR_WRITE_DEBUGINFO_TXT_TO_SD_EN, STR_WRITE_DEBUGINFO_TXT_TO_SD_KO, "hard-drive", CFG_TYPE_ACTION, 0, 0, 0, NULL, NULL, NULL, 0, NULL, NULL, NULL, act_save_debug_info },};
 
 static struct cfg_item exit_power_items[] = {
-    { NULL, "Exit ConfigApp", "설정 앱 종료", "Return to caller", "이전 화면으로 돌아가기", "arrow-left", CFG_TYPE_ACTION, 0, 0, 0, NULL, NULL, NULL, 0, NULL, NULL, NULL, act_return_bootmenu },
-    { NULL, "Reboot Device",  "기기 재부팅",  "Restart the Y1",   "Y1 다시 시작",           "rotate-ccw", CFG_TYPE_ACTION, 0, 0, 0, NULL, NULL, NULL, 0, NULL, NULL, NULL, act_reboot },
-    { NULL, "Shut Down",      "전원 끄기",    "Power off safely", "안전하게 전원 끄기",     "power",      CFG_TYPE_ACTION, 0, 0, 0, NULL, NULL, NULL, 0, NULL, NULL, NULL, act_poweroff },
-};
+    { NULL, STR_EXIT_CONFIGAPP_EN, STR_EXIT_CONFIGAPP_KO, STR_RETURN_TO_CALLER_EN, STR_RETURN_TO_CALLER_KO, "arrow-left", CFG_TYPE_ACTION, 0, 0, 0, NULL, NULL, NULL, 0, NULL, NULL, NULL, act_return_bootmenu },    { NULL, STR_REBOOT_DEVICE_EN,  STR_REBOOT_DEVICE_KO,  STR_RESTART_THE_Y1_EN,   STR_RESTART_THE_Y1_KO,           "rotate-ccw", CFG_TYPE_ACTION, 0, 0, 0, NULL, NULL, NULL, 0, NULL, NULL, NULL, act_reboot },    { NULL, STR_SHUT_DOWN_EN,      STR_SHUT_DOWN_KO,    STR_POWER_OFF_SAFELY_EN, STR_POWER_OFF_SAFELY_KO,     "power",      CFG_TYPE_ACTION, 0, 0, 0, NULL, NULL, NULL, 0, NULL, NULL, NULL, act_poweroff },};
 
 static struct cfg_page g_pages[] = {
-    { "launch",   "Launch",            "실행",             "Start installed software",   "설치된 소프트웨어 실행",     "play",      0xFF10B981U, launch_items,   (int)(sizeof(launch_items) / sizeof(launch_items[0])),     false, false, true,  false },
-    { "status",   "System Status",     "시스템 상태",      "Battery, CPU, RAM & disk",   "배터리, CPU, RAM 및 저장소", "activity",  0xFF16A34AU, status_items,   (int)(sizeof(status_items) / sizeof(status_items[0])),     false, false, false, false },
-    { "display",  "Display & Haptics", "화면 및 진동",     "Brightness, wheel & motor",  "밝기, 휠 및 진동 설정",      "sun",       0xFFD97706U, display_items,  (int)(sizeof(display_items) / sizeof(display_items[0])),   false, false, false, false },
-    { "cpu",      "CPU & Power",       "CPU 및 전력",      "Governor & core hotplug",    "거버너 및 코어 제어",        "cpu",       0xFF2563EBU, cpu_items,      (int)(sizeof(cpu_items) / sizeof(cpu_items[0])),           false, false, false, false },
-    { "datetime", "Date & Time",       "날짜 및 시간",     "12-hour clock & RTC",        "12시간제 시계 및 RTC",       "clock",     0xFF0EA5E9U, datetime_items, (int)(sizeof(datetime_items) / sizeof(datetime_items[0])), false, false, false, false },
-    { "bt",       "Bluetooth",         "블루투스",         "Scan, pair & A2DP codec",    "검색, 연결 및 A2DP 코덱",    "bluetooth", 0xFF0284C7U, bt_items,       (int)(sizeof(bt_items) / sizeof(bt_items[0])),             true,  false, false, false },
-    { "wifi",     "Wi-Fi",             "Wi-Fi",            "Scan & connect wireless",    "무선 네트워크 검색 및 연결", "wifi",      0xFF0284C7U, wifi_items,     (int)(sizeof(wifi_items) / sizeof(wifi_items[0])),           false, true,  false, false },
-    { "usb",      "USB & Storage",     "USB 및 저장소",    "iPod mode & disk sync",      "iPod 모드 및 마운트",        "usb",       0xFF7C3AEDU, usb_items,      (int)(sizeof(usb_items) / sizeof(usb_items[0])),           false, false, false, false },
-    { "serial",   "Serial Terminal",   "시리얼 터미널",    "USB ACM root console",       "USB 시리얼 콘솔",            "terminal",  0xFF0F766EU, serial_items,   (int)(sizeof(serial_items) / sizeof(serial_items[0])),     false, false, false, false },
-    { "debug",    "Debug Info",        "디버그 정보",      "Hardware & system dump",     "하드웨어 및 시스템 정보",    "bug",       0xFF6366F1U, debug_items,    (int)(sizeof(debug_items) / sizeof(debug_items[0])),      false, false, false, true  },
-    { "system",   "System & Power",    "시스템 및 전원",   "Language & debug logs",      "언어 및 디버그 로그",        "settings",  0xFF64748BU, power_items,      (int)(sizeof(power_items) / sizeof(power_items[0])),           false, false, false, false },
-    { "exit",     "Exit / Shut Down",  "종료 / 전원 끄기", "Exit app or power off",      "앱 종료 또는 전원 끄기",     "power",     0xFFDC2626U, exit_power_items, (int)(sizeof(exit_power_items) / sizeof(exit_power_items[0])), false, false, false, false },
-};
+    { "launch",   STR_LAUNCH_EN,            STR_LAUNCH_KO,             STR_START_INSTALLED_SOFTWARE_EN,   STR_START_INSTALLED_SOFTWARE_KO,     "play",      0xFF10B981U, launch_items,   (int)(sizeof(launch_items) / sizeof(launch_items[0])),     false, false, true,  false },    { "status",   STR_SYSTEM_STATUS_EN,     STR_SYSTEM_STATUS_KO,      STR_BATTERY_CPU_RAM_DISK_EN,   STR_BATTERY_CPU_RAM_DISK_KO, "activity",  0xFF16A34AU, status_items,   (int)(sizeof(status_items) / sizeof(status_items[0])),     false, false, false, false },    { "display",  STR_DISPLAY_HAPTICS_EN, STR_DISPLAY_HAPTICS_KO,     STR_BRIGHTNESS_WHEEL_MOTOR_EN,  STR_BRIGHTNESS_WHEEL_MOTOR_KO,      "sun",       0xFFD97706U, display_items,  (int)(sizeof(display_items) / sizeof(display_items[0])),   false, false, false, false },    { "cpu",      STR_CPU_POWER_EN,       STR_CPU_POWER_KO,      STR_GOVERNOR_CORE_HOTPLUG_EN,    STR_GOVERNOR_CORE_HOTPLUG_KO,        "cpu",       0xFF2563EBU, cpu_items,      (int)(sizeof(cpu_items) / sizeof(cpu_items[0])),           false, false, false, false },    { "datetime", STR_DATE_TIME_EN,       STR_DATE_TIME_KO,     STR_S_12_HOUR_CLOCK_RTC_EN,        STR_S_12_HOUR_CLOCK_RTC_KO,       "clock",     0xFF0EA5E9U, datetime_items, (int)(sizeof(datetime_items) / sizeof(datetime_items[0])), false, false, false, false },    { "bt",       STR_BLUETOOTH_EN,         STR_BLUETOOTH_KO,         STR_SCAN_PAIR_A2DP_CODEC_EN,    STR_SCAN_PAIR_A2DP_CODEC_KO,    "bluetooth", 0xFF0284C7U, bt_items,       (int)(sizeof(bt_items) / sizeof(bt_items[0])),             true,  false, false, false },    { "wifi",     STR_WI_FI_EN,             STR_WI_FI_KO,            STR_SCAN_CONNECT_WIRELESS_EN,    STR_SCAN_CONNECT_WIRELESS_KO, "wifi",      0xFF0284C7U, wifi_items,     (int)(sizeof(wifi_items) / sizeof(wifi_items[0])),           false, true,  false, false },    { "usb",      STR_USB_STORAGE_EN,     STR_USB_STORAGE_KO,    STR_IPOD_MODE_DISK_SYNC_EN,      STR_IPOD_MODE_DISK_SYNC_KO,        "usb",       0xFF7C3AEDU, usb_items,      (int)(sizeof(usb_items) / sizeof(usb_items[0])),           false, false, false, false },    { "serial",   STR_SERIAL_TERMINAL_EN,   STR_SERIAL_TERMINAL_KO,    STR_USB_ACM_ROOT_CONSOLE_EN,       STR_USB_ACM_ROOT_CONSOLE_KO,            "terminal",  0xFF0F766EU, serial_items,   (int)(sizeof(serial_items) / sizeof(serial_items[0])),     false, false, false, false },    { "debug",    STR_DEBUG_INFO_EN,        STR_DEBUG_INFO_KO,      STR_HARDWARE_SYSTEM_DUMP_EN,     STR_HARDWARE_SYSTEM_DUMP_KO,    "bug",       0xFF6366F1U, debug_items,    (int)(sizeof(debug_items) / sizeof(debug_items[0])),      false, false, false, true  },    { "system",   STR_SYSTEM_POWER_EN,    STR_SYSTEM_POWER_KO,   STR_LANGUAGE_DEBUG_LOGS_EN,      STR_LANGUAGE_DEBUG_LOGS_KO,        "settings",  0xFF64748BU, power_items,      (int)(sizeof(power_items) / sizeof(power_items[0])),           false, false, false, false },    { "exit",     STR_EXIT_SHUT_DOWN_EN,  STR_EXIT_SHUT_DOWN_KO, STR_EXIT_APP_OR_POWER_OFF_EN,      STR_EXIT_APP_OR_POWER_OFF_KO,     "power",     0xFFDC2626U, exit_power_items, (int)(sizeof(exit_power_items) / sizeof(exit_power_items[0])), false, false, false, false },};
 
 #define NUM_PAGES ((int)(sizeof(g_pages) / sizeof(g_pages[0])))
 
@@ -1391,6 +1260,15 @@ static float g_item_scroll_anim = 0.0f;
 static float g_trans_x = 0.0f;
 static float g_bg_blur_anim = 0.0f;
 static bool  g_editing_slider = false;
+static bool  g_editing_choice = false;
+static int   g_choice_sel = 0;
+
+/* App Switch Confirmation Modal (when launched from MeUI/Rockbox) */
+static bool  g_switch_open = false;
+static int   g_switch_sel = 1;
+static int   g_switch_target_idx = -1;
+static pid_t g_switch_pid = 0;
+static char  g_switch_cur_name[32] = "";
 
 /* ABC Fast Scroll state */
 static uint64_t g_scroll_last_ms = 0;
@@ -1487,9 +1365,9 @@ static void format_12h_clock(char *buf, size_t len)
     if (h12 == 0) h12 = 12;
     bool is_pm = (tm->tm_hour >= 12);
     if (g_cfg.lang == 1)
-        snprintf(buf, len, "%s %02d:%02d", is_pm ? "오후" : "오전", h12, tm->tm_min);
+        snprintf(buf, len, "%s %d:%02d", ampm_choices_ko[is_pm ? 1 : 0], h12, tm->tm_min);
     else
-        snprintf(buf, len, "%02d:%02d %s", h12, tm->tm_min, is_pm ? "PM" : "AM");
+        snprintf(buf, len, "%d:%02d %s", h12, tm->tm_min, is_pm ? "PM" : "AM");
 }
 
 static void draw_header(const char *title, const char *icon_name)
@@ -1501,25 +1379,18 @@ static void draw_header(const char *title, const char *icon_name)
     snprintf(cpu_str, sizeof(cpu_str), "%dM", g_cached_cpu_mhz);
     int cpu_w = gfx_text_width(cpu_str, 18.0f, UI_FONT_SEMIBOLD);
 
-    char bat_str[16];
     int bat_pct = g_cached_bat_pct;
     bool bat_chg = g_cached_bat_chg;
-    snprintf(bat_str, sizeof(bat_str), "%d%%", bat_pct);
-    int bat_w = gfx_text_width(bat_str, 18.0f, UI_FONT_SEMIBOLD);
 
     char time_str[24];
     format_12h_clock(time_str, sizeof(time_str));
-    int time_w = gfx_text_width(time_str, 18.5f, UI_FONT_SEMIBOLD);
+    int time_w = gfx_text_width(time_str, 22.0f, UI_FONT_SEMIBOLD);
 
-    int rx = UI_W - 18 - time_w;
-    gfx_draw_text(rx, 20, time_str, 18.5f, UI_FONT_SEMIBOLD, COL_TEXT);
+    int rx = UI_W - 22 - time_w;
+    gfx_draw_text(rx, 17, time_str, 22.0f, UI_FONT_SEMIBOLD, COL_TEXT);
 
-    int bat_pill_w = 28 + bat_w + 10;
-    rx -= bat_pill_w + 6;
-    gfx_fill_round_rect(rx, 13, bat_pill_w, 34, 17, COL_SURFACE_HI);
-    uint32_t bat_col = (!bat_chg && bat_pct <= 20) ? COL_DANGER : COL_TEXT;
-    gfx_draw_battery_icon(rx + 6, 20, bat_pct, bat_chg, bat_col);
-    gfx_draw_text(rx + 30, 19, bat_str, 18.0f, UI_FONT_SEMIBOLD, COL_TEXT);
+    rx -= 58 + 10;
+    gfx_draw_battery_icon(rx, 14, bat_pct, bat_chg, 0);
 
     int cpu_pill_w = 26 + cpu_w + 10;
     rx -= cpu_pill_w + 6;
@@ -1556,7 +1427,7 @@ static void draw_toast_overlay(void)
 static void render_home(int ox)
 {
     gfx_reset_clip();
-    draw_header(TR("Settings", "시스템 설정"), "settings");
+    draw_header(TR_ID(STR_SETTINGS), "settings");
 
     int cols = 2;
     int pad_x = 12;
@@ -1653,6 +1524,145 @@ static void render_slider_modal(const struct cfg_item *it)
     if (kx > tx + tw - 20) kx = tx + tw - 20;
     gfx_fill_round_rect(kx, ty - 5, 24, 24, 10, COL_SUCCESS);
     gfx_stroke_round_rect(kx, ty - 5, 24, 24, 10, 1, COL_BORDER_HI);
+}
+
+static void render_choice_modal(const struct cfg_item *it)
+{
+    if (!it || it->num_choices <= 0) return;
+    gfx_set_text_shadow(false);
+    int n = it->num_choices;
+    int vis = (n > 4) ? 4 : n;
+    int row_h = 46, gap = 6;
+    int mw = 380;
+    int mh = 72 + vis * (row_h + gap) + 12;
+    int mx = (UI_W - mw) / 2;
+    int my = (UI_H - mh) / 2;
+
+    gfx_fill_round_rect(mx, my, mw, mh, 30, COL_MODAL_BG);
+    gfx_stroke_round_rect(mx, my, mw, mh, 30, 2, COL_BORDER_HI);
+    gfx_draw_text_ellipsize(mx + 22, my + 18, mw - 44, TR(it->label, it->label_ko),
+                            23.0f, UI_FONT_SEMIBOLD, COL_TEXT);
+
+    int cur = it->get_int ? it->get_int() : 0;
+    int scroll = 0;
+    if (g_choice_sel >= vis) scroll = g_choice_sel - vis + 1;
+    if (scroll > n - vis) scroll = n - vis;
+    if (scroll < 0) scroll = 0;
+
+    for (int i = 0; i < vis; i++) {
+        int ci = scroll + i;
+        int ry = my + 58 + i * (row_h + gap);
+        bool sel = (ci == g_choice_sel);
+        gfx_fill_round_rect(mx + 16, ry, mw - 32, row_h, row_h / 2,
+                            sel ? COL_SEL_BG : COL_MODAL_HI);
+        if (sel) gfx_stroke_round_rect(mx + 16, ry, mw - 32, row_h, row_h / 2, 2, COL_BORDER_HI);
+        const char *lbl = (g_cfg.lang == 1 && it->choices_ko) ? it->choices_ko[ci] : it->choices[ci];
+        gfx_draw_text_ellipsize(mx + 34, ry + 11, mw - 92, lbl,
+                                21.5f, UI_FONT_SEMIBOLD, sel ? COL_SEL_TEXT : COL_TEXT);
+        if (ci == cur) {
+            gfx_draw_icon("check", mx + mw - 50, ry + 13, 20,
+                          sel ? COL_SEL_TEXT : COL_ACCENT);
+        }
+    }
+}
+
+static void render_switch_modal(void)
+{
+    if (!g_switch_open || g_switch_target_idx < 0 || g_switch_target_idx >= g_launch_count)
+        return;
+    gfx_set_text_shadow(false);
+    int mw = 410, mh = 196;
+    int mx = (UI_W - mw) / 2;
+    int my = (UI_H - mh) / 2;
+
+    gfx_fill_round_rect(mx, my, mw, mh, 30, COL_MODAL_BG);
+    gfx_stroke_round_rect(mx, my, mw, mh, 30, 2, COL_BORDER_HI);
+    gfx_draw_text_ellipsize(mx + 24, my + 22, mw - 48, TR_ID(STR_CLOSE_APP_TITLE),
+                            24.0f, UI_FONT_SEMIBOLD, COL_TEXT);
+
+    char body[160];
+    snprintf(body, sizeof(body), TR_ID(STR_CLOSE_APP_BODY),
+             g_switch_cur_name[0] ? g_switch_cur_name : "App",
+             g_launch_apps[g_switch_target_idx].name);
+    gfx_draw_text_ellipsize(mx + 24, my + 66, mw - 48, body,
+                            21.0f, UI_FONT_REGULAR, COL_TEXT_DIM);
+
+    int bw = (mw - 60) / 2, bh = 50;
+    int by = my + mh - bh - 20;
+    int bx0 = mx + 22, bx1 = bx0 + bw + 16;
+
+    gfx_fill_round_rect(bx0, by, bw, bh, bh / 2, g_switch_sel == 0 ? COL_SEL_BG : COL_MODAL_HI);
+    if (g_switch_sel == 0) gfx_stroke_round_rect(bx0, by, bw, bh, bh / 2, 2, COL_BORDER_HI);
+    const char *no_lbl = TR_ID(STR_NO);
+    int nw = gfx_text_width(no_lbl, 22.0f, UI_FONT_SEMIBOLD);
+    gfx_draw_text(bx0 + (bw - nw) / 2, by + 13, no_lbl, 22.0f, UI_FONT_SEMIBOLD,
+                  g_switch_sel == 0 ? COL_SEL_TEXT : COL_TEXT);
+
+    gfx_fill_round_rect(bx1, by, bw, bh, bh / 2, g_switch_sel == 1 ? COL_ACCENT : COL_MODAL_HI);
+    if (g_switch_sel == 1) gfx_stroke_round_rect(bx1, by, bw, bh, bh / 2, 2, COL_BORDER_HI);
+    const char *yes_lbl = TR_ID(STR_YES);
+    int yw = gfx_text_width(yes_lbl, 22.0f, UI_FONT_SEMIBOLD);
+    gfx_draw_text(bx1 + (bw - yw) / 2, by + 13, yes_lbl, 22.0f, UI_FONT_SEMIBOLD,
+                  g_switch_sel == 1 ? COL_ACCENT_TEXT : COL_TEXT);
+}
+
+static pid_t find_running_app_pid(char *out_name, size_t out_sz)
+{
+    DIR *d = opendir("/proc");
+    if (!d) return 0;
+    pid_t self = getpid();
+    pid_t found = 0;
+    struct dirent *de;
+    while ((de = readdir(d)) != NULL) {
+        if (de->d_name[0] < '0' || de->d_name[0] > '9') continue;
+        pid_t pid = (pid_t)atoi(de->d_name);
+        if (pid <= 1 || pid == self) continue;
+        char cpath[64], comm[64] = "";
+        snprintf(cpath, sizeof(cpath), "/proc/%d/comm", (int)pid);
+        FILE *f = fopen(cpath, "r");
+        if (!f) continue;
+        if (fgets(comm, sizeof(comm), f)) {
+            char *nl = strchr(comm, '\n');
+            if (nl) *nl = '\0';
+            if (strcmp(comm, "meui") == 0 || strcmp(comm, "rockbox") == 0) {
+                found = pid;
+                if (out_name && out_sz > 0) {
+                    snprintf(out_name, out_sz, "%s",
+                             strcmp(comm, "meui") == 0 ? "MeUI" : "Rockbox");
+                }
+                fclose(f);
+                break;
+            }
+        }
+        fclose(f);
+    }
+    closedir(d);
+    return found;
+}
+
+static void execute_app_switch(const char *exec_path, pid_t kill_pid)
+{
+    if (kill_pid > 0) {
+        kill(kill_pid, SIGTERM);
+        char ppath[64];
+        snprintf(ppath, sizeof(ppath), "/proc/%d", (int)kill_pid);
+        for (int i = 0; i < 30; i++) {
+            if (access(ppath, F_OK) != 0) break;
+            usleep(50000);
+        }
+        if (access(ppath, F_OK) == 0)
+            kill(kill_pid, SIGKILL);
+    }
+    if (strcmp(exec_path, "__ANDROID__") == 0) {
+        save_settings_conf();
+        y1_sys_reboot();
+        return;
+    }
+    save_settings_conf();
+    y1_input_close();
+    gfx_shutdown();
+    execl(exec_path, exec_path, (char *)NULL);
+    _exit(127);
 }
 
 static void render_page(int ox)
@@ -1764,7 +1774,7 @@ static void render_page(int ox)
                                     UI_FONT_SEMIBOLD, COL_TEXT);
             gfx_draw_text_ellipsize(x + 52, y + 38, 238, le->exec_path, 18.5f,
                                     UI_FONT_REGULAR, COL_TEXT_MUTED);
-            const char *badge = TR("Launch", "실행");
+            const char *badge = TR_ID(STR_LAUNCH);
             int bw = gfx_text_width(badge, 19.0f, UI_FONT_SEMIBOLD) + 26;
             gfx_fill_round_rect(x + w - 14 - bw, y + 15, bw, 38, 19, COL_ACCENT);
             gfx_draw_text(x + w - 14 - bw + 13, y + 21, badge, 19.0f, UI_FONT_SEMIBOLD, COL_ACCENT_TEXT);
@@ -1782,14 +1792,14 @@ static void render_page(int ox)
             char sub[64];
             snprintf(sub, sizeof(sub), "%d dBm  •  %s  •  %s",
                      net->rssi,
-                     net->secured ? "WPA" : TR("Open", "개방"),
-                     net->connected ? TR("Connected", "연결됨")
-                                    : (net->saved ? TR("Saved (Right: Forget)", "저장됨 (오른쪽: 삭제)")
-                                                  : TR("Available", "사용 가능")));
+                     net->secured ? "WPA" : TR_ID(STR_OPEN),
+                     net->connected ? TR_ID(STR_CONNECTED)
+                                    : (net->saved ? TR_ID(STR_SAVED_RIGHT_FORGET)
+                                                  : TR_ID(STR_AVAILABLE)));
             gfx_draw_text_ellipsize(x + 52, y + 38, 230, sub, 18.0f,
                                     UI_FONT_REGULAR, COL_TEXT_MUTED);
 
-            const char *badge = net->connected ? TR("Disconnect", "연결 해제") : TR("Connect", "연결");
+            const char *badge = net->connected ? TR_ID(STR_DISCONNECT) : TR_ID(STR_CONNECT);
             int bw = gfx_text_width(badge, 18.5f, UI_FONT_SEMIBOLD) + 24;
             gfx_fill_round_rect(x + w - 14 - bw, y + 15, bw, 38, 19,
                                 net->connected ? COL_WARN : COL_ACCENT);
@@ -1798,7 +1808,7 @@ static void render_page(int ox)
         } else {
             int d_idx = idx - pg->num_items;
             const struct y1_bt_device *dev = &g_bt_devs[d_idx];
-            const char *name = dev->name[0] ? dev->name : TR("Unknown Device", "알 수 없는 기기");
+            const char *name = dev->name[0] ? dev->name : TR_ID(STR_UNKNOWN_DEVICE);
             gfx_draw_icon("bluetooth", x + 14, y + 20, 28, COL_TEXT);
             gfx_draw_text_ellipsize(x + 52, y + 7, 220, name, 24.0f,
                                     UI_FONT_SEMIBOLD, COL_TEXT);
@@ -1806,13 +1816,13 @@ static void render_page(int ox)
             snprintf(sub, sizeof(sub), "%02X:%02X:%02X:%02X:%02X:%02X  •  %s",
                      dev->bdaddr[5], dev->bdaddr[4], dev->bdaddr[3],
                      dev->bdaddr[2], dev->bdaddr[1], dev->bdaddr[0],
-                     dev->connected ? TR("Connected", "연결됨")
-                                    : (dev->paired ? TR("Paired (Right: Forget)", "등록됨 (오른쪽: 삭제)")
-                                                   : TR("Discovered", "검색됨")));
+                     dev->connected ? TR_ID(STR_CONNECTED)
+                                    : (dev->paired ? TR_ID(STR_PAIRED_RIGHT_FORGET)
+                                                   : TR_ID(STR_DISCOVERED)));
             gfx_draw_text_ellipsize(x + 52, y + 38, 230, sub, 18.0f,
                                     UI_FONT_REGULAR, COL_TEXT_MUTED);
 
-            const char *badge = dev->connected ? TR("Disconnect", "연결 해제") : TR("Connect", "연결");
+            const char *badge = dev->connected ? TR_ID(STR_DISCONNECT) : TR_ID(STR_CONNECT);
             int bw = gfx_text_width(badge, 18.5f, UI_FONT_SEMIBOLD) + 24;
             gfx_fill_round_rect(x + w - 14 - bw, y + 15, bw, 38, 19,
                                 dev->connected ? COL_WARN : COL_ACCENT);
@@ -1827,6 +1837,10 @@ static void render_page(int ox)
 
     if (g_editing_slider && g_item_sel < pg->num_items)
         render_slider_modal(&pg->items[g_item_sel]);
+    if (g_editing_choice && g_item_sel < pg->num_items)
+        render_choice_modal(&pg->items[g_item_sel]);
+    if (g_switch_open)
+        render_switch_modal();
 }
 
 /* =========================================================================
@@ -1899,12 +1913,12 @@ static void render_osk_modal(void)
     gfx_stroke_round_rect(mx, my, mw, mh, 36, 2, COL_BORDER_HI);
 
     char title[84];
-    snprintf(title, sizeof(title), "%s: %s", TR("Password", "비밀번호"), g_osk_ssid);
+    snprintf(title, sizeof(title), "%s: %s", TR_ID(STR_PASSWORD), g_osk_ssid);
     gfx_draw_text_ellipsize(mx + 18, my + 12, mw - 36, title, 21.0f, UI_FONT_SEMIBOLD, COL_TEXT);
 
     int bx = mx + 16, by = my + 46, bw = mw - 32, bh = 44;
     gfx_fill_round_rect(bx, by, bw, bh, 22, COL_MODAL_HI);
-    const char *disp = g_osk_len > 0 ? g_osk_buf : TR("Enter Wi-Fi password...", "Wi-Fi 비밀번호 입력...");
+    const char *disp = g_osk_len > 0 ? g_osk_buf : TR_ID(STR_ENTER_WI_FI_PASSWORD);
     uint32_t dcol = g_osk_len > 0 ? COL_TEXT : COL_TEXT_MUTED;
     gfx_draw_text_ellipsize(bx + 16, by + 10, bw - 32, disp, 21.0f, UI_FONT_SEMIBOLD, dcol);
 
@@ -1953,7 +1967,7 @@ static void handle_osk_button(uint32_t btn)
         g_osk_len = (int)strlen(g_osk_buf);
         g_osk_active = false;
         y1_wifi_connect(g_osk_ssid, g_osk_buf);
-        show_toast(TR("Connecting...", "연결 중..."), 1500);
+        show_toast(TR_ID(STR_CONNECTING), 1500);
         return;
     }
     if (btn == Y1_BTN_SCROLL_FWD) {
@@ -1989,7 +2003,7 @@ static void handle_osk_button(uint32_t btn)
             g_osk_len = (int)strlen(g_osk_buf);
             g_osk_active = false;
             y1_wifi_connect(g_osk_ssid, g_osk_buf);
-            show_toast(TR("Connecting...", "연결 중..."), 1500);
+            show_toast(TR_ID(STR_CONNECTING), 1500);
         } else {
             hime_input_key(&g_osk_ime, lbl, g_osk_buf, sizeof(g_osk_buf));
             g_osk_len = (int)strlen(g_osk_buf);
@@ -1999,7 +2013,7 @@ static void handle_osk_button(uint32_t btn)
 
 static void render_wp_picker(void)
 {
-    draw_header(g_picker_is_font ? TR("Font", "글꼴") : TR("Wallpaper", "배경화면"),
+    draw_header(g_picker_is_font ? TR_ID(STR_FONT) : TR_ID(STR_WALLPAPER),
                 g_picker_is_font ? "sliders" : "image");
     int list_top = 60, row_h = 68, gap = 6, step = row_h + gap, visible = 4;
     if (g_wp_sel < g_wp_scroll) g_wp_scroll = g_wp_sel;
@@ -2065,10 +2079,10 @@ static void handle_button(uint32_t btn)
             if (we->is_clear) {
                 if (g_picker_is_font) {
                     gfx_reset_default_font();
-                    show_toast(TR("Default font restored", "기본 글꼴로 복원됨"), 1200);
+                    show_toast(TR_ID(STR_DEFAULT_FONT_RESTORED), 1200);
                 } else {
                     gfx_clear_wallpaper();
-                    show_toast(TR("Wallpaper cleared", "배경화면 삭제됨"), 1200);
+                    show_toast(TR_ID(STR_WALLPAPER_CLEARED), 1200);
                 }
                 g_wp_open = false;
             } else if (we->is_dir) {
@@ -2076,18 +2090,18 @@ static void handle_button(uint32_t btn)
             } else if (g_picker_is_font) {
                 if (gfx_set_custom_font(we->path)) {
                     g_wp_open = false;
-                    show_toast(TR("Font applied", "글꼴 적용됨"), 1400);
+                    show_toast(TR_ID(STR_FONT_APPLIED), 1400);
                 } else {
-                    show_toast(TR("Failed to load font", "글꼴 로드 실패"), 1400);
+                    show_toast(TR_ID(STR_FAILED_TO_LOAD_FONT), 1400);
                 }
             } else {
-                show_toast(TR("Applying wallpaper...", "배경화면 적용 중..."), 1000);
+                show_toast(TR_ID(STR_APPLYING_WALLPAPER), 1000);
                 render_frame();
                 if (gfx_set_wallpaper_from_image(we->path)) {
                     g_wp_open = false;
-                    show_toast(TR("Wallpaper applied", "배경화면 적용됨"), 1400);
+                    show_toast(TR_ID(STR_WALLPAPER_APPLIED), 1400);
                 } else {
-                    show_toast(TR("Failed to load image", "이미지 로드 실패"), 1400);
+                    show_toast(TR_ID(STR_FAILED_TO_LOAD_IMAGE), 1400);
                 }
             }
         }
@@ -2110,6 +2124,8 @@ static void handle_button(uint32_t btn)
             g_item_scroll_anim = 0.0f;
             cfg_item_pill_clear_scope(g_active_page);
             g_editing_slider = false;
+            g_editing_choice = false;
+            g_switch_open = false;
             if (strcmp(g_pages[g_active_page].id, "datetime") == 0)
                 load_datetime_from_sys();
             if (g_pages[g_active_page].is_bt_page)
@@ -2128,6 +2144,41 @@ static void handle_button(uint32_t btn)
 
     const struct cfg_page *pg = &g_pages[g_active_page];
 
+    if (g_switch_open) {
+        if (btn == Y1_BTN_MENU) {
+            g_switch_open = false;
+        } else if (btn == Y1_BTN_SCROLL_FWD || btn == Y1_BTN_SCROLL_BACK ||
+                   btn == Y1_BTN_LEFT || btn == Y1_BTN_RIGHT) {
+            g_switch_sel = g_switch_sel ? 0 : 1;
+        } else if (btn == Y1_BTN_SELECT) {
+            if (g_switch_sel == 1 && g_switch_target_idx >= 0 && g_switch_target_idx < g_launch_count) {
+                execute_app_switch(g_launch_apps[g_switch_target_idx].exec_path, g_switch_pid);
+            }
+            g_switch_open = false;
+        }
+        return;
+    }
+
+    if (g_editing_choice && g_item_sel < pg->num_items) {
+        const struct cfg_item *it = &pg->items[g_item_sel];
+        int n = it->num_choices;
+        if (n > 0) {
+            if (btn == Y1_BTN_SCROLL_FWD || btn == Y1_BTN_RIGHT) {
+                g_choice_sel = (g_choice_sel + 1) % n;
+            } else if (btn == Y1_BTN_SCROLL_BACK || btn == Y1_BTN_LEFT) {
+                g_choice_sel = (g_choice_sel + n - 1) % n;
+            } else if (btn == Y1_BTN_SELECT) {
+                if (it->set_int) it->set_int(g_choice_sel);
+                g_editing_choice = false;
+            } else if (btn == Y1_BTN_MENU) {
+                g_editing_choice = false;
+            }
+        } else {
+            g_editing_choice = false;
+        }
+        return;
+    }
+
     if (g_editing_slider && g_item_sel < pg->num_items) {
         const struct cfg_item *it = &pg->items[g_item_sel];
         int val = it->get_int ? it->get_int() : it->min_val;
@@ -2141,6 +2192,8 @@ static void handle_button(uint32_t btn)
             if (it->set_int) it->set_int(val);
         } else if (btn == Y1_BTN_SELECT || btn == Y1_BTN_MENU) {
             g_editing_slider = false;
+            g_editing_choice = false;
+            g_switch_open = false;
         }
         return;
     }
@@ -2194,10 +2247,16 @@ static void handle_button(uint32_t btn)
             if (it->type == CFG_TYPE_TOGGLE && it->get_int && it->set_int) {
                 it->set_int(!it->get_int());
             } else if (it->type == CFG_TYPE_CHOICE && it->get_int && it->set_int && it->num_choices > 0) {
-                int c = it->get_int();
-                int dir = (btn == Y1_BTN_LEFT) ? -1 : 1;
-                c = (c + it->num_choices + dir) % it->num_choices;
-                it->set_int(c);
+                if (btn == Y1_BTN_SELECT && it->num_choices >= 2) {
+                    g_choice_sel = it->get_int();
+                    if (g_choice_sel < 0 || g_choice_sel >= it->num_choices) g_choice_sel = 0;
+                    g_editing_choice = true;
+                } else {
+                    int c = it->get_int();
+                    int dir = (btn == Y1_BTN_LEFT) ? -1 : 1;
+                    c = (c + it->num_choices + dir) % it->num_choices;
+                    it->set_int(c);
+                }
             } else if (it->type == CFG_TYPE_INT && btn == Y1_BTN_SELECT) {
                 g_editing_slider = true;
             } else if (it->type == CFG_TYPE_INT && (btn == Y1_BTN_RIGHT || btn == Y1_BTN_LEFT)) {
@@ -2212,18 +2271,26 @@ static void handle_button(uint32_t btn)
         } else if (pg->is_launch_page && btn == Y1_BTN_SELECT) {
             int l_idx = g_item_sel - pg->num_items;
             if (l_idx >= 0 && l_idx < g_launch_count) {
-                FILE *lf = fopen("/tmp/configapp_launch", "w");
-                if (lf) {
-                    fprintf(lf, "%s\n", g_launch_apps[l_idx].exec_path);
-                    fclose(lf);
-                }
-                if (g_boot_mode) {
-                    g_should_exit = true;
-                } else if (strcmp(g_launch_apps[l_idx].exec_path, "__ANDROID__") == 0) {
-                    show_toast(TR("Reboot to Android from Boot", "부팅 메뉴에서 Android 실행 가능"), 1500);
+                pid_t run_pid = !g_boot_mode ? find_running_app_pid(g_switch_cur_name, sizeof(g_switch_cur_name)) : 0;
+                if (run_pid > 0) {
+                    g_switch_pid = run_pid;
+                    g_switch_target_idx = l_idx;
+                    g_switch_sel = 1;
+                    g_switch_open = true;
                 } else {
-                    show_toast(TR("Launching...", "실행 중..."), 1000);
-                    g_should_exit = true;
+                    FILE *lf = fopen("/tmp/configapp_launch", "w");
+                    if (lf) {
+                        fprintf(lf, "%s\n", g_launch_apps[l_idx].exec_path);
+                        fclose(lf);
+                    }
+                    if (g_boot_mode) {
+                        g_should_exit = true;
+                    } else if (strcmp(g_launch_apps[l_idx].exec_path, "__ANDROID__") == 0) {
+                        show_toast(TR_ID(STR_REBOOT_TO_ANDROID_FROM_BOOT), 1500);
+                    } else {
+                        show_toast(TR_ID(STR_LAUNCHING), 1000);
+                        g_should_exit = true;
+                    }
                 }
             }
         } else if (pg->is_wifi_page) {
@@ -2231,16 +2298,16 @@ static void handle_button(uint32_t btn)
             if (w_idx >= 0 && w_idx < g_wifi_net_count) {
                 if (btn == Y1_BTN_RIGHT && g_wifi_nets[w_idx].saved) {
                     y1_wifi_forget(g_wifi_nets[w_idx].ssid);
-                    show_toast(TR("Network forgotten", "네트워크 삭제됨"), 1200);
+                    show_toast(TR_ID(STR_NETWORK_FORGOTTEN), 1200);
                 } else if (btn == Y1_BTN_LEFT && g_wifi_nets[w_idx].secured) {
                     open_wifi_osk(g_wifi_nets[w_idx].ssid);
                 } else if (btn == Y1_BTN_SELECT) {
                     if (g_wifi_nets[w_idx].connected) {
                         y1_wifi_disconnect();
-                        show_toast(TR("Disconnecting...", "연결 해제 중..."), 1200);
+                        show_toast(TR_ID(STR_DISCONNECTING), 1200);
                     } else if (!g_wifi_nets[w_idx].secured || g_wifi_nets[w_idx].saved) {
                         y1_wifi_connect(g_wifi_nets[w_idx].ssid, NULL);
-                        show_toast(TR("Connecting...", "연결 중..."), 1500);
+                        show_toast(TR_ID(STR_CONNECTING), 1500);
                     } else {
                         open_wifi_osk(g_wifi_nets[w_idx].ssid);
                     }
@@ -2251,14 +2318,14 @@ static void handle_button(uint32_t btn)
             if (d_idx >= 0 && d_idx < g_bt_dev_count) {
                 if (btn == Y1_BTN_RIGHT && g_bt_devs[d_idx].paired) {
                     y1_bt_forget_device(g_bt_devs[d_idx].bdaddr);
-                    show_toast(TR("Device forgotten", "기기 등록 삭제됨"), 1200);
+                    show_toast(TR_ID(STR_DEVICE_FORGOTTEN), 1200);
                 } else if (btn == Y1_BTN_SELECT) {
                     if (g_bt_devs[d_idx].connected) {
                         y1_bt_disconnect();
-                        show_toast(TR("Disconnecting...", "연결 해제 중..."), 1200);
+                        show_toast(TR_ID(STR_DISCONNECTING), 1200);
                     } else {
                         y1_bt_connect_device(g_bt_devs[d_idx].bdaddr);
-                        show_toast(TR("Connecting...", "연결 중..."), 1500);
+                        show_toast(TR_ID(STR_CONNECTING), 1500);
                     }
                 }
             }
