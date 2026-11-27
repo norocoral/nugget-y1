@@ -632,17 +632,17 @@ void y1_display_exit_early_suspend(void)
     }
 
     if (early_suspended) {
-        /* Wait for kernel late_resume workqueue, then explicitly issue
-         * MTKFB_POWERON and FBIOBLANK to guarantee mtkfb has re-enabled
-         * all MMSYS/DBI display clocks and cleared is_early_suspended. */
-        usleep(45000);
+        /* Wait for kernel late_resume workqueue to finish DSI/DBI panel init,
+         * then explicitly issue FB_BLANK_UNBLANK and MTKFB_POWERON. */
+        usleep(120000);
         early_suspended = false;
         last_bl_hw_val = -1;
     }
 
     if (fb_fd >= 0) {
-        (void)ioctl(fb_fd, MTKFB_POWERON);
         (void)ioctl(fb_fd, FBIOBLANK, FB_BLANK_UNBLANK);
+        (void)ioctl(fb_fd, MTKFB_POWERON);
+        usleep(15000);
     }
     y1_fb_set_eco_mode(false);
     y1_fb_flip();
@@ -665,7 +665,6 @@ void y1_power_set_idle_sleep(bool allow_suspend)
         y1_log("[liby1-pwr] Released wakelocks for true mem suspend\n");
     } else {
         y1_sysfs_write("/sys/power/wake_lock", "rockbox_active\n");
-        y1_sysfs_write("/sys/power/state", "on\n");
     }
 }
 

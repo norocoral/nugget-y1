@@ -39,6 +39,15 @@
 #include <sys/utsname.h>
 #include <sys/statvfs.h>
 #include <sys/klog.h>
+#include <signal.h>
+#include "charger_glyphs.h"
+
+#ifndef MTKFB_POWERON
+#define MTKFB_POWERON  0x4f48
+#endif
+#ifndef MTKFB_POWEROFF
+#define MTKFB_POWEROFF 0x4f49
+#endif
 
 #ifndef VESA_NO_BLANKING
 #define VESA_NO_BLANKING 0
@@ -1139,7 +1148,8 @@ static void boost_cpu_for_boot(void)
 
 static void apply_powersave_cpu(void)
 {
-    /* Used when Rockbox exits or crashes to conserve battery while waiting */
+    /* Used when Rockbox exits, crashes, or in charger/low-battery idle to conserve battery */
+    write_sysfs("/proc/cpufreq/usb_raise_freq", "0\n");
     write_sysfs("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor", "ondemand\n");
     write_sysfs("/sys/devices/system/cpu/cpu0/cpufreq/scaling_min_freq", "390000\n");
     write_sysfs("/sys/devices/system/cpu/cpu0/cpufreq/scaling_max_freq", "1001000\n");
@@ -2833,7 +2843,8 @@ static void play_shutdown_watchdog_loop(void)
                 pfds[i].revents = 0;
             }
 
-            int timeout_ms = play_held ? 100 : 500;
+            /* Block indefinitely when idle (0 wakeups/sec); wake every 200ms only while Play/Pause is held */
+            int timeout_ms = play_held ? 200 : -1;
             int pr = poll(pfds, num_fds, timeout_ms);
             if (pr < 0 && errno == EINTR) {
                 continue;
@@ -2929,8 +2940,6 @@ static int is_usb_power_online(void)
 {
     char buf[16];
     if (read_text_file("/sys/class/power_supply/usb/online", buf, sizeof(buf)) && atoi(buf) > 0)
-        return 1;
-    if (read_text_file("/sys/class/power_supply/ac/online", buf, sizeof(buf)) && atoi(buf) > 0)
         return 1;
     return 0;
 }
@@ -3299,6 +3308,685 @@ static void setup_usb_gadget(const char *sd_dev, const char *ext_dev, int allow_
     log_line("USB Mass Storage activated (PC music transfer ready).\n");
 }
 
+/* ============================================================================
+ * Off-Mode Charging (KPOC) & Low-Battery (<5%) Idle Screen
+ * ============================================================================ */
+
+enum {
+    BATTERY_SCREEN_CHARGING = 0,
+    BATTERY_SCREEN_FULL     = 1,
+    BATTERY_SCREEN_LOW      = 2
+};
+
+static int read_battery_percent(void)
+{
+    char buf[32];
+    if (!read_text_file("/sys/class/power_supply/battery/capacity", buf, sizeof(buf)) ||
+        buf[0] == '\0')
+        return -1;
+    int pct = atoi(buf);
+    if (pct < 0) pct = 0;
+    if (pct > 100) pct = 100;
+    return pct;
+}
+
+static int read_battery_voltage_mv(void)
+{
+    char buf[32];
+    if (read_text_file("/sys/class/power_supply/battery/voltage_now", buf, sizeof(buf)) ||
+        read_text_file("/sys/class/power_supply/battery/batt_vol", buf, sizeof(buf))) {
+        int v = atoi(buf);
+        return (v > 10000) ? (v / 1000) : v;
+    }
+    return 0;
+}
+
+static int is_charger_online(void)
+{
+    char buf[32];
+    if (read_text_file("/sys/class/power_supply/ac/online", buf, sizeof(buf)) && atoi(buf) > 0)
+        return 1;
+    if (read_text_file("/sys/class/power_supply/usb/online", buf, sizeof(buf)) && atoi(buf) > 0)
+        return 1;
+    if (read_text_file("/sys/class/power_supply/battery/status", buf, sizeof(buf))) {
+        if (strncmp(buf, "Charging", 8) == 0 || strncmp(buf, "Full", 4) == 0)
+            return 1;
+    }
+    /* MT6572 mt_battery VBUS ADC voltage (mV): >3000mV confirms physical charger presence
+     * even before BC1.2 USB type detection settles or when full ("Not charging"). */
+    if (read_text_file("/sys/devices/platform/battery/ADC_Charger_Voltage", buf, sizeof(buf)) &&
+        atoi(buf) > 3000)
+        return 1;
+    if (read_text_file("/sys/class/power_supply/battery/Charger_Voltage", buf, sizeof(buf)) &&
+        atoi(buf) > 3000)
+        return 1;
+    return 0;
+}
+
+static int is_battery_full(int pct)
+{
+    if (pct >= 100)
+        return 1;
+    char buf[32];
+    if (read_text_file("/sys/class/power_supply/battery/status", buf, sizeof(buf))) {
+        if (strncmp(buf, "Full", 4) == 0)
+            return 1;
+    }
+    return 0;
+}
+
+static int is_charger_boot_mode(void)
+{
+    char buf[512];
+    /* MT6572 boot_mode sysfs: 8 = KERNEL_POWER_OFF_CHARGING_BOOT, 9 = LOW_POWER_OFF_CHARGING_BOOT */
+    if (read_text_file("/sys/class/BOOT/BOOT/boot/boot_mode", buf, sizeof(buf))) {
+        int mode = atoi(buf);
+        if (mode == 8 || mode == 9)
+            return 1;
+    }
+    if (read_text_file("/proc/cmdline", buf, sizeof(buf))) {
+        if (strstr(buf, "androidboot.mode=charger") != NULL)
+            return 1;
+    }
+    return 0;
+}
+
+static float charger_sqrtf(float x)
+{
+    if (x <= 0.0f) return 0.0f;
+    float r = x;
+    /* Fast Newton-Raphson (no libm dependency) */
+    for (int i = 0; i < 10; i++)
+        r = 0.5f * (r + x / r);
+    return r;
+}
+
+static inline void fb_blend_px(uint8_t *fb, int stride, int w, int h, int bpp,
+                               const struct fb_var_screeninfo *vinfo,
+                               int x, int y, uint8_t r, uint8_t g, uint8_t b, uint8_t alpha)
+{
+    if (x < 0 || x >= w || y < 0 || y >= h || alpha == 0)
+        return;
+
+    if (bpp == 32) {
+        uint32_t *dst = (uint32_t *)(fb + (size_t)y * (size_t)stride) + x;
+        int ro = vinfo->red.length ? (int)vinfo->red.offset : 16;
+        int go = vinfo->green.length ? (int)vinfo->green.offset : 8;
+        int bo = vinfo->blue.length ? (int)vinfo->blue.offset : 0;
+        if (alpha == 255) {
+            *dst = 0xFF000000U | ((uint32_t)r << ro) | ((uint32_t)g << go) | ((uint32_t)b << bo);
+        } else {
+            uint32_t bg = *dst;
+            uint32_t br = (bg >> ro) & 0xFF;
+            uint32_t bgc = (bg >> go) & 0xFF;
+            uint32_t bb = (bg >> bo) & 0xFF;
+            uint32_t inv = 255U - alpha;
+            uint32_t nr = (r * alpha + br * inv + 127U) / 255U;
+            uint32_t ng = (g * alpha + bgc * inv + 127U) / 255U;
+            uint32_t nb = (b * alpha + bb * inv + 127U) / 255U;
+            *dst = 0xFF000000U | (nr << ro) | (ng << go) | (nb << bo);
+        }
+    } else if (bpp == 16) {
+        uint16_t *dst = (uint16_t *)(fb + (size_t)y * (size_t)stride) + x;
+        if (alpha == 255) {
+            *dst = (uint16_t)(((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3));
+        } else {
+            uint16_t bg = *dst;
+            uint32_t br = ((bg >> 11) & 0x1F) * 255U / 31U;
+            uint32_t bgc = ((bg >> 5) & 0x3F) * 255U / 63U;
+            uint32_t bb = (bg & 0x1F) * 255U / 31U;
+            uint32_t inv = 255U - alpha;
+            uint32_t nr = (r * alpha + br * inv + 127U) / 255U;
+            uint32_t ng = (g * alpha + bgc * inv + 127U) / 255U;
+            uint32_t nb = (b * alpha + bb * inv + 127U) / 255U;
+            *dst = (uint16_t)(((nr >> 3) << 11) | ((ng >> 2) << 5) | (nb >> 3));
+        }
+    }
+}
+
+static inline uint8_t sdf_to_alpha(float d)
+{
+    if (d <= -0.5f) return 255;
+    if (d >= 0.5f)  return 0;
+    return (uint8_t)((0.5f - d) * 255.0f + 0.5f);
+}
+
+/* Point-in-polygon test for the 6-vertex Material lightning bolt (16x23) */
+static int point_in_bolt(float x, float y)
+{
+    static const float vx[6] = { 10.2f,  0.8f,  7.6f,  5.6f, 15.2f,  8.4f };
+    static const float vy[6] = {  0.2f, 12.6f, 12.6f, 22.8f, 10.4f, 10.4f };
+    int inside = 0;
+    for (int i = 0, j = 5; i < 6; j = i++) {
+        if (((vy[i] > y) != (vy[j] > y)) &&
+            (x < (vx[j] - vx[i]) * (y - vy[i]) / (vy[j] - vy[i]) + vx[i])) {
+            inside = !inside;
+        }
+    }
+    return inside;
+}
+
+static void draw_bolt_icon(uint8_t *fb, int stride, int w, int h, int bpp,
+                           const struct fb_var_screeninfo *vinfo,
+                           int ox, int oy, uint8_t r, uint8_t g, uint8_t b)
+{
+    for (int y = 0; y < 23; y++) {
+        for (int x = 0; x < 16; x++) {
+            int hits = 0;
+            for (int sy = 0; sy < 4; sy++) {
+                float fy = (float)y + ((float)sy + 0.5f) * 0.25f;
+                for (int sx = 0; sx < 4; sx++) {
+                    float fx = (float)x + ((float)sx + 0.5f) * 0.25f;
+                    if (point_in_bolt(fx, fy))
+                        hits++;
+                }
+            }
+            if (hits > 0) {
+                uint8_t a = (uint8_t)((hits * 255 + 8) / 16);
+                fb_blend_px(fb, stride, w, h, bpp, vinfo, ox + x, oy + y, r, g, b, a);
+            }
+        }
+    }
+}
+
+/* Rounded exclamation mark (6x21) matching Figma priority_high icon */
+static void draw_exclamation_icon(uint8_t *fb, int stride, int w, int h, int bpp,
+                                  const struct fb_var_screeninfo *vinfo,
+                                  int ox, int oy, uint8_t r, uint8_t g, uint8_t b)
+{
+    const float cx = 2.5f;
+    const float rad = 2.4f;
+    for (int y = 0; y < 22; y++) {
+        for (int x = 0; x < 6; x++) {
+            float fx = (float)x + 0.5f;
+            float fy = (float)y + 0.5f;
+            /* Top vertical capsule: y in [2.5 .. 11.5] */
+            float cy_bar = fy < 2.5f ? 2.5f : (fy > 11.5f ? 11.5f : fy);
+            float d_bar = charger_sqrtf((fx - cx) * (fx - cx) + (fy - cy_bar) * (fy - cy_bar)) - rad;
+            /* Bottom dot: center (2.5, 18.0), radius 2.5 */
+            float d_dot = charger_sqrtf((fx - cx) * (fx - cx) + (fy - 18.0f) * (fy - 18.0f)) - 2.5f;
+            float d = d_bar < d_dot ? d_bar : d_dot;
+            uint8_t a = sdf_to_alpha(d);
+            if (a > 0)
+                fb_blend_px(fb, stride, w, h, bpp, vinfo, ox + x, oy + y, r, g, b, a);
+        }
+    }
+}
+
+static void draw_battery_screen(int pct, int mode)
+{
+    if (pct < 0) pct = 0;
+    if (pct > 100) pct = 100;
+
+    const char *devs[] = {"/dev/graphics/fb0", "/dev/fb0", NULL};
+    int fd = -1;
+    for (int i = 0; devs[i]; i++) {
+        fd = open(devs[i], O_RDWR | O_CLOEXEC);
+        if (fd >= 0) break;
+    }
+    if (fd < 0) return;
+
+    struct fb_fix_screeninfo finfo;
+    struct fb_var_screeninfo vinfo;
+    memset(&finfo, 0, sizeof(finfo));
+    memset(&vinfo, 0, sizeof(vinfo));
+    ioctl(fd, FBIOGET_FSCREENINFO, &finfo);
+    ioctl(fd, FBIOGET_VSCREENINFO, &vinfo);
+    ioctl(fd, FBIOBLANK, VESA_NO_BLANKING);
+    ioctl(fd, MTKFB_POWERON);
+
+    int w = vinfo.xres ? (int)vinfo.xres : 480;
+    int h = vinfo.yres ? (int)vinfo.yres : 360;
+    int bpp = vinfo.bits_per_pixel ? (int)vinfo.bits_per_pixel : 32;
+    int stride = finfo.line_length ? (int)finfo.line_length : (w * (bpp / 8));
+    size_t map_len = finfo.smem_len ? (size_t)finfo.smem_len : (size_t)(stride * h);
+
+    uint8_t *fb = (uint8_t *)mmap(NULL, map_len, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+    if (fb != MAP_FAILED && fb != NULL) {
+        size_t clear_len = (size_t)stride * (size_t)h;
+        if (clear_len > map_len)
+            clear_len = map_len;
+        /* Solid black background */
+        memset(fb, 0, clear_len);
+
+        /* Palette per Figma design */
+        uint8_t pill_r, pill_g, pill_b;
+        uint8_t fg_r, fg_g, fg_b;
+        if (mode == BATTERY_SCREEN_FULL) {
+            pill_r = 255; pill_g = 255; pill_b = 255; /* #ffffff */
+            fg_r = 0;     fg_g = 0;     fg_b = 0;     /* #000000 */
+        } else if (mode == BATTERY_SCREEN_LOW) {
+            pill_r = 228; pill_g = 105; pill_b = 105; /* #e46969 */
+            fg_r = 255;   fg_g = 255;   fg_b = 255;   /* #ffffff */
+        } else {
+            pill_r = 105; pill_g = 228; pill_b = 132; /* #69e484 */
+            fg_r = 255;   fg_g = 255;   fg_b = 255;   /* #ffffff */
+        }
+
+        /* Battery geometry: 95x64 capsule + 5px gap + 16x28 crescent terminal nub */
+        const int pill_w = 95;
+        const int pill_h = 64;
+        const int nub_gap = 5;
+        const int total_icon_w = pill_w + nub_gap + CHARGER_NUB_W;
+        const int px = (w - total_icon_w) / 2;
+        const int py = (h - pill_h) / 2;
+
+        /* 1. Draw anti-aliased pill (stadium SDF) */
+        const float pr = (float)pill_h * 0.5f;
+        const float seg_x0 = (float)px + pr;
+        const float seg_x1 = (float)(px + pill_w) - pr;
+        const float cy = (float)py + pr;
+        for (int y = py - 1; y <= py + pill_h + 1; y++) {
+            float dy = ((float)y + 0.5f) - cy;
+            for (int x = px - 1; x <= px + pill_w + 1; x++) {
+                float fx = (float)x + 0.5f;
+                float cx = fx < seg_x0 ? seg_x0 : (fx > seg_x1 ? seg_x1 : fx);
+                float dx = fx - cx;
+                float d = charger_sqrtf(dx * dx + dy * dy) - pr;
+                uint8_t a = sdf_to_alpha(d);
+                if (a > 0)
+                    fb_blend_px(fb, stride, w, h, bpp, &vinfo, x, y, pill_r, pill_g, pill_b, a);
+            }
+        }
+
+        /* 2. Draw right terminal nub (crescent SVG shape, 16x28) */
+        const int nx = px + pill_w + nub_gap;
+        const int ny = py + (pill_h - CHARGER_NUB_H) / 2;
+        for (int r_y = 0; r_y < CHARGER_NUB_H; r_y++) {
+            for (int r_x = 0; r_x < CHARGER_NUB_W; r_x++) {
+                uint8_t a = charger_nub_data[r_y * CHARGER_NUB_W + r_x];
+                if (a > 0)
+                    fb_blend_px(fb, stride, w, h, bpp, &vinfo,
+                                nx + r_x, ny + r_y, pill_r, pill_g, pill_b, a);
+            }
+        }
+
+        /* 3. Format percentage digits and measure content width */
+        char num_str[8];
+        if (mode == BATTERY_SCREEN_FULL)
+            snprintf(num_str, sizeof(num_str), "100");
+        else
+            snprintf(num_str, sizeof(num_str), "%d", pct);
+
+        int len = (int)strlen(num_str);
+        int kern = (len >= 3) ? 1 : 2;
+        int digits_w = 0;
+        for (int i = 0; i < len; i++) {
+            int d = num_str[i] - '0';
+            if (d < 0 || d > 9) continue;
+            digits_w += charger_digit_glyphs[d].w;
+            if (i + 1 < len) digits_w += kern;
+        }
+
+        int icon_w = 0;
+        int icon_gap = 0;
+        if (mode == BATTERY_SCREEN_CHARGING) {
+            icon_w = 16;
+            icon_gap = 3;
+        } else if (mode == BATTERY_SCREEN_LOW) {
+            icon_w = 6;
+            icon_gap = 10;
+        }
+
+        int content_w = digits_w + (icon_w ? (icon_gap + icon_w) : 0);
+        int cur_x = px + (pill_w - content_w) / 2;
+
+        /* 4. Blit anti-aliased digits */
+        for (int i = 0; i < len; i++) {
+            int d = num_str[i] - '0';
+            if (d < 0 || d > 9) continue;
+            const struct charger_glyph *g = &charger_digit_glyphs[d];
+            int gy0 = py + (pill_h - (int)g->h) / 2;
+            for (int r_y = 0; r_y < (int)g->h; r_y++) {
+                for (int r_x = 0; r_x < (int)g->w; r_x++) {
+                    uint8_t a = g->alpha[r_y * g->w + r_x];
+                    if (a > 0)
+                        fb_blend_px(fb, stride, w, h, bpp, &vinfo,
+                                    cur_x + r_x, gy0 + r_y, fg_r, fg_g, fg_b, a);
+                }
+            }
+            cur_x += (int)g->w + kern;
+        }
+
+        /* 5. Draw bolt or exclamation icon */
+        if (mode == BATTERY_SCREEN_CHARGING) {
+            int ix = cur_x - kern + icon_gap;
+            int iy = py + (pill_h - 23) / 2;
+            draw_bolt_icon(fb, stride, w, h, bpp, &vinfo, ix, iy, fg_r, fg_g, fg_b);
+        } else if (mode == BATTERY_SCREEN_LOW) {
+            int ix = cur_x - kern + icon_gap;
+            int iy = py + (pill_h - 21) / 2;
+            draw_exclamation_icon(fb, stride, w, h, bpp, &vinfo, ix, iy, fg_r, fg_g, fg_b);
+        }
+
+        vinfo.xoffset = 0;
+        vinfo.yoffset = 0;
+        ioctl(fd, FBIOPAN_DISPLAY, &vinfo);
+        munmap(fb, map_len);
+    }
+
+    close(fd);
+    current_displayed_screen[0] = '\0';
+}
+
+static void battery_mode_enable_keypad_wakeup(void)
+{
+    write_sysfs("/sys/devices/platform/mtk-kpd/power/wakeup", "enabled\n");
+    for (int i = 0; i < 16; i++) {
+        char path[96];
+        snprintf(path, sizeof(path), "/sys/class/input/event%d/device/power/wakeup", i);
+        write_sysfs(path, "enabled\n");
+    }
+}
+
+static void battery_mode_enter_sleep(int allow_full_mem_suspend)
+{
+    write_sysfs("/sys/class/leds/lcd-backlight/brightness", "0\n");
+    write_sysfs("/proc/tpd_keys_enable", "0\n");
+    battery_mode_enable_keypad_wakeup();
+    if (allow_full_mem_suspend) {
+        write_sysfs("/sys/power/wake_unlock", "rockbox_active\n");
+        write_sysfs("/sys/power/wake_unlock", "y1play\n");
+    } else {
+        /* Keep wakelock held while USB/charger is connected so kernel enters
+         * early_suspend (LCD/touch/GPU off + SPM deep idle) without a USB
+         * full-mem-suspend crash/reboot on MT6572. */
+        write_sysfs("/sys/power/wake_lock", "rockbox_active\n");
+    }
+    write_sysfs("/sys/power/state", "mem\n");
+}
+
+static void battery_mode_wake_display(int pct, int mode)
+{
+    write_sysfs("/sys/power/wake_lock", "rockbox_active\n");
+    write_sysfs("/sys/power/state", "on\n");
+    usleep(120000);
+    draw_battery_screen(pct, mode);
+    usleep(15000);
+    write_sysfs("/sys/class/leds/lcd-backlight/brightness", "128\n");
+}
+
+static int open_battery_input_fds(int fds[16])
+{
+    int count = 0;
+    for (int i = 0; i < 16; i++) {
+        char p[32];
+        snprintf(p, sizeof(p), "/dev/input/event%d", i);
+        fds[i] = open(p, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+        if (fds[i] >= 0) {
+            char name[64] = {0};
+            if (ioctl(fds[i], EVIOCGNAME(sizeof(name) - 1), name) >= 0 &&
+                (strstr(name, "ACCDET") || strstr(name, "accdet"))) {
+                close(fds[i]);
+                fds[i] = -1;
+                continue;
+            }
+            count++;
+        }
+    }
+    return count;
+}
+
+static void close_battery_input_fds(int fds[16])
+{
+    for (int i = 0; i < 16; i++) {
+        if (fds[i] >= 0) {
+            close(fds[i]);
+            fds[i] = -1;
+        }
+    }
+}
+
+/* Forward declaration so low-battery mode can seamlessly transition to charger mode */
+static int run_charger_mode(void);
+
+/*
+ * Off-mode charging loop (MT6572 KPOC).
+ * Returns 1 if user held Play/Pause or Power to boot into the OS (with battery >= 5%).
+ * Powers off the device if the charger is unplugged.
+ */
+static int run_charger_mode(void)
+{
+    log_line("[charger] Entering off-mode charging screen.\n");
+    optimize_power_and_battery();
+    apply_powersave_cpu();
+    write_sysfs("/sys/class/rfkill/rfkill0/state", "0\n");
+    write_sysfs("/sys/class/rfkill/rfkill1/state", "0\n");
+    battery_mode_enable_keypad_wakeup();
+
+    int fds[16];
+    open_battery_input_fds(fds);
+
+    int pct = read_battery_percent();
+    if (pct < 0) pct = 0;
+    int screen_mode = is_battery_full(pct) ? BATTERY_SCREEN_FULL : BATTERY_SCREEN_CHARGING;
+    int last_pct = pct;
+    int last_mode = screen_mode;
+
+    battery_mode_wake_display(pct, screen_mode);
+    int screen_on = 1;
+    uint64_t start_ms = hotkey_monotonic_ms();
+    uint64_t screen_on_since = start_ms;
+    int boot_key_held = 0;
+    uint64_t boot_key_since = 0;
+    int saw_charger_online = is_charger_online();
+    uint64_t unplugged_since = 0;
+
+    while (1) {
+        struct pollfd pfds[16];
+        int map[16];
+        nfds_t n = 0;
+        for (int i = 0; i < 16; i++) {
+            if (fds[i] >= 0) {
+                pfds[n].fd = fds[i];
+                pfds[n].events = POLLIN;
+                pfds[n].revents = 0;
+                map[n] = i;
+                n++;
+            }
+        }
+
+        int timeout_ms = screen_on ? 250 : 2000;
+        int rc = (n > 0) ? poll(pfds, n, timeout_ms) : (usleep((useconds_t)timeout_ms * 1000), 0);
+        uint64_t now = hotkey_monotonic_ms();
+
+        int woke_by_input = 0;
+        if (rc > 0) {
+            for (nfds_t k = 0; k < n; k++) {
+                if (!(pfds[k].revents & POLLIN)) continue;
+                int dev = map[k];
+                struct input_event ev;
+                while (read(fds[dev], &ev, sizeof(ev)) == sizeof(ev)) {
+                    if (ev.type != EV_KEY) continue;
+                    int is_boot_key = (ev.code == KEY_PLAYPAUSE || ev.code == KEY_PLAY ||
+                                       ev.code == 119 || ev.code == KEY_POWER);
+                    if (ev.value == 1) {
+                        woke_by_input = 1;
+                        if (is_boot_key && !boot_key_held) {
+                            boot_key_held = 1;
+                            boot_key_since = now;
+                        }
+                    } else if (ev.value == 0) {
+                        if (is_boot_key)
+                            boot_key_held = 0;
+                    }
+                }
+            }
+        }
+
+        /* Check if charger was unplugged.
+         * Wait at least 8s after entering KPOC (or until charger sysfs reports online once)
+         * and require 2.5s of continuous offline status before powering off, because MT6572
+         * mt_battery/USB BC1.2 detection can report offline briefly at boot and calling
+         * RB_POWER_OFF while VBUS is still present causes the MT6323 PMIC to reboot! */
+        if (is_charger_online()) {
+            saw_charger_online = 1;
+            unplugged_since = 0;
+        } else if (saw_charger_online || (now - start_ms >= 8000ULL)) {
+            if (unplugged_since == 0) {
+                unplugged_since = now;
+            } else if (now - unplugged_since >= 2500ULL) {
+                log_line("[charger] Charger unplugged; powering off.\n");
+                close_battery_input_fds(fds);
+                write_sysfs("/sys/class/leds/lcd-backlight/brightness", "0\n");
+                sync();
+                reboot(RB_POWER_OFF);
+                while (1) sleep(1);
+            }
+        }
+
+        pct = read_battery_percent();
+        if (pct < 0) pct = last_pct;
+        screen_mode = is_battery_full(pct) ? BATTERY_SCREEN_FULL : BATTERY_SCREEN_CHARGING;
+
+        /* Hold Play/Pause or Power for 2.5s to boot into OS */
+        if (boot_key_held && (now - boot_key_since >= 2500ULL)) {
+            if (pct >= 5) {
+                log_line("[charger] Boot key held; continuing normal boot.\n");
+                write_sysfs("/sys/class/timed_output/vibrator/enable", "35\n");
+                close_battery_input_fds(fds);
+                write_sysfs("/sys/power/wake_lock", "rockbox_active\n");
+                write_sysfs("/sys/power/state", "on\n");
+                return 1;
+            } else {
+                /* Too low to boot yet: flash low battery indicator */
+                if (!screen_on) {
+                    battery_mode_wake_display(pct, BATTERY_SCREEN_LOW);
+                    screen_on = 1;
+                } else {
+                    draw_battery_screen(pct, BATTERY_SCREEN_LOW);
+                }
+                last_mode = BATTERY_SCREEN_LOW;
+                screen_on_since = now;
+                boot_key_held = 0;
+            }
+        }
+
+        if (woke_by_input) {
+            if (!screen_on) {
+                battery_mode_wake_display(pct, screen_mode);
+                screen_on = 1;
+                last_pct = pct;
+                last_mode = screen_mode;
+            }
+            screen_on_since = now;
+        }
+
+        if (screen_on) {
+            if (pct != last_pct || screen_mode != last_mode) {
+                draw_battery_screen(pct, screen_mode);
+                last_pct = pct;
+                last_mode = screen_mode;
+            }
+            if (!boot_key_held && (now - screen_on_since >= 6000ULL)) {
+                screen_on = 0;
+                battery_mode_enter_sleep(0);
+            }
+        }
+    }
+}
+
+/*
+ * Low-battery (<5%) low-power idle state.
+ * Shows the red low-battery screen briefly, then enters mem suspend.
+ * Wakes on any button press to show the low-battery screen again, then returns to sleep.
+ * If a charger is plugged in, transitions smoothly into run_charger_mode().
+ */
+static int run_low_battery_mode(void)
+{
+    log_line("[power] Entering low-battery (<5%%) idle state.\n");
+    optimize_power_and_battery();
+    apply_powersave_cpu();
+    write_sysfs("/sys/class/android_usb/android0/enable", "0\n");
+    write_sysfs("/sys/class/rfkill/rfkill0/state", "0\n");
+    write_sysfs("/sys/class/rfkill/rfkill1/state", "0\n");
+    battery_mode_enable_keypad_wakeup();
+
+    int fds[16];
+    open_battery_input_fds(fds);
+
+    int pct = read_battery_percent();
+    if (pct < 0) pct = 0;
+
+    battery_mode_wake_display(pct, BATTERY_SCREEN_LOW);
+    int screen_on = 1;
+    uint64_t screen_on_since = hotkey_monotonic_ms();
+    int last_pct = pct;
+
+    while (1) {
+        struct pollfd pfds[16];
+        int map[16];
+        nfds_t n = 0;
+        for (int i = 0; i < 16; i++) {
+            if (fds[i] >= 0) {
+                pfds[n].fd = fds[i];
+                pfds[n].events = POLLIN;
+                pfds[n].revents = 0;
+                map[n] = i;
+                n++;
+            }
+        }
+
+        int timeout_ms = screen_on ? 250 : 5000;
+        int rc = (n > 0) ? poll(pfds, n, timeout_ms) : (usleep((useconds_t)timeout_ms * 1000), 0);
+        uint64_t now = hotkey_monotonic_ms();
+
+        int woke_by_input = 0;
+        if (rc > 0) {
+            for (nfds_t k = 0; k < n; k++) {
+                if (!(pfds[k].revents & POLLIN)) continue;
+                int dev = map[k];
+                struct input_event ev;
+                while (read(fds[dev], &ev, sizeof(ev)) == sizeof(ev)) {
+                    if (ev.type == EV_KEY && ev.value == 1)
+                        woke_by_input = 1;
+                }
+            }
+        }
+
+        /* If user plugged in a charger, switch to off-mode charging screen */
+        if (is_charger_online()) {
+            log_line("[power] Charger detected in low-battery idle; switching to charger mode.\n");
+            close_battery_input_fds(fds);
+            return run_charger_mode();
+        }
+
+        pct = read_battery_percent();
+        if (pct < 0) pct = last_pct;
+
+        /* Protect Li-Po cell from deep over-discharge at critical empty */
+        int mv = read_battery_voltage_mv();
+        if (pct == 0 && mv > 0 && mv < 3350) {
+            log_line("[power] Critical empty battery voltage; powering off.\n");
+            close_battery_input_fds(fds);
+            write_sysfs("/sys/class/leds/lcd-backlight/brightness", "0\n");
+            sync();
+            reboot(RB_POWER_OFF);
+            while (1) sleep(1);
+        }
+
+        if (woke_by_input) {
+            if (!screen_on) {
+                battery_mode_wake_display(pct, BATTERY_SCREEN_LOW);
+                screen_on = 1;
+                last_pct = pct;
+            }
+            screen_on_since = now;
+        }
+
+        if (screen_on) {
+            if (pct != last_pct) {
+                draw_battery_screen(pct, BATTERY_SCREEN_LOW);
+                last_pct = pct;
+            }
+            if (now - screen_on_since >= 4000ULL) {
+                screen_on = 0;
+                battery_mode_enter_sleep(1);
+            }
+        }
+    }
+}
+
 int main(int argc, char *argv[])
 {
     (void)argc; (void)argv;
@@ -3321,12 +4009,41 @@ int main(int argc, char *argv[])
 
     mkdir("/dev/pts", 0755);
     mount("devpts", "/dev/pts", "devpts", 0, NULL);
+    if (access("/dev/ptmx", F_OK) != 0)
+        mknod("/dev/ptmx", S_IFCHR | 0666, makedev(5, 2));
+    chmod("/dev/ptmx", 0666);
 
     /* 2. Create device nodes & enable touch keys early */
     make_device_nodes();
     clear_android_bcb();
     enable_touch_keys();
-    start_play_shutdown_watchdog();
+    /* Start unified 0%-CPU hotkey daemon early (handles 10s Play/Pause hard shutdown
+     * and MENU+Play screenshot with poll(-1) — replaces redundant 500ms watchdog) */
+    start_global_hotkey_monitor();
+
+    /* 2b. Off-mode charging (MT6572 KPOC) & low-battery (<5%) boot guard */
+    if (is_charger_boot_mode()) {
+        if (!run_charger_mode()) {
+            write_sysfs("/sys/class/leds/lcd-backlight/brightness", "0\n");
+            sync();
+            reboot(RB_POWER_OFF);
+            while (1) sleep(1);
+        }
+        boost_cpu_for_boot();
+        enable_touch_keys();
+    } else if (!is_charger_online()) {
+        int boot_batt = read_battery_percent();
+        if (boot_batt >= 0 && boot_batt < 5) {
+            if (!run_low_battery_mode()) {
+                write_sysfs("/sys/class/leds/lcd-backlight/brightness", "0\n");
+                sync();
+                reboot(RB_POWER_OFF);
+                while (1) sleep(1);
+            }
+            boost_cpu_for_boot();
+            enable_touch_keys();
+        }
+    }
 
     int menu_held = is_menu_button_held_at_boot();
 
@@ -3391,9 +4108,6 @@ int main(int argc, char *argv[])
         sync();
         reboot_to_android();
     }
-
-    /* Start global hotkey daemon (10s Play/Pause hard shutdown + MENU+Play screenshot) */
-    start_global_hotkey_monitor();
 
     /* Bootloader Menu check:
      * Holding MENU while booting will always show this menu, regardless of disablement.
@@ -3493,7 +4207,79 @@ int main(int argc, char *argv[])
         int crashed = 0;
         if (rb_pid > 0) {
             int status = 0;
-            waitpid(rb_pid, &status, 0);
+            int low_batt_strikes = 0;
+            int low_batt_triggered = 0;
+            while (1) {
+                pid_t wr = waitpid(rb_pid, &status, WNOHANG);
+                if (wr == rb_pid || (wr < 0 && errno != EINTR))
+                    break;
+                int sleep_sec = 60;
+                if (!is_charger_online()) {
+                    int bp = read_battery_percent();
+                    if (bp >= 0 && bp < 5) {
+                        low_batt_strikes++;
+                        sleep_sec = 5;
+                        if (low_batt_strikes >= 2) {
+                            low_batt_triggered = 1;
+                            break;
+                        }
+                    } else {
+                        low_batt_strikes = 0;
+                        if (bp >= 0 && bp <= 15)
+                            sleep_sec = 10;
+                    }
+                } else {
+                    low_batt_strikes = 0;
+                }
+                sleep((unsigned int)sleep_sec);
+            }
+
+            if (low_batt_triggered) {
+                log_line("CRITICAL: Battery below 5%! Exiting all apps and entering low-battery idle...\n");
+                kill(rb_pid, SIGTERM);
+                for (int w = 0; w < 30; w++) {
+                    if (waitpid(rb_pid, &status, WNOHANG) == rb_pid)
+                        break;
+                    usleep(100000);
+                }
+                if (kill(rb_pid, 0) == 0) {
+                    kill(rb_pid, SIGKILL);
+                    waitpid(rb_pid, &status, 0);
+                }
+                write_sysfs("/sys/class/android_usb/android0/enable", "0\n");
+                write_sysfs("/sys/class/rfkill/rfkill0/state", "0\n");
+                write_sysfs("/sys/class/rfkill/rfkill1/state", "0\n");
+                sync();
+
+                if (run_low_battery_mode()) {
+                    boost_cpu_for_boot();
+                    enable_touch_keys();
+                    display_screen("boot");
+                    last_screen = "boot";
+                    continue;
+                }
+                write_sysfs("/sys/class/leds/lcd-backlight/brightness", "0\n");
+                sync();
+                reboot(RB_POWER_OFF);
+                while (1) sleep(1);
+            }
+
+            if (access("/tmp/configapp_switching", F_OK) == 0) {
+                unlink("/tmp/configapp_switching");
+                FILE *lf = fopen("/tmp/configapp_launch", "r");
+                if (lf) {
+                    if (fgets(custom_app_override, sizeof(custom_app_override), lf)) {
+                        size_t len = strlen(custom_app_override);
+                        while (len > 0 && (custom_app_override[len - 1] == '\n' ||
+                                           custom_app_override[len - 1] == '\r'))
+                            custom_app_override[--len] = '\0';
+                    }
+                    fclose(lf);
+                    unlink("/tmp/configapp_launch");
+                }
+                log_line("Software switch requested by ConfigApp; launching next app...\n");
+                continue;
+            }
 
             char crash_msg[128];
             if (WIFSIGNALED(status)) {

@@ -290,7 +290,7 @@ static void scale_stereo_pcm(int16_t *buf, size_t frames, int scale_q12)
     }
 }
 
-#define PCM_OUT_FRAMES 32768 /* Stereo int16 sample pairs (~743ms @ 44.1kHz) */
+#define PCM_OUT_FRAMES 65536 /* Stereo int16 sample pairs (~1.48s @ 44.1kHz) */
 #define PCM_OUT_MASK   (PCM_OUT_FRAMES - 1)
 
 static pthread_mutex_t g_out_mtx = PTHREAD_MUTEX_INITIALIZER;
@@ -450,7 +450,7 @@ static void *audio_output_worker(void *arg)
         }
 
         if (!dma_active) {
-            y1_audio_set_deep_idle(false);
+            y1_audio_set_deep_idle(true);
             y1_audio_wake_lock(true);
             dma_active = true;
         }

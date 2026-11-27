@@ -113,6 +113,32 @@ static void read_active_scheduler(const char *path, char *out, size_t out_sz)
     }
 }
 
+static bool read_usb_perf_tune_setting(void)
+{
+    static const char * const paths[] = {
+        "/mnt/sdcard/.system/configapp/settings.conf",
+        "/.system/configapp/settings.conf",
+        NULL
+    };
+    for (int i = 0; paths[i]; i++) {
+        FILE *f = fopen(paths[i], "r");
+        if (!f)
+            continue;
+        char line[128];
+        while (fgets(line, sizeof(line), f)) {
+            char key[64];
+            int val = 0;
+            if (sscanf(line, "%63[^=]=%d", key, &val) == 2 &&
+                strcmp(key, "usb_perf_tune") == 0) {
+                fclose(f);
+                return val != 0;
+            }
+        }
+        fclose(f);
+    }
+    return true;
+}
+
 void y1_usb_tune_performance(bool enable)
 {
     static const char * const sched_path = "/sys/block/mmcblk1/queue/scheduler";
@@ -248,7 +274,7 @@ bool y1_usb_is_serial_active(void)
 {
     char buf[64];
     if (y1_sysfs_read("/sys/class/android_usb/android0/functions", buf, sizeof(buf))) {
-        if (strstr(buf, "acm") != NULL)
+        if (strstr(buf, "acm") != NULL || strstr(buf, "adb") != NULL)
             return true;
     }
     return false;
@@ -449,7 +475,7 @@ bool y1_usb_attach_mass_storage(void)
     g_pre_usb_sys_hash = compute_sys_tree_hash();
     g_pre_usb_sys_valid = true;
 
-    y1_usb_tune_performance(true);
+    y1_usb_tune_performance(read_usb_perf_tune_setting());
     write_usb_line("/sys/class/android_usb/android0/enable", "1");
     storage_attached = true;
     return true;

@@ -49,11 +49,11 @@ enum screen_id {
 
 static int  g_lang = 0;
 static int  g_dark_mode = 0;
-static int  g_brightness = 65;
+static int  g_brightness = 50;
 static int  g_vol_step = 5;            /* 1, 2, 5, 10 */
 static int  g_seek_sec = 10;           /* 5, 10, 15, 30 */
 static int  g_use_ipod_db = 1;         /* 1 = iPod DB, 0 = Normal Files */
-static int  g_screen_timeout_sec = 30; /* 15, 30, 60, 120, 0 (Never) */
+static int  g_screen_timeout_sec = 15; /* 15, 30, 60, 120, 0 (Never) */
 static int  g_safe_vol_enabled = 1;    /* 1 = Warn > 60 dB, 0 = Off */
 static bool g_should_exit = false;
 
@@ -3104,7 +3104,7 @@ static void handle_non_select_button(uint32_t btn, int ev_value)
     if (btn == Y1_BTN_SCROLL_FWD || btn == Y1_BTN_SCROLL_BACK) {
         int dir = (btn == Y1_BTN_SCROLL_FWD) ? 1 : -1;
         uint64_t tnow = now_ms();
-        if (dir == g_scroll_last_dir && (tnow - g_scroll_last_ms) <= 130)
+        if (dir == g_scroll_last_dir && (tnow - g_scroll_last_ms) <= 95)
             g_scroll_fast_streak++;
         else
             g_scroll_fast_streak = 1;
@@ -3112,7 +3112,7 @@ static void handle_non_select_button(uint32_t btn, int ev_value)
         g_scroll_last_ms = tnow;
 
         if (screen_is_abc_sortable(g_screen) && total >= 20 &&
-            (g_abc_active || g_scroll_fast_streak >= 8)) {
+            (g_abc_active || g_scroll_fast_streak >= 16)) {
             g_abc_active = true;
             g_abc_until_ms = tnow + 1100;
             char cur_l[8] = "";
@@ -3187,7 +3187,7 @@ int main(void)
     uint64_t last_hw_poll_ms = 0;
     uint64_t last_resume_save_ms = now_ms();
     g_last_activity_ms = now_ms();
-    g_usb_was_online = y1_power_usb_online();
+    g_usb_was_online = y1_power_usb_data_online();
     g_jack_was_inserted = y1_jack_is_inserted();
     g_cached_bat_pct = y1_battery_percent();
     g_cached_bat_chg = y1_battery_is_charging();
@@ -3200,8 +3200,8 @@ int main(void)
         if (tnow - last_hw_poll_ms >= 1000) {
             last_hw_poll_ms = tnow;
 
-            bool usb_now = y1_power_usb_online();
-            if (usb_now && !g_usb_was_online) {
+            bool usb_now = y1_power_usb_data_online();
+            if (usb_now && !g_usb_was_online && !y1_usb_is_serial_active()) {
                 g_usb_charge_only = false;
                 enter_usb_mode();
                 dirty = true;
@@ -3345,8 +3345,8 @@ int main(void)
             dirty = true;
         }
 
-        /* Periodic resume-position save while playing (every 30s to avoid SD card stuttering) */
-        if (st.playing && (tnow - last_resume_save_ms >= 30000)) {
+        /* Periodic resume-position save while playing (every 3 min to keep MicroSD asleep) */
+        if (st.playing && (tnow - last_resume_save_ms >= 180000)) {
             last_resume_save_ms = tnow;
             save_resume_state();
         }
@@ -3369,15 +3369,15 @@ int main(void)
         if (g_mfb_clicks > 0)
             wait_ms = 40;
         else if (g_screen_off)
-            wait_ms = st.playing ? 500 : 1000;
+            wait_ms = st.playing ? 1000 : 5000;
         else if (dirty || anim_pending)
             wait_ms = (last_render_dur_ms < 15) ? (16 - (int)last_render_dur_ms) : 1;
         else if (home_art_anim)
             wait_ms = (last_render_dur_ms < 49) ? (50 - (int)last_render_dur_ms) : 1;
         else if (st.playing && g_screen == SCR_NOW_PLAYING)
-            wait_ms = 250;
-        else
             wait_ms = 500;
+        else
+            wait_ms = 1000;
 
         /* 1. Poll & drain ALL pending input events */
         struct y1_input_event ev;
@@ -3594,8 +3594,16 @@ int main(void)
             dirty = true;
         }
 
-        if (dirty || animating || tnow < g_vol_hud_until_ms || tnow < g_toast_until_ms ||
-            (g_screen == SCR_PHOTO_VIEW && tnow < g_photo_zoom_hud_ms)) {
+        /* Event-driven HUD/toast expiry: redraw once when overlay hides instead of 60 FPS while visible */
+        static bool last_hud_visible = false;
+        bool hud_visible = (tnow < g_vol_hud_until_ms || tnow < g_toast_until_ms ||
+                            (g_screen == SCR_PHOTO_VIEW && tnow < g_photo_zoom_hud_ms));
+        if (hud_visible != last_hud_visible) {
+            last_hud_visible = hud_visible;
+            dirty = true;
+        }
+
+        if (dirty || animating) {
             uint64_t rf0 = now_ms();
             player_get_status(&st);
             render_current_frame(&st);

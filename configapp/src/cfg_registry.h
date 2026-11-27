@@ -7,6 +7,7 @@
 
 enum cfg_item_type {
     CFG_TYPE_TOGGLE = 0,
+    CFG_TYPE_TRISTATE,
     CFG_TYPE_CHOICE,
     CFG_TYPE_INT,
     CFG_TYPE_INFO,

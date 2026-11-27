@@ -174,19 +174,33 @@ int y1_battery_percent(void)
 
 int y1_battery_voltage_mv(void)
 {
-    int uv = 0;
-    if (y1_sysfs_read_int("/sys/class/power_supply/battery/voltage_now", &uv)) {
-        /* MT6572 battery driver reports either millivolts or microvolts depending on node */
-        return (uv > 10000) ? (uv / 1000) : uv;
-    }
+    int v = 0;
+    /* MT6572 kernel 3.4 exposes batt_vol in mV; fallback to standard voltage_now (uV or mV) and ADC */
+    if (y1_sysfs_read_int("/sys/class/power_supply/battery/batt_vol", &v) && v > 0)
+        return (v > 10000) ? (v / 1000) : v;
+    if (y1_sysfs_read_int("/sys/class/power_supply/battery/voltage_now", &v) && v > 0)
+        return (v > 10000) ? (v / 1000) : v;
+    if (y1_sysfs_read_int("/sys/devices/platform/battery/ADC_BAT_SENSE", &v) && v > 0)
+        return (v > 10000) ? (v / 1000) : v;
     return 0;
 }
 
 int y1_battery_current_ma(void)
 {
-    int ua = 0;
-    if (y1_sysfs_read_int("/sys/class/power_supply/battery/current_now", &ua)) {
-        return ua / 1000;
+    int cur = 0;
+    /* MT6572 fuel gauge nodes: BatteryAverageCurrent / batt_current / FG_Battery_CurrentConsumption */
+    if (y1_sysfs_read_int("/sys/class/power_supply/battery/BatteryAverageCurrent", &cur)) {
+        return (cur > 5000 || cur < -5000) ? (cur / 1000) : cur;
+    }
+    if (y1_sysfs_read_int("/sys/class/power_supply/battery/batt_current", &cur)) {
+        return (cur > 5000 || cur < -5000) ? (cur / 1000) : cur;
+    }
+    if (y1_sysfs_read_int("/sys/class/power_supply/battery/current_now", &cur)) {
+        return (cur > 5000 || cur < -5000) ? (cur / 1000) : cur;
+    }
+    if (y1_sysfs_read_int("/sys/devices/platform/battery/FG_Battery_CurrentConsumption", &cur)) {
+        /* MT6572 fuel gauge reports 0.1 mA units */
+        return cur / 10;
     }
     return 0;
 }
@@ -205,6 +219,14 @@ bool y1_power_usb_online(void)
     int present = 0;
     if (y1_sysfs_read_int("/sys/class/power_supply/ac/online", &present) && present > 0)
         return true;
+    if (y1_sysfs_read_int("/sys/class/power_supply/usb/online", &present) && present > 0)
+        return true;
+    return false;
+}
+
+bool y1_power_usb_data_online(void)
+{
+    int present = 0;
     if (y1_sysfs_read_int("/sys/class/power_supply/usb/online", &present) && present > 0)
         return true;
     return false;

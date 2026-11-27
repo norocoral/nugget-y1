@@ -675,9 +675,17 @@ if [[ "$BUILD_ROCKBOX" -eq 1 ]]; then
         mkdir -p "$ROCKBOX_WORK_SRC/vendor/liby1/include" "$ROCKBOX_WORK_SRC/vendor/liby1/src"
         cp -ru "$SCRIPT_DIR/liby1/include/"* "$ROCKBOX_WORK_SRC/vendor/liby1/include/" 2>/dev/null || cp -rf "$SCRIPT_DIR/liby1/include/"* "$ROCKBOX_WORK_SRC/vendor/liby1/include/"
         cp -ru "$SCRIPT_DIR/liby1/src/"* "$ROCKBOX_WORK_SRC/vendor/liby1/src/" 2>/dev/null || cp -rf "$SCRIPT_DIR/liby1/src/"* "$ROCKBOX_WORK_SRC/vendor/liby1/src/"
+        if [[ -d "$SCRIPT_DIR/liby1/third_party" ]]; then
+            mkdir -p "$ROCKBOX_WORK_SRC/vendor/liby1/third_party"
+            cp -ru "$SCRIPT_DIR/liby1/third_party/"* "$ROCKBOX_WORK_SRC/vendor/liby1/third_party/" 2>/dev/null || cp -rf "$SCRIPT_DIR/liby1/third_party/"* "$ROCKBOX_WORK_SRC/vendor/liby1/third_party/"
+        fi
         if [[ "$ROCKBOX_WORK_SRC" != "$ROCKBOX_SRC" && -d "$ROCKBOX_SRC/vendor/liby1" ]]; then
             cp -ru "$SCRIPT_DIR/liby1/include/"* "$ROCKBOX_SRC/vendor/liby1/include/" 2>/dev/null || true
             cp -ru "$SCRIPT_DIR/liby1/src/"* "$ROCKBOX_SRC/vendor/liby1/src/" 2>/dev/null || true
+            if [[ -d "$SCRIPT_DIR/liby1/third_party" ]]; then
+                mkdir -p "$ROCKBOX_SRC/vendor/liby1/third_party"
+                cp -ru "$SCRIPT_DIR/liby1/third_party/"* "$ROCKBOX_SRC/vendor/liby1/third_party/" 2>/dev/null || true
+            fi
         fi
     fi
 

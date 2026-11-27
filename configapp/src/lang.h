@@ -433,5 +433,15 @@ static const char *ampm_choices_ko[] = { "오전", "오후" };
 #define STR_NO_KO "아니오"
 #define STR_YES_EN "Yes"
 #define STR_YES_KO "예"
+#define STR_ADB_DAEMON_EN "ADB Debug"
+#define STR_ADB_DAEMON_KO "ADB 디버그"
+#define STR_ADB_DESC_EN "Enable USB ADB shell & push"
+#define STR_ADB_DESC_KO "USB ADB 셸 및 파일 전송"
+#define STR_ADB_STARTED_EN "ADB enabled"
+#define STR_ADB_STARTED_KO "ADB 활성화됨"
+#define STR_ADB_STOPPED_EN "ADB disabled"
+#define STR_ADB_STOPPED_KO "ADB 비활성화됨"
+#define STR_ADB_NOT_FOUND_EN "/sbin/adbd not found"
+#define STR_ADB_NOT_FOUND_KO "/sbin/adbd 없음"
 
 #endif

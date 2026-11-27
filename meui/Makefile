@@ -6,7 +6,7 @@ LIBY1_DIR  := ../liby1
 STAGE_DIR  ?= ../dist/rockbox_sdcard
 FFMPEG_DIR := third_party/ffmpeg_arm_static
 CFLAGS     := -O2 -Wall -Wextra -I$(LIBY1_DIR)/include -Ithird_party -I$(FFMPEG_DIR)/include
-LDFLAGS    := $(LIBY1_DIR)/build/liby1.a $(FFMPEG_DIR)/lib/libavformat.a $(FFMPEG_DIR)/lib/libavcodec.a $(FFMPEG_DIR)/lib/libswresample.a $(FFMPEG_DIR)/lib/libavutil.a -lpthread -lm
+LDFLAGS    := $(LIBY1_DIR)/build/liby1.a $(LIBY1_DIR)/third_party/fdk-aac/lib/libfdk-aac.a $(FFMPEG_DIR)/lib/libavformat.a $(FFMPEG_DIR)/lib/libavcodec.a $(FFMPEG_DIR)/lib/libswresample.a $(FFMPEG_DIR)/lib/libavutil.a -lpthread -lm
 
 TARGET    := build/meui
 SRCS      := src/main.c src/ui_gfx.c src/ipod_db.c src/audio_player.c src/album_art.c src/photos.c

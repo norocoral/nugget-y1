@@ -2,6 +2,7 @@
 #include "cfg_registry.h"
 #include "hangul_ime.h"
 #include "lang.h"
+#include "zmodem.h"
 #include "liby1.h"
 
 #include <stdio.h>
@@ -21,7 +22,10 @@
 #include <sys/statvfs.h>
 #include <sys/utsname.h>
 #include <sys/wait.h>
+#include <sys/mman.h>
+#include <sys/mount.h>
 #include <sys/sysmacros.h>
+#include <sys/klog.h>
 #include <linux/rtc.h>
 #include <linux/fb.h>
 
@@ -134,12 +138,18 @@ static void apply_all_settings(void)
 {
     gfx_set_dark_mode(g_cfg.dark_mode != 0);
     y1_backlight_set_percent(g_cfg.brightness_pct);
-    y1_fb_set_eco_mode(g_cfg.eco_mode != 0);
-    y1_input_set_touch_scanning(g_cfg.touch_scan != 0);
-    y1_cpu_set_mode(g_cfg.cpu_mode);
-    y1_cpu_set_dual_core(g_cfg.dual_core != 0);
-    y1_usb_set_ipod_mode(g_cfg.usb_ipod_mode != 0);
-    y1_usb_tune_performance(g_cfg.usb_perf_tune != 0);
+    if (g_cfg.eco_mode != 1)
+        y1_fb_set_eco_mode(g_cfg.eco_mode == 2);
+    if (g_cfg.touch_scan != 1)
+        y1_input_set_touch_scanning(g_cfg.touch_scan == 2);
+    if (g_cfg.dual_core != 1)
+        y1_cpu_set_dual_core(g_cfg.dual_core == 2);
+    if (g_cfg.cpu_mode >= 0)
+        y1_cpu_set_mode(g_cfg.cpu_mode);
+    if (g_cfg.usb_ipod_mode != 1)
+        y1_usb_set_ipod_mode(g_cfg.usb_ipod_mode == 2);
+    if (y1_usb_is_storage_attached())
+        y1_usb_tune_performance(g_cfg.usb_perf_tune != 0);
     y1_log_set_enabled(g_cfg.debug_log != 0);
 }
 
@@ -325,17 +335,19 @@ static void set_brightness(int v)
 static int get_eco_mode(void) { return g_cfg.eco_mode; }
 static void set_eco_mode(int v)
 {
-    g_cfg.eco_mode = v ? 1 : 0;
-    y1_fb_set_eco_mode(g_cfg.eco_mode != 0);
+    g_cfg.eco_mode = (v < 0) ? 0 : (v > 2 ? 2 : v);
     save_settings_conf();
+    if (g_cfg.eco_mode != 1)
+        y1_fb_set_eco_mode(g_cfg.eco_mode == 2);
 }
 
 static int get_touch_scan(void) { return g_cfg.touch_scan; }
 static void set_touch_scan(int v)
 {
-    g_cfg.touch_scan = v ? 1 : 0;
-    y1_input_set_touch_scanning(g_cfg.touch_scan != 0);
+    g_cfg.touch_scan = (v < 0) ? 0 : (v > 2 ? 2 : v);
     save_settings_conf();
+    if (g_cfg.touch_scan != 1)
+        y1_input_set_touch_scanning(g_cfg.touch_scan == 2);
 }
 
 static int get_vibrate_ms(void) { return g_cfg.vibrate_ms; }
@@ -469,9 +481,8 @@ struct cfg_sw_anim {
 static struct cfg_sw_anim g_sw_anims[CFG_MAX_SW_ANIMS];
 static int g_sw_anim_next = 0;
 
-static float cfg_sw_get(int page, int idx, bool on, uint64_t tnow)
+static float cfg_sw_get(int page, int idx, float want, uint64_t tnow)
 {
-    float want = on ? 1.0f : 0.0f;
     struct cfg_sw_anim *sw = NULL;
     for (int i = 0; i < CFG_MAX_SW_ANIMS; i++) {
         if (g_sw_anims[i].valid && g_sw_anims[i].page == page && g_sw_anims[i].idx == idx) {
@@ -638,28 +649,35 @@ static void act_open_font(void)
     g_wp_open = true;
 }
 
-static int get_cpu_mode(void) { return g_cfg.cpu_mode; }
+static int get_cpu_mode(void)
+{
+    int idx = g_cfg.cpu_mode + 1;
+    return (idx < 0 || idx > 5) ? 0 : idx;
+}
 static void set_cpu_mode(int v)
 {
-    g_cfg.cpu_mode = v;
-    y1_cpu_set_mode(v);
+    g_cfg.cpu_mode = (v <= 0) ? -1 : ((v > 5) ? 4 : (v - 1));
     save_settings_conf();
+    if (g_cfg.cpu_mode >= 0)
+        y1_cpu_set_mode(g_cfg.cpu_mode);
 }
 
 static int get_dual_core(void) { return g_cfg.dual_core; }
 static void set_dual_core(int v)
 {
-    g_cfg.dual_core = v ? 1 : 0;
-    y1_cpu_set_dual_core(g_cfg.dual_core != 0);
+    g_cfg.dual_core = (v < 0) ? 0 : (v > 2 ? 2 : v);
     save_settings_conf();
+    if (g_cfg.dual_core != 1)
+        y1_cpu_set_dual_core(g_cfg.dual_core == 2);
 }
 
 static int get_screen_clamp(void) { return g_cfg.screen_off_clamp; }
 static void set_screen_clamp(int v)
 {
-    g_cfg.screen_off_clamp = v ? 1 : 0;
-    y1_cpu_set_screen_off_clamp(g_cfg.screen_off_clamp != 0);
+    g_cfg.screen_off_clamp = (v < 0) ? 0 : (v > 2 ? 2 : v);
     save_settings_conf();
+    if (g_cfg.screen_off_clamp != 1)
+        y1_cpu_set_screen_off_clamp(g_cfg.screen_off_clamp == 2);
 }
 
 static int get_dt_year(void) { if (!dt_loaded) load_datetime_from_sys(); return dt_year; }
@@ -697,16 +715,18 @@ static void info_dt_preview(char *buf, size_t len)
 static int get_usb_ipod(void) { return g_cfg.usb_ipod_mode; }
 static void set_usb_ipod(int v)
 {
-    g_cfg.usb_ipod_mode = v ? 1 : 0;
-    y1_usb_set_ipod_mode(g_cfg.usb_ipod_mode != 0);
+    g_cfg.usb_ipod_mode = (v < 0) ? 0 : (v > 2 ? 2 : v);
     save_settings_conf();
+    if (g_cfg.usb_ipod_mode != 1)
+        y1_usb_set_ipod_mode(g_cfg.usb_ipod_mode == 2);
 }
 
 static int get_usb_perf(void) { return g_cfg.usb_perf_tune; }
 static void set_usb_perf(int v)
 {
     g_cfg.usb_perf_tune = v ? 1 : 0;
-    y1_usb_tune_performance(g_cfg.usb_perf_tune != 0);
+    if (y1_usb_is_storage_attached())
+        y1_usb_tune_performance(g_cfg.usb_perf_tune != 0);
     save_settings_conf();
 }
 
@@ -851,13 +871,13 @@ static void act_reset_settings(void)
     g_cfg.lang = 0;
     g_cfg.dark_mode = 0;
     g_cfg.brightness_pct = 65;
-    g_cfg.eco_mode = 0;
+    g_cfg.eco_mode = 1;
     g_cfg.touch_scan = 1;
     g_cfg.vibrate_ms = 20;
-    g_cfg.cpu_mode = Y1_CPU_MODE_DYNAMIC;
+    g_cfg.cpu_mode = -1;
     g_cfg.dual_core = 1;
     g_cfg.screen_off_clamp = 1;
-    g_cfg.usb_ipod_mode = 0;
+    g_cfg.usb_ipod_mode = 1;
     g_cfg.usb_perf_tune = 1;
     g_cfg.debug_log = 0;
     g_cfg.bt_codec = Y1_BT_CODEC_SBC;
@@ -1095,56 +1115,473 @@ static void info_serial_ports(char *buf, size_t len)
                              : TR_ID(STR_IDLE));
 }
 
+static pid_t g_adb_pid = -1;
+static bool  g_adb_active = false;
+
+static const char *find_or_extract_adbd(void)
+{
+    static const char *cands[] = {
+        "/sbin/adbd",
+        "/mnt/sdcard/.system/bin/adbd",
+        "/mnt/sdcard/.system/adbd",
+        "/tmp/adbd",
+        NULL
+    };
+    for (int i = 0; cands[i]; i++) {
+        if (access(cands[i], F_OK) == 0) {
+            chmod(cands[i], 0755);
+            return cands[i];
+        }
+    }
+    if (access("/mnt/sdcard/.system/ramdisk_android.cpio.gz", R_OK) == 0) {
+        (void)!system("mkdir -p /tmp/adb_ext && (cd /tmp/adb_ext && gzip -dc /mnt/sdcard/.system/ramdisk_android.cpio.gz | cpio -idmu sbin/adbd 2>/dev/null) && mv /tmp/adb_ext/sbin/adbd /tmp/adbd 2>/dev/null && chmod 755 /tmp/adbd; rm -rf /tmp/adb_ext");
+        if (access("/tmp/adbd", X_OK) == 0)
+            return "/tmp/adbd";
+    }
+    return NULL;
+}
+
+static int get_adb_active(void) { return g_adb_active ? 1 : 0; }
+static void set_adb_active(int v)
+{
+    if (v && !g_adb_active) {
+        const char *adbd_bin = find_or_extract_adbd();
+        if (!adbd_bin) {
+            show_toast(TR_ID(STR_ADB_NOT_FOUND), 1400);
+            return;
+        }
+        mkdir("/dev/pts", 0755);
+        mount("devpts", "/dev/pts", "devpts", 0, NULL);
+        if (access("/dev/ptmx", F_OK) != 0)
+            mknod("/dev/ptmx", S_IFCHR | 0666, makedev(5, 2));
+        chmod("/dev/ptmx", 0666);
+
+        mkdir("/system", 0777);
+        mkdir("/system/bin", 0777);
+        if (access("/system/bin/sh", F_OK) != 0)
+            (void)!symlink("/bin/sh", "/system/bin/sh");
+
+        char dev_str[32] = {0};
+        if (y1_sysfs_read("/sys/class/misc/android_adb/dev", dev_str, sizeof(dev_str))) {
+            int maj = 0, min = 0;
+            if (sscanf(dev_str, "%d:%d", &maj, &min) == 2) {
+                unlink("/dev/android_adb");
+                mknod("/dev/android_adb", S_IFCHR | 0666, makedev(maj, min));
+            }
+        }
+
+        y1_sysfs_write("/sys/class/android_usb/android0/enable", "0\n");
+        if (g_serial_active) {
+            y1_sysfs_write("/sys/class/android_usb/android0/idVendor", "0e8d\n");
+            y1_sysfs_write("/sys/class/android_usb/android0/idProduct", "201c\n");
+            y1_sysfs_write("/sys/class/android_usb/android0/f_acm/instances", "2\n");
+            y1_sysfs_write("/sys/class/android_usb/android0/functions", "acm,adb\n");
+        } else {
+            y1_sysfs_write("/sys/class/android_usb/android0/idVendor", "18d1\n");
+            y1_sysfs_write("/sys/class/android_usb/android0/idProduct", "4e11\n");
+            y1_sysfs_write("/sys/class/android_usb/android0/functions", "adb\n");
+        }
+        y1_sysfs_write("/sys/class/android_usb/android0/bDeviceClass", "0\n");
+        y1_sysfs_write("/sys/class/android_usb/android0/bDeviceSubClass", "0\n");
+        y1_sysfs_write("/sys/class/android_usb/android0/bDeviceProtocol", "0\n");
+        y1_sysfs_write("/sys/class/android_usb/android0/enable", "1\n");
+
+        pid_t pid = fork();
+        if (pid == 0) {
+            setsid();
+            int dn = open("/dev/null", O_RDWR);
+            if (dn >= 0) { dup2(dn, 0); dup2(dn, 1); dup2(dn, 2); if (dn > 2) close(dn); }
+            execl(adbd_bin, "adbd", (char *)NULL);
+            _exit(127);
+        }
+        g_adb_pid = pid;
+        g_adb_active = true;
+        show_toast(TR_ID(STR_ADB_STARTED), 1400);
+    } else if (!v && g_adb_active) {
+        if (g_adb_pid > 0) {
+            kill(g_adb_pid, SIGTERM);
+            usleep(100000);
+            kill(g_adb_pid, SIGKILL);
+            waitpid(g_adb_pid, NULL, WNOHANG);
+            g_adb_pid = -1;
+        }
+        (void)!system("killall adbd 2>/dev/null");
+        y1_sysfs_write("/sys/class/android_usb/android0/enable", "0\n");
+        if (g_serial_active) {
+            y1_sysfs_write("/sys/class/android_usb/android0/idVendor", "0e8d\n");
+            y1_sysfs_write("/sys/class/android_usb/android0/idProduct", "2007\n");
+            y1_sysfs_write("/sys/class/android_usb/android0/f_acm/instances", "2\n");
+            y1_sysfs_write("/sys/class/android_usb/android0/functions", "acm\n");
+            y1_sysfs_write("/sys/class/android_usb/android0/enable", "1\n");
+        }
+        g_adb_active = false;
+        show_toast(TR_ID(STR_ADB_STOPPED), 1200);
+    }
+}
+
 /* =========================================================================
- * Debug Info Collector (ConfigApp Native UI)
+ * Debug Info Collector (ConfigApp Native UI + Full SD Export)
  * ========================================================================= */
-#define MAX_DBG_LINES 32
-static char g_dbg_lines[MAX_DBG_LINES][96];
+#define MAX_DBG_LINES 512
+#define MAX_DBG_LINE_LEN 256
+static char g_dbg_lines[MAX_DBG_LINES][MAX_DBG_LINE_LEN];
 static int  g_dbg_count = 0;
+
+static void dbg_add_line(const char *s)
+{
+    if (!s || g_dbg_count >= MAX_DBG_LINES)
+        return;
+    char *dst = g_dbg_lines[g_dbg_count++];
+    size_t i = 0;
+    while (s[i] && s[i] != '\r' && s[i] != '\n' && i < MAX_DBG_LINE_LEN - 1) {
+        dst[i] = (s[i] == '\t') ? ' ' : s[i];
+        i++;
+    }
+    dst[i] = '\0';
+}
+
+static void dbg_add_linef(const char *fmt, ...)
+{
+    if (g_dbg_count >= MAX_DBG_LINES)
+        return;
+    char tmp[MAX_DBG_LINE_LEN];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(tmp, sizeof(tmp), fmt, ap);
+    va_end(ap);
+    dbg_add_line(tmp);
+}
+
+static void dbg_dump_mmc_host(const char *host)
+{
+    char host_dir[96];
+    snprintf(host_dir, sizeof(host_dir), "/sys/class/mmc_host/%s", host);
+    DIR *d = opendir(host_dir);
+    if (!d)
+        return;
+    struct dirent *de;
+    while ((de = readdir(d)) != NULL) {
+        if (strncmp(de->d_name, host, strlen(host)) == 0 && strchr(de->d_name, ':')) {
+            char p[160];
+            char name[32] = "?", manf[16] = "?", oem[16] = "?", prv[16] = "?",
+                 hw[16] = "?", fw[16] = "?", type[16] = "?";
+            snprintf(p, sizeof(p), "%s/%s/name", host_dir, de->d_name);
+            y1_sysfs_read(p, name, sizeof(name));
+            snprintf(p, sizeof(p), "%s/%s/manfid", host_dir, de->d_name);
+            y1_sysfs_read(p, manf, sizeof(manf));
+            snprintf(p, sizeof(p), "%s/%s/oemid", host_dir, de->d_name);
+            y1_sysfs_read(p, oem, sizeof(oem));
+            snprintf(p, sizeof(p), "%s/%s/prv", host_dir, de->d_name);
+            y1_sysfs_read(p, prv, sizeof(prv));
+            snprintf(p, sizeof(p), "%s/%s/hwrev", host_dir, de->d_name);
+            y1_sysfs_read(p, hw, sizeof(hw));
+            snprintf(p, sizeof(p), "%s/%s/fwrev", host_dir, de->d_name);
+            y1_sysfs_read(p, fw, sizeof(fw));
+            snprintf(p, sizeof(p), "%s/%s/type", host_dir, de->d_name);
+            y1_sysfs_read(p, type, sizeof(type));
+            dbg_add_linef("%s(%s): type=%s name=%s manf=%s oem=%s prv=%s hw=%s fw=%s",
+                          host, de->d_name, type, name, manf, oem, prv, hw, fw);
+        }
+    }
+    closedir(d);
+}
+
+static void dbg_dump_dir_names(const char *label, const char *dir_path)
+{
+    DIR *d = opendir(dir_path);
+    if (!d)
+        return;
+    char line[MAX_DBG_LINE_LEN];
+    int pos = snprintf(line, sizeof(line), "%s=", label);
+    struct dirent *de;
+    int first = 1;
+    while ((de = readdir(d)) != NULL) {
+        if (de->d_name[0] == '.')
+            continue;
+        if (pos < (int)sizeof(line) - 2)
+            pos += snprintf(line + pos, sizeof(line) - (size_t)pos, "%s%s",
+                            first ? "" : ",", de->d_name);
+        first = 0;
+    }
+    if (first && pos < (int)sizeof(line) - 8)
+        snprintf(line + pos, sizeof(line) - (size_t)pos, "(empty)");
+    closedir(d);
+    dbg_add_line(line);
+}
+
+static long dbg_file_kb(const char *path)
+{
+    struct stat st;
+    if (stat(path, &st) != 0)
+        return -1;
+    return (long)((st.st_size + 1023) / 1024);
+}
+
+static void dbg_append_file_tail(const char *label, const char *path, size_t max_bytes)
+{
+    FILE *fp = fopen(path, "rb");
+    if (!fp)
+        return;
+    if (fseek(fp, 0, SEEK_END) != 0) {
+        fclose(fp);
+        return;
+    }
+    long sz = ftell(fp);
+    if (sz <= 0) {
+        fclose(fp);
+        return;
+    }
+    size_t read_sz = (size_t)sz;
+    if (read_sz > max_bytes) {
+        read_sz = max_bytes;
+        fseek(fp, sz - (long)max_bytes, SEEK_SET);
+    } else {
+        fseek(fp, 0, SEEK_SET);
+    }
+    char *buf = malloc(read_sz + 1);
+    if (buf) {
+        size_t n = fread(buf, 1, read_sz, fp);
+        buf[n] = '\0';
+        dbg_add_linef("[%s (last %zu/%ld bytes)]", label, n, sz);
+        char *p = buf;
+        while (p && *p && g_dbg_count < MAX_DBG_LINES) {
+            char *nl = strchr(p, '\n');
+            if (nl) *nl = '\0';
+            if (*p) dbg_add_line(p);
+            p = nl ? (nl + 1) : NULL;
+        }
+        free(buf);
+    }
+    fclose(fp);
+}
 
 static void refresh_debug_info(void)
 {
     g_dbg_count = 0;
-    struct utsname u;
-    memset(&u, 0, sizeof(u));
-    uname(&u);
-    snprintf(g_dbg_lines[g_dbg_count++], 96, "Kernel: %s (%s)", u.release, u.machine);
+    time_t now = time(NULL);
+    struct tm tm_now;
+    char date_iso[32] = "unknown";
+    if (localtime_r(&now, &tm_now))
+        strftime(date_iso, sizeof(date_iso), "%Y-%m-%d %H:%M:%S", &tm_now);
 
-    char tmp[96] = "?";
-    if (y1_sysfs_read("/proc/lcm", tmp, sizeof(tmp)))
-        snprintf(g_dbg_lines[g_dbg_count++], 96, "LCM: %s", tmp);
+    struct utsname uts;
+    memset(&uts, 0, sizeof(uts));
+    uname(&uts);
 
-    snprintf(g_dbg_lines[g_dbg_count++], 96, "FB0: %dx%d @ %dbpp (stride=%d)",
-             y1_fb_width(), y1_fb_height(), y1_fb_bpp(), y1_fb_stride());
-    snprintf(g_dbg_lines[g_dbg_count++], 96, "CPU: %d MHz (%s)",
-             y1_cpu_get_freq_mhz(), y1_cpu_is_dual_core() ? "Dual" : "Single");
-    snprintf(g_dbg_lines[g_dbg_count++], 96, "Battery: %d%% %dmV %dmA (%s)",
-             y1_battery_percent(), y1_battery_voltage_mv(), y1_battery_current_ma(),
-             y1_battery_is_charging() ? "Chg" : "Dischg");
+    dbg_add_line("[build]");
+    dbg_add_linef("date=%s", date_iso);
+    dbg_add_linef("configapp_compiled=%s %s", __DATE__, __TIME__);
+    dbg_add_linef("kernel=%s %s %s %s", uts.sysname, uts.release, uts.version, uts.machine);
 
-    char mem[96];
-    info_memory(mem, sizeof(mem));
-    snprintf(g_dbg_lines[g_dbg_count++], 96, "RAM: %s", mem);
+    char buf[512];
+    if (y1_sysfs_read("/proc/cmdline", buf, sizeof(buf)))
+        dbg_add_linef("cmdline=%s", buf);
 
-    char sd[96];
-    info_storage(sd, sizeof(sd));
-    snprintf(g_dbg_lines[g_dbg_count++], 96, "SD: %s", sd);
+    /* Hardware */
+    dbg_add_line("[hardware]");
+    FILE *cpufp = fopen("/proc/cpuinfo", "r");
+    if (cpufp) {
+        char line[160];
+        while (fgets(line, sizeof(line), cpufp)) {
+            if (strncmp(line, "Processor", 9) == 0 ||
+                strncmp(line, "Hardware", 8) == 0 ||
+                strncmp(line, "Revision", 8) == 0 ||
+                strncmp(line, "Serial", 6) == 0 ||
+                strncmp(line, "BogoMIPS", 8) == 0) {
+                dbg_add_line(line);
+            }
+        }
+        fclose(cpufp);
+    }
 
-    snprintf(g_dbg_lines[g_dbg_count++], 96, "Dev: fb0=%d eac=%d fm=%d wmt=%d bt=%d",
-             access("/dev/graphics/fb0", F_OK) == 0,
-             access("/dev/eac", F_OK) == 0,
-             access("/dev/fm", F_OK) == 0,
-             access("/dev/stpwmt", F_OK) == 0,
-             access("/dev/stpbt", F_OK) == 0);
+    int fbfd = open("/dev/graphics/fb0", O_RDONLY | O_CLOEXEC);
+    if (fbfd >= 0) {
+        struct fb_var_screeninfo vinfo;
+        struct fb_fix_screeninfo finfo;
+        if (ioctl(fbfd, FBIOGET_VSCREENINFO, &vinfo) == 0 &&
+            ioctl(fbfd, FBIOGET_FSCREENINFO, &finfo) == 0) {
+            dbg_add_linef("fb0=%s %ux%u@%ubpp stride=%u smem=%u",
+                          finfo.id, vinfo.xres, vinfo.yres, vinfo.bits_per_pixel,
+                          finfo.line_length, finfo.smem_len);
+        }
+        close(fbfd);
+    }
+    if (y1_sysfs_read("/proc/lcm", buf, sizeof(buf)))
+        dbg_add_linef("lcm=%s", buf);
 
-    snprintf(g_dbg_lines[g_dbg_count++], 96, "Bin: rb=%d meui=%d liby1=%d",
-             access("/mnt/sdcard/.rockbox/rockbox", X_OK) == 0,
-             access("/mnt/sdcard/.meui/meui", X_OK) == 0,
-             access("/mnt/sdcard/.system/lib/liby1.so", F_OK) == 0);
+    dbg_dump_mmc_host("mmc0");
+    dbg_dump_mmc_host("mmc1");
 
-    snprintf(g_dbg_lines[g_dbg_count++], 96, "iTunesDB: %s  PlayCounts: %s",
-             access("/mnt/sdcard/iPod_Control/iTunes/iTunesDB", F_OK) == 0 ? "Yes" : "No",
-             access("/mnt/sdcard/iPod_Control/iTunes/Play Counts", F_OK) == 0 ? "Yes" : "No");
+    FILE *ifp = fopen("/proc/bus/input/devices", "r");
+    if (ifp) {
+        char line[256];
+        while (fgets(line, sizeof(line), ifp)) {
+            if (strncmp(line, "I: ", 3) == 0 ||
+                strncmp(line, "N: ", 3) == 0 ||
+                strncmp(line, "P: ", 3) == 0 ||
+                strncmp(line, "H: ", 3) == 0) {
+                dbg_add_line(line);
+            }
+        }
+        fclose(ifp);
+    }
+
+    /* System State */
+    dbg_add_line("[system_state]");
+    char uptime[64] = "?", cpu0_freq[32] = "?", gov[32] = "?", cpu1_on[16] = "?";
+    y1_sysfs_read("/proc/uptime", uptime, sizeof(uptime));
+    y1_sysfs_read("/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq", cpu0_freq, sizeof(cpu0_freq));
+    y1_sysfs_read("/sys/devices/system/cpu/cpu0/cpufreq/scaling_governor", gov, sizeof(gov));
+    y1_sysfs_read("/sys/devices/system/cpu/cpu1/online", cpu1_on, sizeof(cpu1_on));
+    dbg_add_linef("uptime=%s cpu0_khz=%s gov=%s cpu1_online=%s", uptime, cpu0_freq, gov, cpu1_on);
+
+    FILE *mfp = fopen("/proc/meminfo", "r");
+    if (mfp) {
+        char line[128];
+        while (fgets(line, sizeof(line), mfp)) {
+            if (strncmp(line, "MemTotal:", 9) == 0 ||
+                strncmp(line, "MemFree:", 8) == 0 ||
+                strncmp(line, "MemAvailable:", 13) == 0) {
+                dbg_add_line(line);
+            }
+        }
+        fclose(mfp);
+    }
+
+    char bstat[32] = "?", usb_on[16] = "?";
+    y1_sysfs_read("/sys/class/power_supply/battery/status", bstat, sizeof(bstat));
+    y1_sysfs_read("/sys/class/power_supply/usb/online", usb_on, sizeof(usb_on));
+    dbg_add_linef("battery=%d%% status=%s volt=%dmV curr=%dmA usb_online=%s",
+                  y1_battery_percent(), bstat, y1_battery_voltage_mv(),
+                  y1_battery_current_ma(), usb_on);
+
+    char wlock[128] = "?", h2w[16] = "?", tpd[16] = "?";
+    y1_sysfs_read("/sys/power/wake_lock", wlock, sizeof(wlock));
+    y1_sysfs_read("/sys/class/switch/h2w/state", h2w, sizeof(h2w));
+    y1_sysfs_read("/proc/tpd_keys_enable", tpd, sizeof(tpd));
+    dbg_add_linef("wake_lock=[%s] h2w=%s tpd_keys=%s", wlock, h2w, tpd);
+
+    char usb_en[16] = "?", usb_fn[64] = "?", usb_vid[16] = "?", usb_pid[16] = "?";
+    y1_sysfs_read("/sys/class/android_usb/android0/enable", usb_en, sizeof(usb_en));
+    y1_sysfs_read("/sys/class/android_usb/android0/functions", usb_fn, sizeof(usb_fn));
+    y1_sysfs_read("/sys/class/android_usb/android0/idVendor", usb_vid, sizeof(usb_vid));
+    y1_sysfs_read("/sys/class/android_usb/android0/idProduct", usb_pid, sizeof(usb_pid));
+    dbg_add_linef("usb_en=%s usb_fn=%s vid=%s pid=%s ipod_cfg=%d dbg_cfg=%d",
+                  usb_en, usb_fn, usb_vid, usb_pid, g_cfg.usb_ipod_mode, g_cfg.debug_log);
+
+    /* Available Components */
+    dbg_add_line("[available_components]");
+    dbg_add_linef("dev: fb0=%d eac=%d fm=%d stpwmt=%d stpbt=%d ttyGS0=%d",
+                  access("/dev/graphics/fb0", F_OK) == 0,
+                  access("/dev/eac", F_OK) == 0,
+                  access("/dev/fm", F_OK) == 0,
+                  access("/dev/stpwmt", F_OK) == 0,
+                  access("/dev/stpbt", F_OK) == 0,
+                  access("/dev/ttyGS0", F_OK) == 0);
+    dbg_add_linef("bin_kb: rockbox=%ld meui=%ld custom=%ld sys_app=%ld ipod_sync=%ld",
+                  dbg_file_kb("/mnt/sdcard/.rockbox/rockbox"),
+                  dbg_file_kb("/mnt/sdcard/.meui/meui"),
+                  dbg_file_kb("/mnt/sdcard/.custom/launch"),
+                  dbg_file_kb("/mnt/sdcard/.system/app"),
+                  dbg_file_kb("/bin/ipod_sync"));
+    dbg_add_linef("sys_kb: liby1=%ld liby1video=%ld android_ramdisk=%ld ipod_vpd_ko=%ld",
+                  dbg_file_kb("/mnt/sdcard/.system/lib/liby1.so"),
+                  dbg_file_kb("/mnt/sdcard/.system/lib/liby1video.so"),
+                  dbg_file_kb("/mnt/sdcard/.system/ramdisk_android.cpio.gz"),
+                  dbg_file_kb("/lib/modules/ipod_vpd.ko"));
+    dbg_add_linef("itunes_kb: iTunesDB=%ld ArtworkDB=%ld PlayCounts=%ld",
+                  dbg_file_kb("/mnt/sdcard/iPod_Control/iTunes/iTunesDB"),
+                  dbg_file_kb("/mnt/sdcard/iPod_Control/Artwork/ArtworkDB"),
+                  dbg_file_kb("/mnt/sdcard/iPod_Control/iTunes/Play Counts"));
+    dbg_dump_dir_names("sys_bin", "/mnt/sdcard/.system/bin");
+    dbg_dump_dir_names("bt_blobs", "/mnt/sdcard/.system/bt");
+
+    /* Storage & Partitions */
+    struct statvfs vfs;
+    unsigned long long total_mb = 0, free_mb = 0;
+    if (statvfs("/mnt/sdcard", &vfs) == 0) {
+        total_mb = ((unsigned long long)vfs.f_blocks * vfs.f_frsize) >> 20;
+        free_mb = ((unsigned long long)vfs.f_bavail * vfs.f_frsize) >> 20;
+    }
+    dbg_add_line("[storage]");
+    dbg_add_linef("sd_total_mb=%llu sd_free_mb=%llu", total_mb, free_mb);
+
+    FILE *pfp = fopen("/proc/partitions", "r");
+    if (pfp) {
+        char line[128];
+        while (fgets(line, sizeof(line), pfp)) {
+            if (line[0] != '\n' && line[0] != '\r')
+                dbg_add_line(line);
+        }
+        fclose(pfp);
+    }
+
+    FILE *mntfp = fopen("/proc/mounts", "r");
+    if (mntfp) {
+        char line[256];
+        dbg_add_line("[mounts]");
+        while (fgets(line, sizeof(line), mntfp)) {
+            if (strstr(line, "/mnt/sdcard") || strstr(line, "mmcblk"))
+                dbg_add_line(line);
+        }
+        fclose(mntfp);
+    }
+
+    FILE *modfp = fopen("/proc/modules", "r");
+    if (modfp) {
+        char line[256];
+        dbg_add_line("[modules]");
+        while (fgets(line, sizeof(line), modfp)) {
+            char name[64];
+            unsigned long sz = 0;
+            if (sscanf(line, "%63s %lu", name, &sz) == 2)
+                dbg_add_linef("%s (%lu)", name, sz);
+        }
+        fclose(modfp);
+    }
+
+    /* Kernel dmesg (hardware probes + tail) */
+    char *kbuf = malloc(16384 + 1);
+    if (kbuf) {
+        int kn = klogctl(3, kbuf, 16384);
+        if (kn > 0) {
+            kbuf[kn] = '\0';
+
+            dbg_add_line("[hw_probe_dmesg]");
+            int probe_lines = 0;
+            char *p = kbuf;
+            while (p && *p && probe_lines < 25) {
+                char *nl = strchr(p, '\n');
+                if (nl) *nl = '\0';
+                if (strstr(p, "lcm") || strstr(p, "LCM") ||
+                    strstr(p, "tpd") || strstr(p, "accdet") ||
+                    strstr(p, "msdc") || strstr(p, "mt6323") ||
+                    strstr(p, "mt6627") || strstr(p, "eac")) {
+                    dbg_add_line(p);
+                    probe_lines++;
+                }
+                if (nl) *nl = '\n';
+                p = nl ? (nl + 1) : NULL;
+            }
+
+            const char *tail = (kn > 3072) ? (kbuf + kn - 3072) : kbuf;
+            if (kn > 3072) {
+                const char *nl = strchr(tail, '\n');
+                if (nl) tail = nl + 1;
+            }
+            dbg_add_line("[dmesg_tail]");
+            p = (char *)tail;
+            while (p && *p && g_dbg_count < MAX_DBG_LINES) {
+                char *nl = strchr(p, '\n');
+                if (nl) *nl = '\0';
+                if (*p) dbg_add_line(p);
+                p = nl ? (nl + 1) : NULL;
+            }
+        }
+        free(kbuf);
+    }
+
+    dbg_append_file_tail("y1_debug.txt", "/mnt/sdcard/.system/y1_debug.txt", 2048);
 }
 
 static void act_save_debug_info(void)
@@ -1158,15 +1595,23 @@ static void act_save_debug_info(void)
 
     char path[128];
     snprintf(path, sizeof(path), "/mnt/sdcard/debuginfo%s.txt", tag);
-    FILE *f = fopen(path, "w");
-    if (!f) {
+    FILE *out = fopen(path, "w");
+    if (!out) {
         show_toast(TR_ID(STR_SD_NOT_WRITABLE), 1400);
         return;
     }
-    fprintf(f, "=== Nugget Y1 Debug Info ===\n");
-    for (int i = 0; i < g_dbg_count; i++)
-        fprintf(f, "%s\n", g_dbg_lines[i]);
-    fclose(f);
+
+    fprintf(out, "=== Nugget Y1 Debug Info ===\n");
+    for (int i = 0; i < g_dbg_count; i++) {
+        if (i > 0 && g_dbg_lines[i][0] == '[')
+            fputc('\n', out);
+        fprintf(out, "%s\n", g_dbg_lines[i]);
+    }
+
+    fflush(out);
+    fsync(fileno(out));
+    fclose(out);
+    sync();
     show_toast(TR_ID(STR_SAVED_DEBUGINFO_TO_SD), 1500);
 }
 
@@ -1177,10 +1622,10 @@ static struct cfg_item status_items[] = {
     { NULL, STR_BATTERY_EN,    STR_BATTERY_KO,    STR_CHARGE_LEVEL_VOLTAGE_EN, STR_CHARGE_LEVEL_VOLTAGE_KO,     "battery-charging", CFG_TYPE_INFO, 0, 0, 0, NULL, NULL, NULL, 0, NULL, NULL, info_battery, NULL },    { NULL, STR_POWER_DRAW_EN, STR_POWER_DRAW_KO,STR_CURRENT_USB_POWER_EN,    STR_CURRENT_USB_POWER_KO, "activity",         CFG_TYPE_INFO, 0, 0, 0, NULL, NULL, NULL, 0, NULL, NULL, info_current, NULL },    { NULL, STR_PROCESSOR_EN,  STR_PROCESSOR_KO,  STR_LIVE_CLOCK_CORE_COUNT_EN,STR_LIVE_CLOCK_CORE_COUNT_KO,   "cpu",              CFG_TYPE_INFO, 0, 0, 0, NULL, NULL, NULL, 0, NULL, NULL, info_cpu,     NULL },    { NULL, STR_MEMORY_EN,     STR_MEMORY_KO,    STR_SYSTEM_RAM_USAGE_EN,       STR_SYSTEM_RAM_USAGE_KO,  "sliders",          CFG_TYPE_INFO, 0, 0, 0, NULL, NULL, NULL, 0, NULL, NULL, info_memory,  NULL },    { NULL, STR_SD_STORAGE_EN, STR_SD_STORAGE_KO, STR_MICROSD_FREE_SPACE_EN,     STR_MICROSD_FREE_SPACE_KO,     "hard-drive",       CFG_TYPE_INFO, 0, 0, 0, NULL, NULL, NULL, 0, NULL, NULL, info_storage, NULL },    { NULL, STR_KERNEL_EN,     STR_KERNEL_KO,      STR_LINUX_KERNEL_VERSION_EN,   STR_LINUX_KERNEL_VERSION_KO,      "info",             CFG_TYPE_INFO, 0, 0, 0, NULL, NULL, NULL, 0, NULL, NULL, info_kernel,  NULL },    { NULL, STR_UPTIME_EN,     STR_UPTIME_KO, STR_TIME_SINCE_BOOT_EN,        STR_TIME_SINCE_BOOT_KO,     "refresh-cw",       CFG_TYPE_INFO, 0, 0, 0, NULL, NULL, NULL, 0, NULL, NULL, info_uptime,  NULL },};
 
 static struct cfg_item display_items[] = {
-    { "dark_mode",      STR_DARK_MODE_EN,        STR_DARK_MODE_KO,       STR_DARK_MEUI_COLOR_THEME_EN,     STR_DARK_MEUI_COLOR_THEME_KO,  "sliders", CFG_TYPE_TOGGLE, 0, 1,   1, NULL, NULL, NULL, 0, get_dark_mode,  set_dark_mode,  NULL, NULL },    { NULL,             STR_WALLPAPER_EN,        STR_WALLPAPER_KO,        STR_PNG_JPG_BACKGROUND_IMAGE_EN,STR_PNG_JPG_BACKGROUND_IMAGE_KO,  "image",   CFG_TYPE_ACTION, 0, 0,   0, NULL, NULL, NULL, 0, NULL,           NULL,           NULL, act_open_wallpaper },    { NULL,             STR_FONT_EN,             STR_FONT_KO,            STR_CUSTOM_TTF_OTF_UI_FONT_EN,  STR_CUSTOM_TTF_OTF_UI_FONT_KO,  "sliders", CFG_TYPE_ACTION, 0, 0,   0, NULL, NULL, NULL, 0, NULL,           NULL,           NULL, act_open_font },    { "brightness_pct", STR_BRIGHTNESS_EN,       STR_BRIGHTNESS_KO,       STR_BACKLIGHT_INTENSITY_EN,       STR_BACKLIGHT_INTENSITY_KO,     "sun",     CFG_TYPE_INT,    5, 100, 5, "%",  NULL, NULL, 0, get_brightness, set_brightness, NULL, NULL },    { "eco_mode",       STR_DISPLAY_ECO_MODE_EN, STR_DISPLAY_ECO_MODE_KO, STR_PANEL_LOW_POWER_MODE_EN,      STR_PANEL_LOW_POWER_MODE_KO,       "sliders", CFG_TYPE_TOGGLE, 0, 1,   1, NULL, NULL, NULL, 0, get_eco_mode,   set_eco_mode,   NULL, NULL },    { "touch_scan",     STR_TOUCH_WHEEL_EN,      STR_TOUCH_WHEEL_KO,         STR_CAPACITIVE_WHEEL_SCANNING_EN, STR_CAPACITIVE_WHEEL_SCANNING_KO,  "activity",CFG_TYPE_TOGGLE, 0, 1,   1, NULL, NULL, NULL, 0, get_touch_scan, set_touch_scan, NULL, NULL },    { "vibrate_ms",     STR_HAPTIC_DURATION_EN,  STR_HAPTIC_DURATION_KO,       STR_MOTOR_PULSE_LENGTH_EN,        STR_MOTOR_PULSE_LENGTH_KO,    "vibrate", CFG_TYPE_INT,    5, 100, 5, "ms", NULL, NULL, 0, get_vibrate_ms, set_vibrate_ms, NULL, NULL },    { NULL,             STR_TEST_HAPTICS_EN,     STR_TEST_HAPTICS_KO,     STR_TRIGGER_VIBRATION_PULSE_EN,   STR_TRIGGER_VIBRATION_PULSE_KO,"vibrate", CFG_TYPE_ACTION, 0, 0,   0, NULL, NULL, NULL, 0, NULL,           NULL,           NULL, act_vibrate_test },};
+    { "dark_mode",      STR_DARK_MODE_EN,        STR_DARK_MODE_KO,       STR_DARK_MEUI_COLOR_THEME_EN,     STR_DARK_MEUI_COLOR_THEME_KO,  "sliders", CFG_TYPE_TOGGLE, 0, 1,   1, NULL, NULL, NULL, 0, get_dark_mode,  set_dark_mode,  NULL, NULL },    { NULL,             STR_WALLPAPER_EN,        STR_WALLPAPER_KO,        STR_PNG_JPG_BACKGROUND_IMAGE_EN,STR_PNG_JPG_BACKGROUND_IMAGE_KO,  "image",   CFG_TYPE_ACTION, 0, 0,   0, NULL, NULL, NULL, 0, NULL,           NULL,           NULL, act_open_wallpaper },    { NULL,             STR_FONT_EN,             STR_FONT_KO,            STR_CUSTOM_TTF_OTF_UI_FONT_EN,  STR_CUSTOM_TTF_OTF_UI_FONT_KO,  "sliders", CFG_TYPE_ACTION, 0, 0,   0, NULL, NULL, NULL, 0, NULL,           NULL,           NULL, act_open_font },    { "brightness_pct", STR_BRIGHTNESS_EN,       STR_BRIGHTNESS_KO,       STR_BACKLIGHT_INTENSITY_EN,       STR_BACKLIGHT_INTENSITY_KO,     "sun",     CFG_TYPE_INT,    5, 100, 5, "%",  NULL, NULL, 0, get_brightness, set_brightness, NULL, NULL },    { "eco_mode",       STR_DISPLAY_ECO_MODE_EN, STR_DISPLAY_ECO_MODE_KO, STR_PANEL_LOW_POWER_MODE_EN,      STR_PANEL_LOW_POWER_MODE_KO,       "sliders", CFG_TYPE_TRISTATE, 0, 2,  1, NULL, NULL, NULL, 0, get_eco_mode,   set_eco_mode,   NULL, NULL },    { "touch_scan",     STR_TOUCH_WHEEL_EN,      STR_TOUCH_WHEEL_KO,         STR_CAPACITIVE_WHEEL_SCANNING_EN, STR_CAPACITIVE_WHEEL_SCANNING_KO,  "activity",CFG_TYPE_TRISTATE, 0, 2,  1, NULL, NULL, NULL, 0, get_touch_scan, set_touch_scan, NULL, NULL },    { "vibrate_ms",     STR_HAPTIC_DURATION_EN,  STR_HAPTIC_DURATION_KO,       STR_MOTOR_PULSE_LENGTH_EN,        STR_MOTOR_PULSE_LENGTH_KO,    "vibrate", CFG_TYPE_INT,    5, 100, 5, "ms", NULL, NULL, 0, get_vibrate_ms, set_vibrate_ms, NULL, NULL },    { NULL,             STR_TEST_HAPTICS_EN,     STR_TEST_HAPTICS_KO,     STR_TRIGGER_VIBRATION_PULSE_EN,   STR_TRIGGER_VIBRATION_PULSE_KO,"vibrate", CFG_TYPE_ACTION, 0, 0,   0, NULL, NULL, NULL, 0, NULL,           NULL,           NULL, act_vibrate_test },};
 
 static struct cfg_item cpu_items[] = {
-    { "cpu_mode",         STR_CPU_GOVERNOR_EN,     STR_CPU_GOVERNOR_KO,      STR_FREQUENCY_SCALING_POLICY_EN, STR_FREQUENCY_SCALING_POLICY_KO,   "cpu",     CFG_TYPE_CHOICE, 0, 4, 1, NULL, cpu_mode_choices, cpu_mode_choices_ko, 5, get_cpu_mode,     set_cpu_mode,     NULL, NULL },    { "dual_core",        STR_DUAL_CORE_EN,        STR_DUAL_CORE_KO,       STR_ENABLE_SECOND_CORTEX_A7_EN,  STR_ENABLE_SECOND_CORTEX_A7_KO, "cpu",     CFG_TYPE_TOGGLE, 0, 1, 1, NULL, NULL,             NULL,                0, get_dual_core,    set_dual_core,    NULL, NULL },    { "screen_off_clamp", STR_SCREEN_OFF_CLAMP_EN, STR_SCREEN_OFF_CLAMP_KO,  STR_CLAMP_TO_390MHZ_OFF_SCREEN_EN,STR_CLAMP_TO_390MHZ_OFF_SCREEN_KO,"sliders",CFG_TYPE_TOGGLE, 0, 1, 1, NULL, NULL,             NULL,                0, get_screen_clamp, set_screen_clamp, NULL, NULL },    { NULL,               STR_LIVE_CLOCK_EN,       STR_LIVE_CLOCK_KO,       STR_CURRENT_CPU_FREQUENCY_EN,    STR_CURRENT_CPU_FREQUENCY_KO,      "activity",CFG_TYPE_INFO,   0, 0, 0, NULL, NULL,             NULL,                0, NULL,             NULL,             info_cpu, NULL },};
+    { "cpu_mode",         STR_CPU_GOVERNOR_EN,     STR_CPU_GOVERNOR_KO,      STR_FREQUENCY_SCALING_POLICY_EN, STR_FREQUENCY_SCALING_POLICY_KO,   "cpu",     CFG_TYPE_CHOICE,   0, 5, 1, NULL, cpu_mode_choices, cpu_mode_choices_ko, 6, get_cpu_mode,     set_cpu_mode,     NULL, NULL },    { "dual_core",        STR_DUAL_CORE_EN,        STR_DUAL_CORE_KO,       STR_ENABLE_SECOND_CORTEX_A7_EN,  STR_ENABLE_SECOND_CORTEX_A7_KO, "cpu",     CFG_TYPE_TRISTATE, 0, 2, 1, NULL, NULL,             NULL,                0, get_dual_core,    set_dual_core,    NULL, NULL },    { "screen_off_clamp", STR_SCREEN_OFF_CLAMP_EN, STR_SCREEN_OFF_CLAMP_KO,  STR_CLAMP_TO_390MHZ_OFF_SCREEN_EN,STR_CLAMP_TO_390MHZ_OFF_SCREEN_KO,"sliders",CFG_TYPE_TRISTATE, 0, 2, 1, NULL, NULL,             NULL,                0, get_screen_clamp, set_screen_clamp, NULL, NULL },    { NULL,               STR_LIVE_CLOCK_EN,       STR_LIVE_CLOCK_KO,       STR_CURRENT_CPU_FREQUENCY_EN,    STR_CURRENT_CPU_FREQUENCY_KO,      "activity",CFG_TYPE_INFO,   0, 0, 0, NULL, NULL,             NULL,                0, NULL,             NULL,             info_cpu, NULL },};
 
 static struct cfg_item datetime_items[] = {
     { NULL, STR_PREVIEW_EN,      STR_PREVIEW_KO, STR_PENDING_DATE_TIME_EN,   STR_PENDING_DATE_TIME_KO, "clock", CFG_TYPE_INFO,   0,    0,    0, NULL, NULL,         NULL,            0, NULL,           NULL,           info_dt_preview, NULL },    { NULL, STR_YEAR_EN,         STR_YEAR_KO,      STR_CALENDAR_YEAR_EN,         STR_CALENDAR_YEAR_KO,           "clock", CFG_TYPE_INT,    2020, 2040, 1, NULL, NULL,         NULL,            0, get_dt_year,    set_dt_year,    NULL, NULL },    { NULL, STR_MONTH_EN,        STR_MONTH_KO,        STR_MONTH_1_12_EN,        STR_MONTH_1_12_KO,         "clock", CFG_TYPE_INT,    1,    12,   1, NULL, NULL,         NULL,            0, get_dt_month,   set_dt_month,   NULL, NULL },    { NULL, STR_DAY_EN,          STR_DAY_KO,        STR_DAY_OF_MONTH_EN,          STR_DAY_OF_MONTH_KO,             "clock", CFG_TYPE_INT,    1,    31,   1, NULL, NULL,         NULL,            0, get_dt_day,     set_dt_day,     NULL, NULL },    { NULL, STR_AM_PM_EN,      STR_AM_PM_KO,STR_S_12_HOUR_PERIOD_EN,       STR_S_12_HOUR_PERIOD_KO,    "clock", CFG_TYPE_CHOICE, 0,    1,    1, NULL, ampm_choices, ampm_choices_ko, 2, get_dt_ampm,    set_dt_ampm,    NULL, NULL },    { NULL, STR_HOUR_EN,         STR_HOUR_KO,        STR_HOUR_1_12_EN,         STR_HOUR_1_12_KO,         "clock", CFG_TYPE_INT,    1,    12,   1, NULL, NULL,         NULL,            0, get_dt_hour12,  set_dt_hour12,  NULL, NULL },    { NULL, STR_MINUTE_EN,       STR_MINUTE_KO,        STR_MINUTE_0_59_EN,       STR_MINUTE_0_59_KO,         "clock", CFG_TYPE_INT,    0,    59,   1, NULL, NULL,         NULL,            0, get_dt_minute,  set_dt_minute,  NULL, NULL },    { NULL, STR_APPLY_TO_RTC_EN, STR_APPLY_TO_RTC_KO,STR_SAVE_TO_HARDWARE_CLOCK_EN,STR_SAVE_TO_HARDWARE_CLOCK_KO,"check", CFG_TYPE_ACTION, 0,    0,    0, NULL, NULL,         NULL,            0, NULL,           NULL,           NULL, apply_datetime_to_rtc },};
@@ -1223,7 +1668,7 @@ static struct cfg_item wifi_items[] = {
     { NULL, STR_WI_FI_POWER_EN,  STR_WI_FI_POWER_KO,  STR_ENABLE_MT6572_WI_FI_RADIO_EN, STR_ENABLE_MT6572_WI_FI_RADIO_KO,   "wifi",       CFG_TYPE_TOGGLE, 0, 1, 1, NULL, NULL, NULL, 0, get_wifi_enable, set_wifi_enable, NULL, NULL },    { NULL, STR_STATUS_EN,       STR_STATUS_KO,   STR_CURRENT_WI_FI_STATE_EN,       STR_CURRENT_WI_FI_STATE_KO,          "info",       CFG_TYPE_INFO,   0, 0, 0, NULL, NULL, NULL, 0, NULL,            NULL,            info_wifi_status, NULL },    { NULL, STR_IP_ADDRESS_EN,   STR_IP_ADDRESS_KO,     STR_ASSIGNED_DHCP_IPV4_EN,        STR_ASSIGNED_DHCP_IPV4_KO,         "globe",      CFG_TYPE_INFO,   0, 0, 0, NULL, NULL, NULL, 0, NULL,            NULL,            info_wifi_ip, NULL },    { NULL, STR_SCAN_NETWORKS_EN,STR_SCAN_NETWORKS_KO,STR_FIND_NEARBY_ACCESS_POINTS_EN,STR_FIND_NEARBY_ACCESS_POINTS_KO,   "refresh-cw", CFG_TYPE_ACTION, 0, 0, 0, NULL, NULL, NULL, 0, NULL,            NULL,            NULL, act_wifi_scan },    { NULL, STR_DISCONNECT_EN,   STR_DISCONNECT_KO,   STR_LEAVE_CURRENT_NETWORK_EN,     STR_LEAVE_CURRENT_NETWORK_KO,  "power",      CFG_TYPE_ACTION, 0, 0, 0, NULL, NULL, NULL, 0, NULL,            NULL,            NULL, act_wifi_disconnect },};
 
 static struct cfg_item usb_items[] = {
-    { "usb_ipod_mode", STR_IPOD_USB_MODE_EN,    STR_IPOD_USB_MODE_KO,  STR_SPOOF_IPOD_5_5G_OVER_USB_EN,  STR_SPOOF_IPOD_5_5G_OVER_USB_KO,   "usb",        CFG_TYPE_TOGGLE, 0, 1, 1, NULL, NULL, NULL, 0, get_usb_ipod, set_usb_ipod, NULL, NULL },    { "usb_perf_tune", STR_USB_PERFORMANCE_EN,  STR_USB_PERFORMANCE_KO,  STR_BOOST_USB_GADGET_THROUGHPUT_EN,STR_BOOST_USB_GADGET_THROUGHPUT_KO,    "sliders",    CFG_TYPE_TOGGLE, 0, 1, 1, NULL, NULL, NULL, 0, get_usb_perf, set_usb_perf, NULL, NULL },    { NULL,            STR_USB_MASS_STORAGE_EN, STR_USB_MASS_STORAGE_KO,STR_MOUNT_SD_CARD_TO_PC_EN,       STR_MOUNT_SD_CARD_TO_PC_KO,     "hard-drive", CFG_TYPE_TOGGLE, 0, 1, 1, NULL, NULL, NULL, 0, get_usb_ums,  set_usb_ums,  NULL, NULL },    { NULL,            STR_SYNC_STORAGE_EN,     STR_SYNC_STORAGE_KO,  STR_FLUSH_SD_CARD_WRITE_CACHE_EN, STR_FLUSH_SD_CARD_WRITE_CACHE_KO,     "refresh-cw", CFG_TYPE_ACTION, 0, 0, 0, NULL, NULL, NULL, 0, NULL,         NULL,         NULL, act_sync_disks },    { NULL,            STR_DROP_CACHES_EN,      STR_DROP_CACHES_KO,    STR_FREE_LINUX_PAGE_CACHE_EN,     STR_FREE_LINUX_PAGE_CACHE_KO, "trash-2",    CFG_TYPE_ACTION, 0, 0, 0, NULL, NULL, NULL, 0, NULL,         NULL,         NULL, act_drop_caches },};
+    { "usb_ipod_mode", STR_IPOD_USB_MODE_EN,    STR_IPOD_USB_MODE_KO,  STR_SPOOF_IPOD_5_5G_OVER_USB_EN,  STR_SPOOF_IPOD_5_5G_OVER_USB_KO,   "usb",        CFG_TYPE_TRISTATE, 0, 2, 1, NULL, NULL, NULL, 0, get_usb_ipod, set_usb_ipod, NULL, NULL },    { "usb_perf_tune", STR_USB_PERFORMANCE_EN,  STR_USB_PERFORMANCE_KO,  STR_BOOST_USB_GADGET_THROUGHPUT_EN,STR_BOOST_USB_GADGET_THROUGHPUT_KO,    "sliders",    CFG_TYPE_TOGGLE, 0, 1, 1, NULL, NULL, NULL, 0, get_usb_perf, set_usb_perf, NULL, NULL },    { NULL,            STR_USB_MASS_STORAGE_EN, STR_USB_MASS_STORAGE_KO,STR_MOUNT_SD_CARD_TO_PC_EN,       STR_MOUNT_SD_CARD_TO_PC_KO,     "hard-drive", CFG_TYPE_TOGGLE, 0, 1, 1, NULL, NULL, NULL, 0, get_usb_ums,  set_usb_ums,  NULL, NULL },    { NULL,            STR_SYNC_STORAGE_EN,     STR_SYNC_STORAGE_KO,  STR_FLUSH_SD_CARD_WRITE_CACHE_EN, STR_FLUSH_SD_CARD_WRITE_CACHE_KO,     "refresh-cw", CFG_TYPE_ACTION, 0, 0, 0, NULL, NULL, NULL, 0, NULL,         NULL,         NULL, act_sync_disks },    { NULL,            STR_DROP_CACHES_EN,      STR_DROP_CACHES_KO,    STR_FREE_LINUX_PAGE_CACHE_EN,     STR_FREE_LINUX_PAGE_CACHE_KO, "trash-2",    CFG_TYPE_ACTION, 0, 0, 0, NULL, NULL, NULL, 0, NULL,         NULL,         NULL, act_drop_caches },};
 
 static struct cfg_item power_items[] = {
     { "lang",       STR_LANGUAGE_EN,      STR_LANGUAGE_KO,  STR_SWITCH_ENGLISH_EN,        STR_SWITCH_ENGLISH_KO,           "globe",      CFG_TYPE_CHOICE, 0, 1, 1, NULL, lang_choices, lang_choices, 2, get_lang,       set_lang,       NULL, NULL },    { "screenshot", STR_SCREENSHOT_EN,    STR_SCREENSHOT_KO,         STR_MENU_PLAY_SAVES_TO_SCREENSHOTS_EN, STR_MENU_PLAY_SAVES_TO_SCREENSHOTS_KO, "camera",     CFG_TYPE_TOGGLE, 0, 1, 1, NULL, NULL,         NULL,         0, get_screenshot, set_screenshot, NULL, NULL },    { "debug_log",  STR_Y1_DEBUG_LOG_EN,  STR_Y1_DEBUG_LOG_KO,   STR_WRITE_SYSTEM_Y1_DEBUG_TXT_EN,     STR_WRITE_SYSTEM_Y1_DEBUG_TXT_KO,    "info",       CFG_TYPE_TOGGLE, 0, 1, 1, NULL, NULL,         NULL,         0, get_debug_log,  set_debug_log,  NULL, NULL },    { NULL,        STR_CLEAR_LOG_EN,     STR_CLEAR_LOG_KO,        STR_DELETE_Y1_DEBUG_TXT_EN,        STR_DELETE_Y1_DEBUG_TXT_KO,  "trash-2",    CFG_TYPE_ACTION, 0, 0, 0, NULL, NULL,         NULL,         0, NULL,          NULL,          NULL, act_clear_log },    { NULL,        STR_RESET_SETTINGS_EN,STR_RESET_SETTINGS_KO,      STR_RESTORE_DEFAULT_SETTINGS_EN,   STR_RESTORE_DEFAULT_SETTINGS_KO,  "rotate-ccw", CFG_TYPE_ACTION, 0, 0, 0, NULL, NULL,         NULL,         0, NULL,          NULL,          NULL, act_reset_settings },    { NULL,        STR_EXIT_CONFIGAPP_EN,STR_EXIT_CONFIGAPP_KO,     STR_RETURN_TO_CALLER_EN,           STR_RETURN_TO_CALLER_KO, "arrow-left", CFG_TYPE_ACTION, 0, 0, 0, NULL, NULL,         NULL,         0, NULL,          NULL,          NULL, act_return_bootmenu },    { NULL,        STR_REBOOT_DEVICE_EN, STR_REBOOT_DEVICE_KO,      STR_RESTART_THE_Y1_EN,             STR_RESTART_THE_Y1_KO,           "rotate-ccw", CFG_TYPE_ACTION, 0, 0, 0, NULL, NULL,         NULL,         0, NULL,          NULL,          NULL, act_reboot },    { NULL,        STR_POWER_OFF_EN,     STR_POWER_OFF_KO,        STR_SHUT_DOWN_SAFELY_EN,           STR_SHUT_DOWN_SAFELY_KO,     "power",      CFG_TYPE_ACTION, 0, 0, 0, NULL, NULL,         NULL,         0, NULL,          NULL,          NULL, act_poweroff },};
@@ -1234,7 +1679,10 @@ static struct cfg_item launch_items[] = {
 };
 
 static struct cfg_item serial_items[] = {
-    { NULL, STR_SERIAL_CONSOLE_EN, STR_SERIAL_CONSOLE_KO,   STR_ENABLE_DUAL_USB_ACM_SHELL_EN, STR_ENABLE_DUAL_USB_ACM_SHELL_KO, "terminal", CFG_TYPE_TOGGLE, 0, 1, 1, NULL, NULL, NULL, 0, get_serial_active, set_serial_active, NULL, NULL },    { NULL, STR_USB_ACM_PORTS_EN,  STR_USB_ACM_PORTS_KO,  STR_TTYGS0_TTYGS1_STATUS_EN,    STR_TTYGS0_TTYGS1_STATUS_KO,   "info",     CFG_TYPE_INFO,   0, 0, 0, NULL, NULL, NULL, 0, NULL,              NULL,              info_serial_ports, NULL },};
+    { NULL, STR_SERIAL_CONSOLE_EN, STR_SERIAL_CONSOLE_KO,   STR_ENABLE_DUAL_USB_ACM_SHELL_EN, STR_ENABLE_DUAL_USB_ACM_SHELL_KO, "terminal", CFG_TYPE_TOGGLE, 0, 1, 1, NULL, NULL, NULL, 0, get_serial_active, set_serial_active, NULL, NULL },
+    { NULL, STR_USB_ACM_PORTS_EN,  STR_USB_ACM_PORTS_KO,  STR_TTYGS0_TTYGS1_STATUS_EN,    STR_TTYGS0_TTYGS1_STATUS_KO,   "info",     CFG_TYPE_INFO,   0, 0, 0, NULL, NULL, NULL, 0, NULL,              NULL,              info_serial_ports, NULL },
+    { NULL, STR_ADB_DAEMON_EN,     STR_ADB_DAEMON_KO,     STR_ADB_DESC_EN,                STR_ADB_DESC_KO,               "terminal", CFG_TYPE_TOGGLE, 0, 1, 1, NULL, NULL, NULL, 0, get_adb_active,    set_adb_active,    NULL, NULL },
+};
 
 static struct cfg_item debug_items[] = {
     { NULL, STR_SAVE_DEBUG_INFO_EN, STR_SAVE_DEBUG_INFO_KO, STR_WRITE_DEBUGINFO_TXT_TO_SD_EN, STR_WRITE_DEBUGINFO_TXT_TO_SD_KO, "hard-drive", CFG_TYPE_ACTION, 0, 0, 0, NULL, NULL, NULL, 0, NULL, NULL, NULL, act_save_debug_info },};
@@ -1642,6 +2090,33 @@ static pid_t find_running_app_pid(char *out_name, size_t out_sz)
 
 static void execute_app_switch(const char *exec_path, pid_t kill_pid)
 {
+    if (strcmp(exec_path, "__ANDROID__") == 0) {
+        if (kill_pid > 0) {
+            kill(kill_pid, SIGTERM);
+            usleep(200000);
+        }
+        save_settings_conf();
+        y1_sys_reboot();
+        return;
+    }
+
+    mkdir("/tmp", 0777);
+    FILE *lf = fopen("/tmp/configapp_launch", "w");
+    if (lf) {
+        fprintf(lf, "%s\n", exec_path);
+        fclose(lf);
+    }
+    FILE *sf = fopen("/tmp/configapp_switching", "w");
+    if (sf) {
+        fprintf(sf, "1\n");
+        fclose(sf);
+    }
+    sync();
+
+    save_settings_conf();
+    y1_input_close();
+    gfx_shutdown();
+
     if (kill_pid > 0) {
         kill(kill_pid, SIGTERM);
         char ppath[64];
@@ -1653,16 +2128,7 @@ static void execute_app_switch(const char *exec_path, pid_t kill_pid)
         if (access(ppath, F_OK) == 0)
             kill(kill_pid, SIGKILL);
     }
-    if (strcmp(exec_path, "__ANDROID__") == 0) {
-        save_settings_conf();
-        y1_sys_reboot();
-        return;
-    }
-    save_settings_conf();
-    y1_input_close();
-    gfx_shutdown();
-    execl(exec_path, exec_path, (char *)NULL);
-    _exit(127);
+    _exit(0);
 }
 
 static void render_page(int ox)
@@ -1729,7 +2195,7 @@ static void render_page(int ox)
 
             if (it->type == CFG_TYPE_TOGGLE && it->get_int) {
                 int on = it->get_int();
-                float t = cfg_sw_get(g_active_page, idx, on != 0, cfg_now_ms());
+                float t = cfg_sw_get(g_active_page, idx, on ? 1.0f : 0.0f, cfg_now_ms());
                 int pw = 58, ph = 34;
                 int px = x + w - 16 - pw;
                 int py = y + (row_h - ph) / 2;
@@ -1738,6 +2204,29 @@ static void render_page(int ox)
                 uint32_t thumb_col = cfg_lerp_argb(COL_WARN, COL_SUCCESS, t);
                 gfx_fill_round_rect(tx, py, 34, 34, 14, thumb_col);
                 gfx_draw_icon(t >= 0.5f ? "check" : "x", tx + 7, py + 7, 20, COL_SWITCH_ICON);
+            } else if (it->type == CFG_TYPE_TRISTATE && it->get_int) {
+                int st = it->get_int();
+                if (st < 0) st = 0;
+                if (st > 2) st = 2;
+                float want = (st == 0) ? 0.0f : ((st == 1) ? 0.5f : 1.0f);
+                float t = cfg_sw_get(g_active_page, idx, want, cfg_now_ms());
+                int pw = 82, ph = 34;
+                int px = x + w - 16 - pw;
+                int py = y + (row_h - ph) / 2;
+                gfx_fill_round_rect(px, py, pw, ph, 17, sel ? COL_SURFACE : COL_SURFACE_HI);
+                int tx = px + (int)roundf(t * (float)(pw - 34));
+                uint32_t thumb_col = (t < 0.5f)
+                    ? cfg_lerp_argb(COL_WARN, COL_ACCENT, t * 2.0f)
+                    : cfg_lerp_argb(COL_ACCENT, COL_SUCCESS, (t - 0.5f) * 2.0f);
+                gfx_fill_round_rect(tx, py, 34, 34, 14, thumb_col);
+                if (t < 0.25f) {
+                    gfx_draw_icon("x", tx + 7, py + 7, 20, COL_SWITCH_ICON);
+                } else if (t > 0.75f) {
+                    gfx_draw_icon("check", tx + 7, py + 7, 20, COL_SWITCH_ICON);
+                } else {
+                    int sw = gfx_text_width("/", 20.0f, UI_FONT_SEMIBOLD);
+                    gfx_draw_text(tx + (34 - sw) / 2, py + 5, "/", 20.0f, UI_FONT_SEMIBOLD, COL_SWITCH_ICON);
+                }
             } else if (it->type == CFG_TYPE_CHOICE && it->get_int && it->choices) {
                 int c = it->get_int();
                 if (c < 0 || c >= it->num_choices) c = 0;
@@ -1780,9 +2269,15 @@ static void render_page(int ox)
             gfx_draw_text(x + w - 14 - bw + 13, y + 21, badge, 19.0f, UI_FONT_SEMIBOLD, COL_ACCENT_TEXT);
         } else if (pg->is_debug_page) {
             int d_idx = idx - pg->num_items;
-            gfx_draw_icon("bug", x + 14, y + 21, 24, COL_TEXT_DIM);
-            gfx_draw_text_ellipsize(x + 48, y + 22, w - 64, g_dbg_lines[d_idx], 20.0f,
-                                    UI_FONT_REGULAR, COL_TEXT);
+            const char *line = g_dbg_lines[d_idx];
+            if (line[0] == '[') {
+                gfx_draw_icon("info", x + 14, y + 21, 22, COL_TEXT);
+                gfx_draw_text_ellipsize(x + 46, y + 22, w - 60, line, 19.0f,
+                                        UI_FONT_SEMIBOLD, COL_TEXT);
+            } else {
+                gfx_draw_text_ellipsize(x + 16, y + 24, w - 32, line, 16.0f,
+                                        UI_FONT_REGULAR, COL_TEXT);
+            }
         } else if (pg->is_wifi_page) {
             int w_idx = idx - pg->num_items;
             const struct y1_wifi_network *net = &g_wifi_nets[w_idx];
@@ -2215,7 +2710,7 @@ static void handle_button(uint32_t btn)
             g_scroll_last_dir = dir;
             g_scroll_last_ms = tnow;
 
-            if (total_rows >= 8 && (g_abc_active || g_scroll_fast_streak >= 12)) {
+            if (total_rows >= 8 && (g_abc_active || g_scroll_fast_streak >= 20)) {
                 g_abc_active = true;
                 g_abc_until_ms = tnow + 1100;
                 char cur_l[8] = "";
@@ -2246,6 +2741,16 @@ static void handle_button(uint32_t btn)
             const struct cfg_item *it = &pg->items[g_item_sel];
             if (it->type == CFG_TYPE_TOGGLE && it->get_int && it->set_int) {
                 it->set_int(!it->get_int());
+            } else if (it->type == CFG_TYPE_TRISTATE && it->get_int && it->set_int) {
+                int st = it->get_int();
+                if (st < 0 || st > 2) st = 1;
+                if (btn == Y1_BTN_LEFT) {
+                    if (st > 0) it->set_int(st - 1);
+                } else if (btn == Y1_BTN_RIGHT) {
+                    if (st < 2) it->set_int(st + 1);
+                } else {
+                    it->set_int((st + 1) % 3);
+                }
             } else if (it->type == CFG_TYPE_CHOICE && it->get_int && it->set_int && it->num_choices > 0) {
                 if (btn == Y1_BTN_SELECT && it->num_choices >= 2) {
                     g_choice_sel = it->get_int();
@@ -2333,12 +2838,452 @@ static void handle_button(uint32_t btn)
     }
 }
 
+static int cli_launch_bg(const char *exec_path, const char *log_name)
+{
+    if (!exec_path || !exec_path[0]) return 1;
+    if (strcmp(exec_path, "__ANDROID__") == 0) {
+        printf("Rebooting to Android...\n");
+        save_settings_conf();
+        y1_sys_reboot();
+        return 0;
+    }
+    if (access(exec_path, X_OK) != 0) {
+        fprintf(stderr, "Not executable: %s\n", exec_path);
+        return 1;
+    }
+
+    /* If ConfigApp GUI is currently running in the player, ask init to switch cleanly
+     * without tearing down active Serial/ADB sessions. */
+    DIR *d = opendir("/proc");
+    pid_t gui_pid = 0;
+    if (d) {
+        pid_t self = getpid();
+        struct dirent *de;
+        while ((de = readdir(d)) != NULL) {
+            if (de->d_name[0] < '0' || de->d_name[0] > '9') continue;
+            pid_t pid = (pid_t)atoi(de->d_name);
+            if (pid <= 1 || pid == self) continue;
+            char cpath[64], comm[64] = "";
+            snprintf(cpath, sizeof(cpath), "/proc/%d/comm", (int)pid);
+            FILE *f = fopen(cpath, "r");
+            if (!f) continue;
+            if (fgets(comm, sizeof(comm), f)) {
+                char *nl = strchr(comm, '\n');
+                if (nl) *nl = '\0';
+                if (strcmp(comm, "configapp") == 0) {
+                    gui_pid = pid;
+                    fclose(f);
+                    break;
+                }
+            }
+            fclose(f);
+        }
+        closedir(d);
+    }
+    if (gui_pid > 0) {
+        FILE *lf = fopen("/tmp/configapp_launch", "w");
+        if (lf) { fprintf(lf, "%s\n", exec_path); fclose(lf); }
+        FILE *sf = fopen("/tmp/configapp_switching", "w");
+        if (sf) { fprintf(sf, "1\n"); fclose(sf); }
+        kill(gui_pid, SIGTERM);
+        printf("Switching from ConfigApp GUI (PID %d) to %s (serial/ADB kept active)\n",
+               (int)gui_pid, exec_path);
+        return 0;
+    }
+
+    char log_path[128];
+    snprintf(log_path, sizeof(log_path), "/tmp/%s.log", log_name && log_name[0] ? log_name : "app");
+    pid_t pid = fork();
+    if (pid < 0) {
+        perror("fork");
+        return 1;
+    }
+    if (pid == 0) {
+        setsid();
+        int devnull = open("/dev/null", O_RDONLY);
+        if (devnull >= 0) { dup2(devnull, 0); if (devnull > 2) close(devnull); }
+        int lfd = open(log_path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+        if (lfd >= 0) { dup2(lfd, 1); dup2(lfd, 2); if (lfd > 2) close(lfd); }
+        execl(exec_path, exec_path, (char *)NULL);
+        _exit(127);
+    }
+    printf("Started %s in background (PID %d, log: %s)\n", exec_path, (int)pid, log_path);
+    return 0;
+}
+
+static void fb_read_rgb(const uint8_t *fb, int bpp, int stride, int xoff, int yoff,
+                        int x, int y, uint8_t *r, uint8_t *g, uint8_t *b)
+{
+    const uint8_t *src = fb + (size_t)(y + yoff) * (size_t)stride;
+    if (bpp == 32) {
+        uint32_t c = ((const uint32_t *)src + xoff)[x];
+        *b = (uint8_t)(c & 0xFF);
+        *g = (uint8_t)((c >> 8) & 0xFF);
+        *r = (uint8_t)((c >> 16) & 0xFF);
+    } else if (bpp == 16) {
+        uint16_t c = ((const uint16_t *)src + xoff)[x];
+        *b = (uint8_t)((c & 0x1F) << 3);
+        *g = (uint8_t)(((c >> 5) & 0x3F) << 2);
+        *r = (uint8_t)(((c >> 11) & 0x1F) << 3);
+    } else {
+        *r = *g = *b = 0;
+    }
+}
+
+static void write_base64_ascii(const uint8_t *data, size_t len)
+{
+    static const char b64[] =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    int col = 0;
+    for (size_t i = 0; i < len; i += 3) {
+        uint32_t v = ((uint32_t)data[i] << 16);
+        if (i + 1 < len) v |= ((uint32_t)data[i + 1] << 8);
+        if (i + 2 < len) v |= (uint32_t)data[i + 2];
+
+        putchar(b64[(v >> 18) & 0x3F]);
+        putchar(b64[(v >> 12) & 0x3F]);
+        putchar((i + 1 < len) ? b64[(v >> 6) & 0x3F] : '=');
+        putchar((i + 2 < len) ? b64[v & 0x3F] : '=');
+        col += 4;
+        if (col >= 76) {
+            putchar('\n');
+            col = 0;
+        }
+    }
+    if (col > 0) putchar('\n');
+}
+
+static int cli_take_screenshot(const char *out_path)
+{
+    int fd = open("/dev/graphics/fb0", O_RDONLY);
+    if (fd < 0) fd = open("/dev/fb0", O_RDONLY);
+    if (fd < 0) {
+        perror("open fb0");
+        return 1;
+    }
+    struct fb_var_screeninfo vinfo;
+    struct fb_fix_screeninfo finfo;
+    if (ioctl(fd, FBIOGET_VSCREENINFO, &vinfo) < 0 ||
+        ioctl(fd, FBIOGET_FSCREENINFO, &finfo) < 0) {
+        perror("ioctl fb");
+        close(fd);
+        return 1;
+    }
+
+    int w = (int)vinfo.xres;
+    int h = (int)vinfo.yres;
+    int bpp = (int)vinfo.bits_per_pixel;
+    int stride = (int)finfo.line_length;
+    int xoff = (int)vinfo.xoffset;
+    int yoff = (int)vinfo.yoffset;
+    size_t map_sz = (size_t)finfo.smem_len;
+    if (map_sz == 0) map_sz = (size_t)vinfo.yres_virtual * (size_t)stride;
+
+    const uint8_t *fb = (const uint8_t *)mmap(NULL, map_sz, PROT_READ, MAP_SHARED, fd, 0);
+    if (fb == MAP_FAILED) {
+        perror("mmap fb");
+        close(fd);
+        return 1;
+    }
+
+    int row_bytes = w * 3;
+    int pad = (4 - (row_bytes % 4)) % 4;
+    uint32_t img_sz = (uint32_t)((row_bytes + pad) * h);
+    uint32_t file_sz = 54U + img_sz;
+
+    uint8_t *bmp = (uint8_t *)calloc(1, file_sz);
+    if (!bmp) {
+        fprintf(stderr, "Out of memory\n");
+        munmap((void *)fb, map_sz);
+        close(fd);
+        return 1;
+    }
+
+    bmp[0] = 'B'; bmp[1] = 'M';
+    bmp[2] = (uint8_t)(file_sz);       bmp[3] = (uint8_t)(file_sz >> 8);
+    bmp[4] = (uint8_t)(file_sz >> 16); bmp[5] = (uint8_t)(file_sz >> 24);
+    bmp[10] = 54;
+    bmp[14] = 40;
+    bmp[18] = (uint8_t)(w);       bmp[19] = (uint8_t)(w >> 8);
+    bmp[20] = (uint8_t)(w >> 16); bmp[21] = (uint8_t)(w >> 24);
+    bmp[22] = (uint8_t)(h);       bmp[23] = (uint8_t)(h >> 8);
+    bmp[24] = (uint8_t)(h >> 16); bmp[25] = (uint8_t)(h >> 24);
+    bmp[26] = 1;
+    bmp[28] = 24;
+    bmp[34] = (uint8_t)(img_sz);       bmp[35] = (uint8_t)(img_sz >> 8);
+    bmp[36] = (uint8_t)(img_sz >> 16); bmp[37] = (uint8_t)(img_sz >> 24);
+
+    uint8_t *dst = bmp + 54;
+    int row_stride = row_bytes + pad;
+    for (int y = h - 1; y >= 0; y--) {
+        for (int x = 0; x < w; x++) {
+            uint8_t r, g, b;
+            fb_read_rgb(fb, bpp, stride, xoff, yoff, x, y, &r, &g, &b);
+            dst[x * 3 + 0] = b;
+            dst[x * 3 + 1] = g;
+            dst[x * 3 + 2] = r;
+        }
+        dst += row_stride;
+    }
+
+    munmap((void *)fb, map_sz);
+    close(fd);
+
+    if (!out_path || strcmp(out_path, "-") == 0) {
+        printf("-----BEGIN BMP BASE64 (%dx%d)-----\n", w, h);
+        write_base64_ascii(bmp, file_sz);
+        printf("-----END BMP BASE64-----\n");
+        fflush(stdout);
+    } else if (strcmp(out_path, "--zmodem") == 0 || strcmp(out_path, "-z") == 0) {
+        char zname[64];
+        time_t now = time(NULL);
+        struct tm *tm = localtime(&now);
+        if (tm) {
+            snprintf(zname, sizeof(zname), "shot_%04d%02d%02d_%02d%02d%02d.bmp",
+                     tm->tm_year + 1900, tm->tm_mon + 1, tm->tm_mday,
+                     tm->tm_hour, tm->tm_min, tm->tm_sec);
+        } else {
+            snprintf(zname, sizeof(zname), "screenshot.bmp");
+        }
+        int zrc = zmodem_send_buf(zname, bmp, file_sz);
+        free(bmp);
+        return zrc;
+    } else {
+        FILE *f = fopen(out_path, "wb");
+        if (!f) {
+            perror("fopen screenshot");
+            free(bmp);
+            return 1;
+        }
+        fwrite(bmp, 1, file_sz, f);
+        fclose(f);
+        printf("Saved screenshot to %s (%dx%d %dbpp)\n", out_path, w, h, bpp);
+    }
+
+    free(bmp);
+    return 0;
+}
+
+static void cli_print_help(void)
+{
+    printf(
+        "Usage: configapp <command> [args]\n"
+        "  status                       Show battery, CPU, RAM, storage, kernel, uptime\n"
+        "  list                         List all settings and launchable apps\n"
+        "  get <key>                    Get a setting value (or default_player)\n"
+        "  set <key> <val>              Set a setting value and apply immediately\n"
+        "  launch [app|path]            Launch app in background (terminal stays free)\n"
+        "  gui                          Launch ConfigApp GUI in background\n"
+        "  stop <proc_name>             Stop a running app (e.g. rockbox, meui)\n"
+        "  log <name>                   Tail /tmp/<name>.log\n"
+        "  screenshot [--zmodem|out.bmp] Capture framebuffer (Base64 / ZMODEM / BMP)\n"
+        "  sz <file>                    Send file over ZMODEM\n"
+        "  rz [dir]                     Receive file(s) over ZMODEM\n"
+        "  adb <on|off|status>          Enable/disable USB ADB daemon\n"
+        "  bt <on|off|rx|rx_off|scan|status|disconnect>\n"
+        "  wifi <on|off|scan|status|disconnect|connect <ssid> [pass]>\n"
+        "  action <sync|drop_caches|clear_log|reset|debuginfo|vibrate|reboot|poweroff>\n"
+    );
+}
+
+static int run_configapp_cli(int argc, char **argv)
+{
+    load_settings_conf();
+    const char *cmd = argv[1];
+
+    if (strcmp(cmd, "-h") == 0 || strcmp(cmd, "--help") == 0 || strcmp(cmd, "help") == 0) {
+        cli_print_help();
+        return 0;
+    }
+    if (strcmp(cmd, "status") == 0 || strcmp(cmd, "info") == 0) {
+        char buf[128];
+        info_battery(buf, sizeof(buf)); printf("Battery:  %s\n", buf);
+        info_current(buf, sizeof(buf)); printf("Power:    %s\n", buf);
+        info_cpu(buf, sizeof(buf));     printf("CPU:      %s\n", buf);
+        info_memory(buf, sizeof(buf));  printf("Memory:   %s\n", buf);
+        info_storage(buf, sizeof(buf)); printf("Storage:  %s\n", buf);
+        info_kernel(buf, sizeof(buf));  printf("Kernel:   %s\n", buf);
+        info_uptime(buf, sizeof(buf));  printf("Uptime:   %s\n", buf);
+        printf("Default:  %s\n", default_player_choices[get_default_player()]);
+        return 0;
+    }
+    if (strcmp(cmd, "list") == 0) {
+        printf("Settings:\n");
+        printf("  lang=%d dark_mode=%d brightness_pct=%d eco_mode=%d touch_scan=%d vibrate_ms=%d\n",
+               g_cfg.lang, g_cfg.dark_mode, g_cfg.brightness_pct, g_cfg.eco_mode,
+               g_cfg.touch_scan, g_cfg.vibrate_ms);
+        printf("  cpu_mode=%d dual_core=%d screen_off_clamp=%d usb_ipod_mode=%d usb_perf_tune=%d\n",
+               g_cfg.cpu_mode, g_cfg.dual_core, g_cfg.screen_off_clamp,
+               g_cfg.usb_ipod_mode, g_cfg.usb_perf_tune);
+        printf("  debug_log=%d bt_codec=%d screenshot=%d default_player=%s\n",
+               g_cfg.debug_log, g_cfg.bt_codec, g_cfg.screenshot,
+               default_player_choices[get_default_player()]);
+        scan_launch_apps();
+        printf("Launchable apps (%d):\n", g_launch_count);
+        for (int i = 0; i < g_launch_count; i++)
+            printf("  %-14s -> %s\n", g_launch_apps[i].name, g_launch_apps[i].exec_path);
+        return 0;
+    }
+    if (strcmp(cmd, "get") == 0 && argc >= 3) {
+        const char *k = argv[2];
+        if (strcmp(k, "default_player") == 0) printf("%s\n", default_player_choices[get_default_player()]);
+        else if (strcmp(k, "lang") == 0) printf("%d\n", g_cfg.lang);
+        else if (strcmp(k, "dark_mode") == 0) printf("%d\n", g_cfg.dark_mode);
+        else if (strcmp(k, "brightness_pct") == 0) printf("%d\n", g_cfg.brightness_pct);
+        else if (strcmp(k, "eco_mode") == 0) printf("%d\n", g_cfg.eco_mode);
+        else if (strcmp(k, "touch_scan") == 0) printf("%d\n", g_cfg.touch_scan);
+        else if (strcmp(k, "vibrate_ms") == 0) printf("%d\n", g_cfg.vibrate_ms);
+        else if (strcmp(k, "cpu_mode") == 0) printf("%d\n", g_cfg.cpu_mode);
+        else if (strcmp(k, "dual_core") == 0) printf("%d\n", g_cfg.dual_core);
+        else if (strcmp(k, "screen_off_clamp") == 0) printf("%d\n", g_cfg.screen_off_clamp);
+        else if (strcmp(k, "usb_ipod_mode") == 0) printf("%d\n", g_cfg.usb_ipod_mode);
+        else if (strcmp(k, "usb_perf_tune") == 0) printf("%d\n", g_cfg.usb_perf_tune);
+        else if (strcmp(k, "debug_log") == 0) printf("%d\n", g_cfg.debug_log);
+        else if (strcmp(k, "bt_codec") == 0) printf("%d\n", g_cfg.bt_codec);
+        else if (strcmp(k, "screenshot") == 0) printf("%d\n", g_cfg.screenshot);
+        else { fprintf(stderr, "Unknown key: %s\n", k); return 1; }
+        return 0;
+    }
+    if (strcmp(cmd, "set") == 0 && argc >= 4) {
+        const char *k = argv[2];
+        const char *vs = argv[3];
+        int v = atoi(vs);
+        if (strcmp(k, "default_player") == 0) {
+            int idx = (strcasecmp(vs, "meui") == 0) ? 1 : (strcasecmp(vs, "configapp") == 0) ? 2 : 0;
+            set_default_player(idx);
+            return 0;
+        }
+        if (strcmp(k, "lang") == 0) g_cfg.lang = (v == 1) ? 1 : 0;
+        else if (strcmp(k, "dark_mode") == 0) g_cfg.dark_mode = v ? 1 : 0;
+        else if (strcmp(k, "brightness_pct") == 0) { g_cfg.brightness_pct = (v < 5) ? 5 : (v > 100 ? 100 : v); y1_backlight_set_percent(g_cfg.brightness_pct); }
+        else if (strcmp(k, "eco_mode") == 0) { g_cfg.eco_mode = v ? 1 : 0; y1_fb_set_eco_mode(g_cfg.eco_mode != 0); }
+        else if (strcmp(k, "touch_scan") == 0) { g_cfg.touch_scan = v ? 1 : 0; y1_input_set_touch_scanning(g_cfg.touch_scan != 0); }
+        else if (strcmp(k, "vibrate_ms") == 0) g_cfg.vibrate_ms = (v < 5) ? 5 : (v > 100 ? 100 : v);
+        else if (strcmp(k, "cpu_mode") == 0) { g_cfg.cpu_mode = (v < -1) ? -1 : (v > 4 ? 4 : v); if (g_cfg.cpu_mode >= 0) y1_cpu_set_mode(g_cfg.cpu_mode); }
+        else if (strcmp(k, "dual_core") == 0) { g_cfg.dual_core = (v < 0) ? 0 : (v > 2 ? 2 : v); if (g_cfg.dual_core != 1) y1_cpu_set_dual_core(g_cfg.dual_core == 2); }
+        else if (strcmp(k, "screen_off_clamp") == 0) { g_cfg.screen_off_clamp = (v < 0) ? 0 : (v > 2 ? 2 : v); if (g_cfg.screen_off_clamp != 1) y1_cpu_set_screen_off_clamp(g_cfg.screen_off_clamp == 2); }
+        else if (strcmp(k, "usb_ipod_mode") == 0) { g_cfg.usb_ipod_mode = (v < 0) ? 0 : (v > 2 ? 2 : v); if (g_cfg.usb_ipod_mode != 1) y1_usb_set_ipod_mode(g_cfg.usb_ipod_mode == 2); }
+        else if (strcmp(k, "usb_perf_tune") == 0) { g_cfg.usb_perf_tune = v ? 1 : 0; if (y1_usb_is_storage_attached()) y1_usb_tune_performance(g_cfg.usb_perf_tune != 0); }
+        else if (strcmp(k, "debug_log") == 0) { g_cfg.debug_log = v ? 1 : 0; y1_log_set_enabled(g_cfg.debug_log != 0); }
+        else if (strcmp(k, "bt_codec") == 0) { g_cfg.bt_codec = (v < 0) ? 0 : (v > 2 ? 2 : v); y1_bt_set_active_device_codec(g_cfg.bt_codec); }
+        else if (strcmp(k, "screenshot") == 0) g_cfg.screenshot = v ? 1 : 0;
+        else { fprintf(stderr, "Unknown key: %s\n", k); return 1; }
+        save_settings_conf();
+        printf("Updated %s=%s\n", k, vs);
+        return 0;
+    }
+    if (strcmp(cmd, "gui") == 0) {
+        const char *exe = access("/mnt/sdcard/.system/configapp/configapp", X_OK) == 0
+                        ? "/mnt/sdcard/.system/configapp/configapp"
+                        : "/.system/configapp/configapp";
+        return cli_launch_bg(exe, "configapp");
+    }
+    if (strcmp(cmd, "launch") == 0) {
+        scan_launch_apps();
+        if (argc < 3) {
+            for (int i = 0; i < g_launch_count; i++)
+                printf("%s (%s)\n", g_launch_apps[i].name, g_launch_apps[i].exec_path);
+            return 0;
+        }
+        const char *target = argv[2];
+        for (int i = 0; i < g_launch_count; i++) {
+            if (strcasecmp(target, g_launch_apps[i].name) == 0 ||
+                strcasecmp(target, g_launch_apps[i].folder) == 0 ||
+                strcmp(target, g_launch_apps[i].exec_path) == 0) {
+                return cli_launch_bg(g_launch_apps[i].exec_path, g_launch_apps[i].name);
+            }
+        }
+        if (target[0] == '/')
+            return cli_launch_bg(target, "custom");
+        fprintf(stderr, "App not found: %s\n", target);
+        return 1;
+    }
+    if (strcmp(cmd, "stop") == 0 && argc >= 3) {
+        char pcmd[128];
+        snprintf(pcmd, sizeof(pcmd), "killall '%s' 2>/dev/null; sleep 1; killall -9 '%s' 2>/dev/null", argv[2], argv[2]);
+        (void)!system(pcmd);
+        return 0;
+    }
+    if (strcmp(cmd, "log") == 0 && argc >= 3) {
+        char pcmd[128];
+        snprintf(pcmd, sizeof(pcmd), "tail -f '/tmp/%s.log'", argv[2]);
+        return system(pcmd);
+    }
+    if (strcmp(cmd, "screenshot") == 0) {
+        return cli_take_screenshot(argc >= 3 ? argv[2] : NULL);
+    }
+    if (strcmp(cmd, "sz") == 0 && argc >= 3) {
+        return zmodem_send_file(argv[2]);
+    }
+    if (strcmp(cmd, "rz") == 0) {
+        return zmodem_recv_dir(argc >= 3 ? argv[2] : ".");
+    }
+    if (strcmp(cmd, "adb") == 0 && argc >= 3) {
+        const char *sub = argv[2];
+        char cur_fn[64] = "";
+        if (y1_sysfs_read("/sys/class/android_usb/android0/functions", cur_fn, sizeof(cur_fn))) {
+            g_serial_active = (strstr(cur_fn, "acm") != NULL);
+            g_adb_active = (strstr(cur_fn, "adb") != NULL);
+        }
+        if (strcmp(sub, "on") == 0) { set_adb_active(1); printf("ADB enabled\n"); }
+        else if (strcmp(sub, "off") == 0) { set_adb_active(0); printf("ADB disabled\n"); }
+        else if (strcmp(sub, "status") == 0) { printf("ADB: %s (functions: %s)\n", g_adb_active ? "active" : "off", cur_fn); }
+        else { fprintf(stderr, "Unknown adb subcommand: %s\n", sub); return 1; }
+        return 0;
+    }
+    if (strcmp(cmd, "bt") == 0 && argc >= 3) {
+        const char *sub = argv[2];
+        y1_bt_init();
+        if (strcmp(sub, "on") == 0) y1_bt_set_enabled(true);
+        else if (strcmp(sub, "off") == 0) y1_bt_set_enabled(false);
+        else if (strcmp(sub, "rx") == 0) y1_bt_set_receiver_mode(true);
+        else if (strcmp(sub, "rx_off") == 0) y1_bt_set_receiver_mode(false);
+        else if (strcmp(sub, "scan") == 0) y1_bt_start_scan();
+        else if (strcmp(sub, "disconnect") == 0) y1_bt_disconnect();
+        else if (strcmp(sub, "status") == 0) printf("%s\n", y1_bt_get_status_str());
+        else { fprintf(stderr, "Unknown bt subcommand: %s\n", sub); return 1; }
+        return 0;
+    }
+    if (strcmp(cmd, "wifi") == 0 && argc >= 3) {
+        const char *sub = argv[2];
+        y1_wifi_init();
+        if (strcmp(sub, "on") == 0) y1_wifi_set_enabled(true);
+        else if (strcmp(sub, "off") == 0) y1_wifi_set_enabled(false);
+        else if (strcmp(sub, "scan") == 0) y1_wifi_start_scan();
+        else if (strcmp(sub, "disconnect") == 0) y1_wifi_disconnect();
+        else if (strcmp(sub, "connect") == 0 && argc >= 4) y1_wifi_connect(argv[3], argc >= 5 ? argv[4] : NULL);
+        else if (strcmp(sub, "status") == 0) {
+            char ip[32] = ""; y1_wifi_get_ip(ip, sizeof(ip));
+            printf("%s (IP: %s)\n", y1_wifi_get_status_str(), ip[0] ? ip : "None");
+        } else { fprintf(stderr, "Unknown wifi subcommand: %s\n", sub); return 1; }
+        return 0;
+    }
+    if (strcmp(cmd, "action") == 0 && argc >= 3) {
+        const char *sub = argv[2];
+        if (strcmp(sub, "sync") == 0) act_sync_disks();
+        else if (strcmp(sub, "drop_caches") == 0) act_drop_caches();
+        else if (strcmp(sub, "clear_log") == 0) act_clear_log();
+        else if (strcmp(sub, "reset") == 0) act_reset_settings();
+        else if (strcmp(sub, "debuginfo") == 0) act_save_debug_info();
+        else if (strcmp(sub, "vibrate") == 0) act_vibrate_test();
+        else if (strcmp(sub, "reboot") == 0) act_reboot();
+        else if (strcmp(sub, "poweroff") == 0) act_poweroff();
+        else { fprintf(stderr, "Unknown action: %s\n", sub); return 1; }
+        return 0;
+    }
+
+    cli_print_help();
+    return 1;
+}
+
 int main(int argc, char **argv)
 {
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--bootmenu") == 0)
             g_boot_mode = true;
     }
+    if (argc > 1 && !g_boot_mode)
+        return run_configapp_cli(argc, argv);
 
     y1_fb_init();
     y1_input_set_touch_scanning(true);
@@ -2366,7 +3311,7 @@ int main(int argc, char **argv)
 
     while (!g_should_exit) {
         uint64_t tnow = cfg_now_ms();
-        if (tnow - last_hw_ms >= 1000) {
+        if (tnow - last_hw_ms >= 5000) {
             last_hw_ms = tnow;
             int nc = y1_cpu_get_freq_mhz();
             int nb = y1_battery_percent();
@@ -2389,7 +3334,7 @@ int main(int argc, char **argv)
                              cfg_sw_any_active());
         int wait_ms = (dirty || anim_pending)
             ? ((last_render_dur_ms < 15) ? (16 - (int)last_render_dur_ms) : 1)
-            : 250;
+            : 2000;
 
         struct y1_input_event ev;
         if (y1_input_poll(&ev, wait_ms) > 0) {
@@ -2439,16 +3384,11 @@ int main(int argc, char **argv)
             g_item_scroll_anim = (float)g_item_scroll;
         }
 
-        struct timespec now;
-        clock_gettime(CLOCK_MONOTONIC, &now);
-        long long elapsed_ms =
-            (long long)(now.tv_sec - last_refresh.tv_sec) * 1000LL +
-            (long long)(now.tv_nsec - last_refresh.tv_nsec) / 1000000LL;
-        if (dirty || animating || elapsed_ms >= 500) {
+        if (dirty || animating) {
             uint64_t rf0 = cfg_now_ms();
             render_frame();
             last_render_dur_ms = cfg_now_ms() - rf0;
-            last_refresh = now;
+            clock_gettime(CLOCK_MONOTONIC, &last_refresh);
             dirty = false;
         } else {
             last_render_dur_ms = 0;

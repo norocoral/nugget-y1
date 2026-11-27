@@ -34,8 +34,7 @@
 
 #include "liby1.h"
 #include "sbc/sbc.h"
-#include "vo-aacenc/voAAC.h"
-#include "vo-aacenc/cmnMemory.h"
+#include <fdk-aac/aacenc_lib.h>
 
 static struct y1_bt_callbacks bt_cbs = {0};
 static bool bt_receiver_auto_connect = false;
@@ -200,6 +199,7 @@ static uint8_t  avdtp_tx_label = 1;
 static uint16_t cid_sdp_remote = 0;
 static uint16_t cid_avdtp_sig_remote = 0;
 static uint16_t cid_avdtp_med_remote = 0;
+static uint16_t remote_med_mtu = 672;
 static uint16_t cid_avctp_remote = 0;
 static uint16_t cid_bip_remote = 0;
 
@@ -220,7 +220,17 @@ static uint32_t bt_monotonic_ms(void)
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (uint32_t)(ts.tv_sec * 1000 + ts.tv_nsec / 1000000);
 }
+static uint64_t bt_monotonic_us(void)
+{
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (uint64_t)ts.tv_sec * 1000000ULL + (uint64_t)(ts.tv_nsec / 1000L);
+}
 static volatile bool in_sniff_mode = false;
+static int acl_max_pkts = 6;
+static int acl_mtu = 1021;
+static volatile int acl_inflight = 0;
+static uint64_t next_a2dp_tx_us = 0;
 #define Y1_BT_MIC_RING_FRAMES 4096
 static int16_t bt_mic_pcm_ring[Y1_BT_MIC_RING_FRAMES * 2];
 static size_t bt_mic_ring_read = 0;
@@ -566,6 +576,7 @@ static void reset_bt_session(void)
     cid_sdp_remote = 0;
     cid_avdtp_sig_remote = 0;
     cid_avdtp_med_remote = 0;
+    remote_med_mtu = 672;
     cid_avctp_remote = 0;
     cid_bip_remote = 0;
     avdtp_sig_local_conf_done = false;
@@ -606,6 +617,8 @@ static void reset_bt_session(void)
     avdtp_cap_query_ms = 0;
     a2dp_streaming = false;
     in_sniff_mode = false;
+    acl_inflight = 0;
+    next_a2dp_tx_us = 0;
     avrcp_play_notify_pending = false;
     avrcp_track_notify_pending = false;
     receiver_metadata_request_pending = false;
@@ -640,9 +653,7 @@ static void reset_bt_session(void)
 
 static sbc_t a2dp_sbc;
 static bool  a2dp_sbc_ready = false;
-static VO_AUDIO_CODECAPI a2dp_aac_api;
-static VO_HANDLE a2dp_aac_handle = NULL;
-static VO_MEM_OPERATOR a2dp_aac_mem;
+static HANDLE_AACENCODER a2dp_aac_handle = NULL;
 static bool  a2dp_aac_ready = false;
 
 static void reinit_a2dp_sbc(void)
@@ -661,8 +672,8 @@ static void reinit_a2dp_sbc(void)
 
 static void uninit_a2dp_aac(void)
 {
-    if (a2dp_aac_ready && a2dp_aac_handle) {
-        a2dp_aac_api.Uninit(a2dp_aac_handle);
+    if (a2dp_aac_handle) {
+        aacEncClose(&a2dp_aac_handle);
         a2dp_aac_handle = NULL;
     }
     a2dp_aac_ready = false;
@@ -671,32 +682,32 @@ static void uninit_a2dp_aac(void)
 static void reinit_a2dp_aac(void)
 {
     uninit_a2dp_aac();
-    memset(&a2dp_aac_api, 0, sizeof(a2dp_aac_api));
-    memset(&a2dp_aac_mem, 0, sizeof(a2dp_aac_mem));
-    voGetAACEncAPI(&a2dp_aac_api);
-    a2dp_aac_mem.Alloc = cmnMemAlloc;
-    a2dp_aac_mem.Copy = cmnMemCopy;
-    a2dp_aac_mem.Free = cmnMemFree;
-    a2dp_aac_mem.Set = cmnMemSet;
-    a2dp_aac_mem.Check = cmnMemCheck;
-    VO_CODEC_INIT_USERDATA user_data;
-    memset(&user_data, 0, sizeof(user_data));
-    user_data.memflag = VO_IMF_USERMEMOPERATOR;
-    user_data.memData = &a2dp_aac_mem;
-    if (a2dp_aac_api.Init(&a2dp_aac_handle, VO_AUDIO_CodingAAC, &user_data) != VO_ERR_NONE) {
-        bt_log("vo-aacenc Init failed\n");
+    if (aacEncOpen(&a2dp_aac_handle, 0x01, (UINT)aac_channels) != AACENC_OK) {
+        bt_log("fdk-aac aacEncOpen failed\n");
         a2dp_aac_handle = NULL;
         return;
     }
-    AACENC_PARAM params;
-    memset(&params, 0, sizeof(params));
-    params.sampleRate = (int)aac_sample_rate_hz;
-    params.bitRate = (int)aac_bitrate;
-    params.nChannels = aac_channels;
-    params.adtsUsed = 0; /* Raw AAC access units for RFC 3016 LATM */
-    if (a2dp_aac_api.SetParam(a2dp_aac_handle, VO_PID_AAC_ENCPARAM, &params) != VO_ERR_NONE) {
-        bt_log("vo-aacenc SetParam failed\n");
-        a2dp_aac_api.Uninit(a2dp_aac_handle);
+    uint32_t eff_br = aac_bitrate;
+    /* Cap AAC bitrate with ~10% headroom so LATM frames never exceed remote L2CAP Media MTU */
+    if (remote_med_mtu >= 128 && aac_sample_rate_hz > 0) {
+        uint32_t max_au = (uint32_t)(remote_med_mtu - 24);
+        uint32_t mtu_br = (uint32_t)(((uint64_t)max_au * 8ULL * (uint64_t)aac_sample_rate_hz * 90ULL) / (1024ULL * 100ULL));
+        if (mtu_br >= 64000 && eff_br > mtu_br)
+            eff_br = mtu_br;
+    }
+    CHANNEL_MODE ch_mode = (aac_channels == 1) ? MODE_1 : MODE_2;
+    if (aacEncoder_SetParam(a2dp_aac_handle, AACENC_AOT, AOT_AAC_LC) != AACENC_OK ||
+        aacEncoder_SetParam(a2dp_aac_handle, AACENC_SAMPLERATE, (UINT)aac_sample_rate_hz) != AACENC_OK ||
+        aacEncoder_SetParam(a2dp_aac_handle, AACENC_CHANNELMODE, ch_mode) != AACENC_OK ||
+        aacEncoder_SetParam(a2dp_aac_handle, AACENC_CHANNELORDER, 1) != AACENC_OK ||
+        aacEncoder_SetParam(a2dp_aac_handle, AACENC_BITRATE, (UINT)eff_br) != AACENC_OK ||
+        aacEncoder_SetParam(a2dp_aac_handle, AACENC_PEAK_BITRATE, (UINT)eff_br) != AACENC_OK ||
+        aacEncoder_SetParam(a2dp_aac_handle, AACENC_TRANSMUX, TT_MP4_LATM_MCP1) != AACENC_OK ||
+        aacEncoder_SetParam(a2dp_aac_handle, AACENC_HEADER_PERIOD, 1) != AACENC_OK ||
+        aacEncoder_SetParam(a2dp_aac_handle, AACENC_AFTERBURNER, 0) != AACENC_OK ||
+        aacEncEncode(a2dp_aac_handle, NULL, NULL, NULL, NULL) != AACENC_OK) {
+        bt_log("fdk-aac SetParam/Init failed\n");
+        aacEncClose(&a2dp_aac_handle);
         a2dp_aac_handle = NULL;
         return;
     }
@@ -779,33 +790,48 @@ static int l2cap_send_pdu(uint16_t dcid, const void *payload, uint16_t len)
         pthread_mutex_unlock(&stpbt_io_mtx);
         return -1;
     }
-    if (len > 1012) {
+    if (len > 1580) {
         pthread_mutex_unlock(&stpbt_io_mtx);
         return -1;
     }
 
-    uint8_t pkt[1024];
-    uint16_t acl_len = len + 4;
-    uint16_t hdr_handle = (acl_handle & 0x0FFF) | (0x02 << 12); /* PB = 10b (First automatically flushable) */
-
-    pkt[0] = HCI_PKT_ACL;
-    pkt[1] = (uint8_t)(hdr_handle & 0xFF);
-    pkt[2] = (uint8_t)((hdr_handle >> 8) & 0xFF);
-    pkt[3] = (uint8_t)(acl_len & 0xFF);
-    pkt[4] = (uint8_t)((acl_len >> 8) & 0xFF);
-    pkt[5] = (uint8_t)(len & 0xFF);
-    pkt[6] = (uint8_t)((len >> 8) & 0xFF);
-    pkt[7] = (uint8_t)(dcid & 0xFF);
-    pkt[8] = (uint8_t)((dcid >> 8) & 0xFF);
+    uint8_t l2cap_buf[1588];
+    l2cap_buf[0] = (uint8_t)(len & 0xFF);
+    l2cap_buf[1] = (uint8_t)((len >> 8) & 0xFF);
+    l2cap_buf[2] = (uint8_t)(dcid & 0xFF);
+    l2cap_buf[3] = (uint8_t)((dcid >> 8) & 0xFF);
     if (len > 0 && payload)
-        memcpy(&pkt[9], payload, len);
+        memcpy(&l2cap_buf[4], payload, len);
 
-    ssize_t w = write(stpbt_fd, pkt, 9 + len);
-    pthread_mutex_unlock(&stpbt_io_mtx);
-    if (w == (ssize_t)(9 + len)) {
-        return 0;
+    size_t total_l2cap = (size_t)len + 4;
+    size_t max_frag = (acl_mtu >= 64 && acl_mtu <= 1021) ? (size_t)acl_mtu : 339;
+    size_t off = 0;
+    while (off < total_l2cap) {
+        size_t chunk = total_l2cap - off;
+        if (chunk > max_frag)
+            chunk = max_frag;
+
+        uint8_t pb = (off == 0) ? 0x02 : 0x01; /* 10b=First auto-flushable, 01b=Continuation */
+        uint16_t hdr_handle = (acl_handle & 0x0FFF) | ((uint16_t)pb << 12);
+
+        uint8_t pkt[1030];
+        pkt[0] = HCI_PKT_ACL;
+        pkt[1] = (uint8_t)(hdr_handle & 0xFF);
+        pkt[2] = (uint8_t)((hdr_handle >> 8) & 0xFF);
+        pkt[3] = (uint8_t)(chunk & 0xFF);
+        pkt[4] = (uint8_t)((chunk >> 8) & 0xFF);
+        memcpy(&pkt[5], &l2cap_buf[off], chunk);
+
+        ssize_t w = write(stpbt_fd, pkt, 5 + chunk);
+        if (w != (ssize_t)(5 + chunk)) {
+            pthread_mutex_unlock(&stpbt_io_mtx);
+            return -1;
+        }
+        acl_inflight++;
+        off += chunk;
     }
-    return -1;
+    pthread_mutex_unlock(&stpbt_io_mtx);
+    return 0;
 }
 
 static void l2cap_send_sig(uint8_t code, uint8_t ident, const void *data, uint16_t dlen)
@@ -1026,8 +1052,9 @@ static void avdtp_send_accept(uint8_t rx_hdr, uint8_t sig_id, const void *params
 static void avdtp_send_sbc_configuration(uint8_t seid, uint8_t sup_o0, uint8_t sup_o1,
                                          uint8_t min_bp, uint8_t max_bp, bool allow_xq)
 {
-    uint8_t freq = (sup_o0 & 0x10) ? 0x10 :
-                   (sup_o0 & 0x20) ? 0x20 :
+    /* Prefer 44.1 kHz (0x20) to match standard audio without linear resampling; fallback to 48 kHz */
+    uint8_t freq = (sup_o0 & 0x20) ? 0x20 :
+                   (sup_o0 & 0x10) ? 0x10 :
                    (sup_o0 & 0x40) ? 0x40 : 0x80;
     uint8_t channel_mode = (sup_o0 & 0x01) ? 0x01 :
                            (sup_o0 & 0x02) ? 0x02 :
@@ -1184,7 +1211,7 @@ static bool avdtp_request_next_sink_capabilities(void)
     remote_seid = remote_sink_seids[remote_sink_index++];
     avdtp_cap_query_ms = bt_monotonic_ms();
     uint8_t param[1] = { (uint8_t)(remote_seid << 2) };
-    avdtp_send_cmd(AVDTP_GET_CAPABILITIES, param, sizeof(param));
+    avdtp_send_cmd(AVDTP_GET_ALL_CAPABILITIES, param, sizeof(param));
     return true;
 }
 
@@ -1240,7 +1267,7 @@ static void handle_avdtp_sig_pdu(const uint8_t *pdu, uint16_t len)
                 break;
             case AVDTP_START: {
                 bool was_streaming = a2dp_streaming;
-                reinit_a2dp_sbc();
+                reinit_a2dp_encoder();
                 avdtp_send_accept(hdr, sig_id, NULL, 0);
                 a2dp_streaming = true;
                 bt_state = Y1_BT_STATE_STREAMING;
@@ -1374,7 +1401,10 @@ static void handle_avdtp_sig_pdu(const uint8_t *pdu, uint16_t len)
     }
     else if (msg_type == 0x03 || msg_type == 0x01) /* Response Reject or General Reject */
     {
-        if (sig_id == AVDTP_SET_CONFIGURATION) {
+        if (sig_id == AVDTP_GET_ALL_CAPABILITIES && remote_seid != 0) {
+            uint8_t param[1] = { (uint8_t)(remote_seid << 2) };
+            avdtp_send_cmd(AVDTP_GET_CAPABILITIES, param, sizeof(param));
+        } else if (sig_id == AVDTP_SET_CONFIGURATION) {
             bt_log("AVDTP_SET_CONFIGURATION rejected by remote\n");
             if (a2dp_active_codec == Y1_BT_CODEC_AAC && best_sbc_seid != 0) {
                 bt_log("Falling back from AAC to SBC\n");
@@ -2255,7 +2285,24 @@ static void handle_l2cap_sig(const uint8_t *sig, uint16_t len)
                     uint16_t rcid = 0;
                     if (dcid == CID_SDP_LOCAL) rcid = cid_sdp_remote;
                     else if (dcid == CID_AVDTP_SIG_LOCAL) { rcid = cid_avdtp_sig_remote; avdtp_sig_remote_conf_done = true; }
-                    else if (dcid == CID_AVDTP_MED_LOCAL) { rcid = cid_avdtp_med_remote; avdtp_med_remote_conf_done = true; }
+                    else if (dcid == CID_AVDTP_MED_LOCAL) {
+                        rcid = cid_avdtp_med_remote;
+                        avdtp_med_remote_conf_done = true;
+                        /* Parse remote L2CAP MTU option (Type 0x01, Length 2) */
+                        uint16_t opt_off = 4;
+                        while (opt_off + 2 <= clen) {
+                            uint8_t otype = d[opt_off] & 0x7F;
+                            uint8_t olen  = d[opt_off + 1];
+                            if (opt_off + 2 + olen > clen)
+                                break;
+                            if (otype == 0x01 && olen == 2) {
+                                uint16_t mtu = (uint16_t)d[opt_off + 2] | ((uint16_t)d[opt_off + 3] << 8);
+                                if (mtu >= 48 && mtu <= 1024)
+                                    remote_med_mtu = mtu;
+                            }
+                            opt_off += (uint16_t)(2 + olen);
+                        }
+                    }
                     else if (dcid == CID_AVCTP_LOCAL) rcid = cid_avctp_remote;
                     else if (dcid == CID_BIP_LOCAL) {
                         rcid = cid_bip_remote;
@@ -2589,6 +2636,13 @@ static void handle_hci_event(const uint8_t *pkt, size_t len)
                         hci_send_cmd(0x0419, rnr, 10);
                     }
 
+                    /* Set 20s Link Supervision Timeout (0x7D00 slots) for stable AirPods/A2DP links */
+                    uint8_t lst[4] = {
+                        (uint8_t)(acl_handle & 0xFF), (uint8_t)(acl_handle >> 8),
+                        0x00, 0x7D
+                    };
+                    hci_send_cmd(0x0C37, lst, 4); /* HCI_Write_Link_Supervision_Timeout */
+
                     /* If we initiated the connection, request authentication -> then open L2CAP AVDTP */
                     if (avdtp_initiator || bt_receiver_mode) {
                         uint8_t auth[2] = { (uint8_t)(acl_handle & 0xFF), (uint8_t)(acl_handle >> 8) };
@@ -2662,11 +2716,14 @@ static void handle_hci_event(const uint8_t *pkt, size_t len)
                     hci_send_cmd(0x0413, enc, 3); /* HCI_Set_Connection_Encryption */
                     if (bt_receiver_mode && cid_avctp_remote == 0) {
                         l2cap_send_conn_req(PSM_AVCTP, CID_AVCTP_LOCAL);
-                    } else if (avdtp_initiator && cid_avdtp_sig_remote == 0) {
+                    } else if (avdtp_initiator && cid_avdtp_sig_remote == 0 && !avdtp_sig_conn_requested) {
+                        avdtp_sig_conn_requested = true;
                         l2cap_send_conn_req(PSM_AVDTP, CID_AVDTP_SIG_LOCAL);
                     }
-                } else if (avdtp_initiator && acl_handle != 0xFFFF && cid_avdtp_sig_remote == 0) {
+                } else if (avdtp_initiator && acl_handle != 0xFFFF &&
+                           cid_avdtp_sig_remote == 0 && !avdtp_sig_conn_requested) {
                     /* Even if headset didn't require auth, proceed to L2CAP AVDTP */
+                    avdtp_sig_conn_requested = true;
                     l2cap_send_conn_req(PSM_AVDTP, CID_AVDTP_SIG_LOCAL);
                 }
             }
@@ -2755,8 +2812,21 @@ static void handle_hci_event(const uint8_t *pkt, size_t len)
             break;
         }
 
-        case 0x13: /* Number Of Completed Packets */
+        case 0x13: /* Number Of Completed Packets */ {
+            if (plen >= 1) {
+                uint8_t n_handles = p[0];
+                for (uint8_t i = 0; i < n_handles && (1 + i * 4 + 3) < plen; i++) {
+                    uint16_t h = ((uint16_t)p[1 + i * 4] | ((uint16_t)p[2 + i * 4] << 8)) & 0x0FFF;
+                    uint16_t comp = (uint16_t)p[3 + i * 4] | ((uint16_t)p[4 + i * 4] << 8);
+                    if (h == acl_handle) {
+                        acl_inflight -= (int)comp;
+                        if (acl_inflight < 0)
+                            acl_inflight = 0;
+                    }
+                }
+            }
             break;
+        }
 
         default:
             break;
@@ -2992,6 +3062,28 @@ static bool mt6572_bt_hw_open_and_init(void)
     static const uint8_t evt_mask[8] = { 0xFF, 0xFF, 0xFB, 0xFF, 0x07, 0xF8, 0xBF, 0x3D };
     run_cmd_sync(0x0C01, evt_mask, 8);    /* HCI_Set_Event_Mask */
 
+    if (hci_send_cmd(0x1005, NULL, 0) == 0) { /* HCI_Read_Buffer_Size */
+        uint8_t bbuf[64];
+        int el = 0;
+        while (el < 500) {
+            struct pollfd pfd = { .fd = stpbt_fd, .events = POLLIN };
+            if (poll(&pfd, 1, 50) > 0 && (pfd.revents & POLLIN)) {
+                ssize_t r = read(stpbt_fd, bbuf, sizeof(bbuf));
+                if (r >= 13 && bbuf[0] == HCI_PKT_EVT && bbuf[1] == 0x0E &&
+                    ((uint16_t)bbuf[4] | ((uint16_t)bbuf[5] << 8)) == 0x1005 && bbuf[6] == 0x00) {
+                    int mtu = (int)((uint16_t)bbuf[7] | ((uint16_t)bbuf[8] << 8));
+                    int pkts = (int)((uint16_t)bbuf[10] | ((uint16_t)bbuf[11] << 8));
+                    if (mtu >= 64 && mtu <= 1021)
+                        acl_mtu = mtu;
+                    if (pkts >= 2 && pkts <= 32)
+                        acl_max_pkts = pkts;
+                    break;
+                }
+            }
+            el += 50;
+        }
+    }
+
     uint8_t local_name[248];
     memset(local_name, 0, sizeof(local_name));
     strcpy((char *)local_name, "Innioasis Y1");
@@ -3020,82 +3112,25 @@ static bool mt6572_bt_hw_open_and_init(void)
 /* ============================================================================
  * Background Bluetooth Worker Thread (HCI Rx + A2DP RTP Media Tx)
  * ============================================================================ */
-struct latm_bitwriter {
-    uint8_t *buf;
-    size_t   cap;
-    size_t   bitpos;
-};
-
-static void latm_put_bits(struct latm_bitwriter *bw, uint32_t val, int nbits)
-{
-    for (int i = nbits - 1; i >= 0; i--) {
-        size_t byte_idx = bw->bitpos >> 3;
-        if (byte_idx < bw->cap) {
-            if ((bw->bitpos & 7) == 0)
-                bw->buf[byte_idx] = 0;
-            if ((val >> i) & 1U)
-                bw->buf[byte_idx] |= (uint8_t)(0x80U >> (bw->bitpos & 7));
-        }
-        bw->bitpos++;
-    }
-}
-
-static size_t write_latm_aac_frame(uint8_t *dst, size_t dst_cap,
-                                   const uint8_t *au, size_t au_len,
-                                   unsigned long sample_rate, uint8_t channels)
-{
-    struct latm_bitwriter bw = { dst, dst_cap, 0 };
-    uint32_t sr_idx = (sample_rate == 48000) ? 3 : 4; /* 3=48kHz, 4=44.1kHz */
-    uint32_t ch_cfg = (channels == 1) ? 1 : 2;
-
-    /* AudioMuxElement(1): useSameStreamMux=0, StreamMuxConfig() */
-    latm_put_bits(&bw, 0, 1); /* useSameStreamMux = 0 */
-    latm_put_bits(&bw, 0, 1); /* audioMuxVersion = 0 */
-    latm_put_bits(&bw, 1, 1); /* allStreamsSameTimeFraming = 1 */
-    latm_put_bits(&bw, 0, 6); /* numSubFrames = 0 */
-    latm_put_bits(&bw, 0, 4); /* numProgram = 0 */
-    latm_put_bits(&bw, 0, 3); /* numLayer = 0 */
-
-    /* AudioSpecificConfig(): AAC-LC (2), sr_idx, ch_cfg, GASpecificConfig(0,0,0) */
-    latm_put_bits(&bw, 2, 5);
-    latm_put_bits(&bw, sr_idx, 4);
-    latm_put_bits(&bw, ch_cfg, 4);
-    latm_put_bits(&bw, 0, 3);
-
-    latm_put_bits(&bw, 0, 3);    /* frameLengthType = 0 */
-    latm_put_bits(&bw, 0xFF, 8); /* latmBufferFullness = 0xFF */
-    latm_put_bits(&bw, 0, 1);    /* otherDataPresent = 0 */
-    latm_put_bits(&bw, 0, 1);    /* crcCheckPresent = 0 */
-
-    /* PayloadLengthInfo() */
-    size_t rem = au_len;
-    while (rem >= 255) {
-        latm_put_bits(&bw, 0xFF, 8);
-        rem -= 255;
-    }
-    latm_put_bits(&bw, (uint32_t)rem, 8);
-
-    /* PayloadMux() */
-    for (size_t i = 0; i < au_len; i++)
-        latm_put_bits(&bw, au[i], 8);
-
-    /* Byte-align */
-    while (bw.bitpos & 7)
-        latm_put_bits(&bw, 0, 1);
-
-    size_t out_len = bw.bitpos >> 3;
-    return (out_len <= dst_cap) ? out_len : 0;
-}
-
 static void drain_a2dp_aac_and_transmit(void)
 {
     if (!a2dp_aac_ready || !a2dp_aac_handle)
         return;
 
     const size_t samples_per_frame = 1024;
+    uint64_t frame_us = (aac_sample_rate_hz > 0) ? ((uint64_t)samples_per_frame * 1000000ULL) / aac_sample_rate_hz : 23220ULL;
+    if (frame_us < 10000ULL) frame_us = 10000ULL;
+    uint64_t now_us = bt_monotonic_us();
+    if (next_a2dp_tx_us == 0)
+        next_a2dp_tx_us = now_us;
+    else if (now_us > next_a2dp_tx_us + 45000ULL)
+        next_a2dp_tx_us = now_us - 45000ULL;
+
     int pkts_sent = 0;
-    while (pkts_sent < 8)
+    while (pkts_sent < 3 && acl_inflight < acl_max_pkts)
     {
+        if (now_us < next_a2dp_tx_us)
+            break;
         size_t r = pcm_ring_r;
         size_t w = pcm_ring_w;
         size_t avail = (w - r) & (PCM_RING_SAMPLES - 1);
@@ -3116,26 +3151,11 @@ static void drain_a2dp_aac_and_transmit(void)
             }
         }
 
-        VO_CODECBUFFER input = { 0 }, output = { 0 };
-        VO_AUDIO_OUTPUTINFO output_info = { 0 };
-        uint8_t aac_raw[1536];
-        input.Buffer = (VO_PBYTE)aac_pcm;
-        input.Length = (VO_U32)(samples_per_frame * aac_channels * sizeof(int16_t));
-        if (a2dp_aac_api.SetInputData(a2dp_aac_handle, &input) != VO_ERR_NONE)
-            break;
-
-        output.Buffer = (VO_PBYTE)aac_raw;
-        output.Length = sizeof(aac_raw);
-        if (a2dp_aac_api.GetOutputData(a2dp_aac_handle, &output, &output_info) != VO_ERR_NONE ||
-            output.Length == 0)
-            break;
-
         uint8_t rtp_pkt[1600];
         rtp_pkt[0]  = 0x80; /* RTP v2 */
         rtp_pkt[1]  = 0xE0; /* Marker=1, Payload type 96 */
         rtp_pkt[2]  = (uint8_t)(rtp_seq_num >> 8);
         rtp_pkt[3]  = (uint8_t)(rtp_seq_num & 0xFF);
-        rtp_seq_num++;
         rtp_pkt[4]  = (uint8_t)(rtp_timestamp >> 24);
         rtp_pkt[5]  = (uint8_t)(rtp_timestamp >> 16);
         rtp_pkt[6]  = (uint8_t)(rtp_timestamp >> 8);
@@ -3145,17 +3165,54 @@ static void drain_a2dp_aac_and_transmit(void)
         rtp_pkt[10] = 0x00;
         rtp_pkt[11] = 0x01; /* SSRC = 1 */
 
-        size_t latm_len = write_latm_aac_frame(&rtp_pkt[12], sizeof(rtp_pkt) - 12,
-                                               aac_raw, (size_t)output.Length,
-                                               aac_sample_rate_hz, aac_channels);
-        if (latm_len == 0)
+        AACENC_BufDesc in_buf = { 0 }, out_buf = { 0 };
+        AACENC_InArgs in_args = { 0 };
+        AACENC_OutArgs out_args = { 0 };
+        void *in_ptr = aac_pcm;
+        int in_id = IN_AUDIO_DATA;
+        int in_size = (int)(samples_per_frame * aac_channels * sizeof(int16_t));
+        int in_elem = (int)sizeof(int16_t);
+        in_buf.numBufs = 1;
+        in_buf.bufs = &in_ptr;
+        in_buf.bufferIdentifiers = &in_id;
+        in_buf.bufSizes = &in_size;
+        in_buf.bufElSizes = &in_elem;
+        in_args.numInSamples = (INT)(samples_per_frame * aac_channels);
+
+        void *out_ptr = &rtp_pkt[12];
+        int out_id = OUT_BITSTREAM_DATA;
+        int out_size = (int)(sizeof(rtp_pkt) - 12);
+        int out_elem = 1;
+        out_buf.numBufs = 1;
+        out_buf.bufs = &out_ptr;
+        out_buf.bufferIdentifiers = &out_id;
+        out_buf.bufSizes = &out_size;
+        out_buf.bufElSizes = &out_elem;
+
+        if (aacEncEncode(a2dp_aac_handle, &in_buf, &out_buf, &in_args, &out_args) != AACENC_OK)
             break;
+
+        size_t latm_len = (size_t)out_args.numOutBytes;
+        if (latm_len == 0) {
+            pcm_ring_r = (r + samples_per_frame) & (PCM_RING_SAMPLES - 1);
+            continue;
+        }
+
+        if ((12 + latm_len) > remote_med_mtu) {
+            /* Never exceed remote L2CAP Media MTU (prevents sink crash on e.g. Pixel Buds Pro) */
+            pcm_ring_r = (r + samples_per_frame) & (PCM_RING_SAMPLES - 1);
+            rtp_timestamp += (uint32_t)samples_per_frame;
+            next_a2dp_tx_us += frame_us;
+            continue;
+        }
 
         if (l2cap_send_pdu(cid_avdtp_med_remote, rtp_pkt, (uint16_t)(12 + latm_len)) < 0)
             break;
 
         pcm_ring_r = (r + samples_per_frame) & (PCM_RING_SAMPLES - 1);
+        rtp_seq_num++;
         rtp_timestamp += (uint32_t)samples_per_frame;
+        next_a2dp_tx_us += frame_us;
         pkts_sent++;
     }
 }
@@ -3181,15 +3238,26 @@ static void drain_a2dp_pcm_and_transmit(void)
     size_t samples_per_frame = codesize >> 2; /* 16-bit stereo = 4 bytes per sample */
 
     size_t framelen = sbc_get_frame_length(&a2dp_sbc);
-    int frames_per_pkt = (framelen > 0) ? (int)((895 - 13) / framelen) : 5;
+    uint16_t sbc_mtu = (remote_med_mtu >= 64) ? remote_med_mtu : 672;
+    int frames_per_pkt = (framelen > 0 && sbc_mtu > 13) ? (int)((sbc_mtu - 13) / framelen) : 5;
     if (frames_per_pkt > 5) frames_per_pkt = 5;
     if (frames_per_pkt < 1) frames_per_pkt = 1;
 
     size_t samples_per_pkt = samples_per_frame * frames_per_pkt;
+    unsigned long sr = a2dp_sample_rate();
+    uint64_t pkt_us = (sr > 0) ? ((uint64_t)samples_per_pkt * 1000000ULL) / sr : 14512ULL;
+    if (pkt_us < 2000ULL) pkt_us = 2000ULL;
+    uint64_t now_us = bt_monotonic_us();
+    if (next_a2dp_tx_us == 0)
+        next_a2dp_tx_us = now_us;
+    else if (now_us > next_a2dp_tx_us + 35000ULL)
+        next_a2dp_tx_us = now_us - 35000ULL;
 
     int pkts_sent = 0;
-    while (pkts_sent < 8)
+    while (pkts_sent < 3 && acl_inflight < acl_max_pkts)
     {
+        if (now_us < next_a2dp_tx_us)
+            break;
         size_t r = pcm_ring_r;
         size_t w = pcm_ring_w;
         size_t avail = (w - r) & (PCM_RING_SAMPLES - 1);
@@ -3202,7 +3270,6 @@ static void drain_a2dp_pcm_and_transmit(void)
         rtp_pkt[1]  = 0x60; /* Payload type 96 (Dynamic) */
         rtp_pkt[2]  = (uint8_t)(rtp_seq_num >> 8);
         rtp_pkt[3]  = (uint8_t)(rtp_seq_num & 0xFF);
-        rtp_seq_num++;
         rtp_pkt[4]  = (uint8_t)(rtp_timestamp >> 24);
         rtp_pkt[5]  = (uint8_t)(rtp_timestamp >> 16);
         rtp_pkt[6]  = (uint8_t)(rtp_timestamp >> 8);
@@ -3244,7 +3311,9 @@ static void drain_a2dp_pcm_and_transmit(void)
             break;
 
         pcm_ring_r = r;
+        rtp_seq_num++;
         rtp_timestamp += (uint32_t)(samples_per_frame * encoded_frames);
+        next_a2dp_tx_us += pkt_us;
         pkts_sent++;
     }
 }
@@ -3488,8 +3557,15 @@ static void *bt_worker_thread(void *arg)
         int timeout_ms;
         if (req_connect || req_scan || resolving_names)
             timeout_ms = 25;
-        else if (a2dp_streaming)
-            timeout_ms = 8;
+        else if (a2dp_streaming) {
+            uint64_t now_us = bt_monotonic_us();
+            if (next_a2dp_tx_us > now_us) {
+                uint64_t rem_ms = (next_a2dp_tx_us - now_us + 999ULL) / 1000ULL;
+                timeout_ms = (rem_ms > 20ULL) ? 20 : (rem_ms < 1ULL ? 1 : (int)rem_ms);
+            } else {
+                timeout_ms = 2;
+            }
+        }
         else if (in_sniff_mode || acl_handle == 0xFFFF)
             timeout_ms = 1000;
         else

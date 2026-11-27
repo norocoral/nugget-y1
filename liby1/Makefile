@@ -4,11 +4,11 @@ CC            := $(CROSS_COMPILE)gcc
 AR            := $(CROSS_COMPILE)ar
 STRIP         := $(CROSS_COMPILE)strip
 
-CFLAGS  ?= -O2 -Wall -Wextra -fPIC -Iinclude -Isrc -Isrc/sbc -Isrc/vo-aacenc
-LDFLAGS ?= -lpthread -lm
+FDK_AAC_DIR := third_party/fdk-aac
+CFLAGS  ?= -O2 -Wall -Wextra -fPIC -Iinclude -Isrc -Isrc/sbc -I$(FDK_AAC_DIR)/include
+LDFLAGS ?= $(FDK_AAC_DIR)/lib/libfdk-aac.a -lpthread -lm
 
 BUILD_DIR := build
-VO_SRCS   := $(filter-out src/vo-aacenc/aac-enc.c,$(wildcard src/vo-aacenc/*.c))
 SRCS      := src/y1_core.c \
              src/y1_display.c \
              src/y1_cpu.c \
@@ -21,8 +21,7 @@ SRCS      := src/y1_core.c \
              src/y1_wifi.c \
              src/sbc/sbc.c \
              src/sbc/sbc_primitives.c \
-             src/sbc/sbc_primitives_armv6.c \
-             $(VO_SRCS)
+             src/sbc/sbc_primitives_armv6.c
 
 OBJS      := $(patsubst src/%.c,$(BUILD_DIR)/%.o,$(SRCS))
 STATIC_LIB := $(BUILD_DIR)/liby1.a

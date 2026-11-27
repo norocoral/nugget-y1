@@ -74,9 +74,10 @@ int  y1_battery_percent(void);       /* 0..100 % */
 int  y1_battery_voltage_mv(void);    /* Millivolts (e.g. 3850) */
 int  y1_battery_current_ma(void);    /* Milliamps */
 bool y1_battery_is_charging(void);
-bool y1_power_usb_online(void);
+bool y1_power_usb_online(void);      /* True if USB or AC power is connected */
+bool y1_power_usb_data_online(void); /* True only if USB data port (/sys/class/power_supply/usb/online) is connected */
 bool y1_vibrate_available(void);
-void y1_vibrate(int ms);      /* True if USB or AC power is connected */
+void y1_vibrate(int ms);
 
 /** System power control. */
 void y1_sys_poweroff(void) __attribute__((noreturn));
